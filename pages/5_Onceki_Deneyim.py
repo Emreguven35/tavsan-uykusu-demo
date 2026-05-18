@@ -1,12 +1,20 @@
 """Bölüm 6: Önceki Deneyim (Sorular 31-32)."""
+import sys
+from pathlib import Path
+
 import streamlit as st
+
+# Engine import yolu
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from engine.session_init import init_session_state
+
+# Streamlit multipage'de her sayfa bağımsız çalışır — her sayfada init zorunlu
+init_session_state()
 
 st.set_page_config(page_title="Önceki Deneyim", page_icon="🐰", layout="centered")
 st.title("Bölüm 6: Önceki Uyku Eğitimi Deneyimi")
 st.caption("Sorular 31-32 — daha önce denediğiniz yöntemler")
 
-if "profile" not in st.session_state:
-    st.session_state.profile = {}
 profile = st.session_state.profile
 
 with st.form("onceki_deneyim_form"):

@@ -2,6 +2,8 @@
 import streamlit as st
 from dotenv import load_dotenv
 
+from engine.session_init import init_session_state
+
 load_dotenv()
 
 st.set_page_config(
@@ -10,11 +12,9 @@ st.set_page_config(
     layout="centered",
 )
 
-# Session state başlat
-if "profile" not in st.session_state:
-    st.session_state.profile = {}
-if "tamamlandi" not in st.session_state:
-    st.session_state.tamamlandi = set()
+# Tüm session_state değişkenlerini tek yerde başlat
+# Multipage'de her sayfa bağımsız çalıştığı için pages/ dosyaları da aynı init'i çağırıyor
+init_session_state()
 
 st.title("🐰 Tavşan Uykusu Premium Demo")
 
@@ -39,8 +39,12 @@ karar mekanizmasını kullanarak kişiselleştirilmiş uyku planı üretir.
 if st.session_state.profile:
     st.success(f"📋 Şu an kayıtlı **{len(st.session_state.profile)} cevap** var.")
     if st.button("🔄 Sıfırla ve yeniden başla"):
+        # Plan + chatbot cache'lerini de temizle ki tekrar üretilsin
         st.session_state.profile = {}
         st.session_state.tamamlandi = set()
+        st.session_state.plan = None
+        st.session_state.param = None
+        st.session_state.chat_history = []
         st.rerun()
 
 st.info(

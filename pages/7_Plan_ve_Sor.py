@@ -12,14 +12,18 @@ if str(ROOT) not in sys.path:
 
 load_dotenv()
 
+from engine.session_init import init_session_state  # noqa: E402
 from engine.parameter_engine import parametre_uret  # noqa: E402
 from engine.plan_generator import plan_uret  # noqa: E402
 from engine.chatbot import cevapla, init_index  # noqa: E402
 
+# Streamlit multipage'de her sayfa bağımsız çalışır — her sayfada init zorunlu
+init_session_state()
+
 st.set_page_config(page_title="Plan ve Sor", page_icon="🐰", layout="centered")
 st.title("🐰 Kişisel Uyku Eğitimi Planınız")
 
-if "profile" not in st.session_state or not st.session_state.profile.get("dogum_tarihi"):
+if not st.session_state.profile.get("dogum_tarihi"):
     st.warning("⚠️ Önce diğer sayfalardaki 37 soruyu cevaplayın. *1 Bebek Bilgileri* sayfasından başlayın.")
     st.stop()
 
@@ -27,8 +31,9 @@ profile = st.session_state.profile
 
 # ---------------------------------------------------------------------------
 # Plan üretimi (cache)
+# init_session_state() plan'ı None olarak kuruyor; bu yüzden "is None" kontrolü.
 # ---------------------------------------------------------------------------
-if "plan" not in st.session_state:
+if st.session_state.plan is None:
     with st.spinner("📋 Kişisel planınız oluşturuluyor... (15-30 saniye)"):
         try:
             param = parametre_uret(profile)
@@ -41,6 +46,9 @@ if "plan" not in st.session_state:
             st.stop()
 
 param = st.session_state.param
+if param is None:
+    st.error("Plan parametreleri yüklenemedi. Lütfen sayfayı yenileyin.")
+    st.stop()
 
 # Üst bant: özet
 c1, c2, c3 = st.columns(3)
@@ -72,8 +80,7 @@ st.markdown(
     "Tavşan Uykusu içeriklerinden cevap üretilir."
 )
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+# chat_history zaten init_session_state() ile [] olarak set edildi
 
 # Index'i sayfa açılışında initialize et (ilk soruda spinner görünmesin)
 try:

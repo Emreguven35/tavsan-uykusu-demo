@@ -1,13 +1,21 @@
 """Bölüm 1-2: Bebek Bilgileri (Sorular 1-14)."""
+import sys
+from pathlib import Path
+
 import streamlit as st
 from datetime import date
+
+# Engine import yolu
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from engine.session_init import init_session_state
+
+# Streamlit multipage'de her sayfa bağımsız çalışır — her sayfada init zorunlu
+init_session_state()
 
 st.set_page_config(page_title="Bebek Bilgileri", page_icon="🐰", layout="centered")
 st.title("Bölüm 1-2: Bebek Bilgileri")
 st.caption("Sorular 1-14 — yaklaşık 1 dakika")
 
-if "profile" not in st.session_state:
-    st.session_state.profile = {}
 profile = st.session_state.profile
 
 with st.form("bebek_bilgileri_form"):

@@ -1,12 +1,20 @@
 """Bölüm 3: Mevcut Uyku (Sorular 15-21)."""
+import sys
+from pathlib import Path
+
 import streamlit as st
+
+# Engine import yolu
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from engine.session_init import init_session_state
+
+# Streamlit multipage'de her sayfa bağımsız çalışır — her sayfada init zorunlu
+init_session_state()
 
 st.set_page_config(page_title="Mevcut Uyku", page_icon="🐰", layout="centered")
 st.title("Bölüm 3: Mevcut Uyku Düzeni")
 st.caption("Sorular 15-21 — bebeğinizin şu anki uyku alışkanlıkları")
 
-if "profile" not in st.session_state:
-    st.session_state.profile = {}
 profile = st.session_state.profile
 
 with st.form("mevcut_uyku_form"):
