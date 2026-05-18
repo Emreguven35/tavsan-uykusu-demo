@@ -1,0 +1,14 @@
+.env
+.env.*
+__pycache__/
+*.pyc
+*.pyo
+.streamlit/secrets.toml
+.venv/
+venv/
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+tests/test_results.json

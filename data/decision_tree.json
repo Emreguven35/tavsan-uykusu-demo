@@ -1,0 +1,566 @@
+{
+  "extracted_at": "2026-05-18",
+  "source": "batch_2 (kayıt36-kayıt47)",
+  "extraction_methodology": "Yeni 12 transkriptten sayısal eşik, koşullu kural, yaş-bazlı tablo, kırmızı bayrak ve başarı kriteri çıkarımı. Her kural en az 1 ses kaydından doğrudan alıntılanmıştır. Spekülasyon yapılmamış; içerikte olmayan kovalara 'yok' yazılmıştır.",
+  "parameter_tables": {
+    "uyaniklik_penceresi_by_age": {
+      "0-3_ay": {
+        "status": "yok",
+        "note": "Batch_2'de de 0-3 ay yenidoğan dönemi için spesifik içerik yok. En erken 3-5 ay aralığı kayıt47'de işleniyor."
+      },
+      "3-5_ay": {
+        "min_hours": 1.5,
+        "max_hours": 2.25,
+        "min_hours_text": "1 saat 30 dakika",
+        "max_hours_text": "2 saat 15 dakika",
+        "nap_count": "4-5",
+        "min_daily_sleep_hours": 4,
+        "max_daily_sleep_hours": 5,
+        "education_eligible": false,
+        "note": "Bu yaş eğitim ALMAZ, sadece saat planlaması yapılabilir.",
+        "source_lesson": "kayıt47"
+      },
+      "6_ay": {
+        "min_hours": 2.25,
+        "max_hours": 2.5,
+        "min_hours_text": "2 saat 15 dakika",
+        "max_hours_text": "2 saat 30 dakika",
+        "nap_count": 3,
+        "education_eligible": true,
+        "education_eligibility_note": "5. ayın dolmasıyla eğitim verilir (kademeli kavram bu yaşta gelişir).",
+        "source_lesson": "kayıt47"
+      },
+      "7_ay": {
+        "min_hours": 2.5,
+        "max_hours": 2.75,
+        "min_hours_text": "2 saat 30 dakika",
+        "max_hours_text": "2 saat 45 dakika",
+        "nap_count": 3,
+        "education_eligible": true,
+        "source_lesson": "kayıt47"
+      },
+      "8_ay": {
+        "min_hours": 2.75,
+        "max_hours": 3.0,
+        "min_hours_text": "2 saat 45 dakika",
+        "max_hours_text": "3 saat",
+        "nap_count": 3,
+        "education_eligible": true,
+        "wake_up_time_strict": "06:00 KATI (esnetilemez)",
+        "source_lesson": "kayıt47, kayıt39"
+      },
+      "9_ay": {
+        "min_hours": 3.25,
+        "max_hours": 3.5,
+        "min_hours_text": "3 saat 15 dakika",
+        "max_hours_text": "3 saat 30 dakika",
+        "nap_count": "2 veya 3",
+        "education_eligible": true,
+        "source_lesson": "kayıt42"
+      },
+      "10_ay": {
+        "min_hours": 3.5,
+        "max_hours": 3.75,
+        "min_hours_text": "3 saat 30 dakika",
+        "max_hours_text": "3 saat 45 dakika",
+        "nap_count": 2,
+        "education_eligible": true,
+        "source_lesson": "kayıt42"
+      },
+      "11_ay": {
+        "min_hours": 3.75,
+        "max_hours": 3.75,
+        "min_hours_text": "3 saat 45 dakika",
+        "max_hours_text": "3 saat 45 dakika",
+        "nap_count": 2,
+        "education_eligible": true,
+        "source_lesson": "kayıt42"
+      },
+      "12_ay": {
+        "min_hours": 3.75,
+        "max_hours": 4.0,
+        "min_hours_text": "3 saat 45 dakika",
+        "max_hours_text": "4 saat",
+        "nap_count": 2,
+        "education_eligible": true,
+        "source_lesson": "kayıt42"
+      },
+      "12-13_ay": {
+        "min_hours": 4.0,
+        "max_hours": 4.5,
+        "min_hours_text": "4 saat",
+        "max_hours_text": "4 saat 30 dakika",
+        "nap_count": 2,
+        "source_lesson": "kayıt45"
+      },
+      "14_ay": {
+        "min_hours": 4.0,
+        "max_hours": 4.5,
+        "nap_count": 2,
+        "note": "13 ay ile aynı veriler",
+        "source_lesson": "kayıt45"
+      },
+      "15-17_ay": {
+        "first_wake_hours": 4.0,
+        "second_wake_hours": 4.5,
+        "post_nap_wake_hours_to_bed": 4.0,
+        "nap_count": 2,
+        "schedule_text": "06 başla → 4h sonra 1h uyku → 4h30 sonra 1h uyku → 4h sonra gece",
+        "source_lesson": "kayıt45"
+      },
+      "18_ay": {
+        "min_hours_to_first_nap": 5.0,
+        "max_hours_to_first_nap": 6.0,
+        "min_hours_text": "5 saat",
+        "max_hours_text": "6 saat",
+        "nap_count": 1,
+        "earliest_nap_time": "12:00",
+        "min_nap_duration_hours": 2,
+        "max_nap_duration_hours": 3,
+        "source_lesson": "kayıt45, kayıt44"
+      },
+      "40_ay_buyuk_cocuk": {
+        "nap_count": "0 (öğlen uykusu önerilmiyor)",
+        "wake_up_time_max": "07-08",
+        "wake_up_time_strict_max": "09 (kesin sınır)",
+        "bedtime_normal": "21:00-21:30",
+        "note": "Öğlen uykusu yapılırsa gece uykusu geç kalır.",
+        "source_lesson": "kayıt38"
+      }
+    },
+    "gece_beslenme_by_age": {
+      "6_ay": {
+        "max_feedings": 2,
+        "feeding_times": ["00:00", "04:00"],
+        "method": "uykudayken besle (uyandığında DEĞİL)",
+        "if_weight_good": "1 öğüne düşür (sadece 00:00 veya 02:00)",
+        "source_lesson": "kayıt46"
+      },
+      "6+_ay_genel": {
+        "biological_need": false,
+        "note": "Tıbbi olarak gece beslenme ihtiyacı yoktur.",
+        "policy": "Ebeveynlik tercihi — 1 yaşa kadar uykudayken beslenebilir, ama 9-12 ayda doktor onayıyla kesilebilir.",
+        "source_lesson": "kayıt37, kayıt46"
+      }
+    },
+    "gunduz_uyku_by_age": {
+      "3-5_ay": {
+        "nap_count": "4-5",
+        "min_total_hours": 4,
+        "max_total_hours": 5,
+        "if_under_min": "30 dakikalık kestirme uyku ZORUNLU",
+        "source_lesson": "kayıt47"
+      },
+      "6-8_ay": {
+        "nap_count": 3,
+        "if_baby_wakes_4_plus_times": "Saatleri 2-2.5h max 3h uyanıklık şeklinde planla. Toplam 3 saat uyku dolmazsa +30 dk kestirme.",
+        "source_lesson": "kayıt46, kayıt47"
+      },
+      "9_ay": {
+        "first_nap_hours": 1.5,
+        "second_nap_hours": 1.5,
+        "max_total_hours": 3,
+        "source_lesson": "kayıt43"
+      },
+      "10_ay": {
+        "first_nap_hours": 1.0,
+        "second_nap_hours": 1.5,
+        "source_lesson": "kayıt43"
+      },
+      "11_ay": {
+        "first_nap_hours": 1.0,
+        "second_nap_max_hours": 1.5,
+        "first_nap_overflow_warning": "1 saati GEÇMEMELİ — geçerse 2. nap reddi → gece uyanma tetiklenir",
+        "source_lesson": "kayıt43"
+      },
+      "12_ay": {
+        "first_nap_hours": 1.0,
+        "second_nap_hours": 1.0,
+        "source_lesson": "kayıt43"
+      },
+      "12-18_ay": {
+        "nap_count": 2,
+        "each_nap_hours": 1.0,
+        "source_lesson": "kayıt45"
+      },
+      "18+_ay_tek_uyku_koşulları": {
+        "min_awake_hours_before_nap": 5,
+        "max_awake_hours_before_nap": 6,
+        "min_nap_hours": 2,
+        "max_nap_hours": 3,
+        "earliest_time": "12:00",
+        "if_under_2h": "30 dakikalık kestirme uyku ZORUNLU (yoksa gece uyanma)",
+        "source_lesson": "kayıt44, kayıt45"
+      }
+    },
+    "bekleme_sureleri_by_day": {
+      "egitim_uygulamasi_kucaktan_almak": {
+        "schedule": {
+          "1_kucak": "30 saniye bekleme",
+          "2_kucak": "1 dakika bekleme",
+          "3_kucak": "1.5 dakika bekleme",
+          "4_kucak": "2 dakika bekleme",
+          "sonrası": "her seferde +30 saniye"
+        },
+        "max_session_duration_min": 45,
+        "after_45min": "15-30 dakika rutin molası + yine 45 dakika dene",
+        "source_lesson": "kayıt36, kayıt37"
+      },
+      "egitim_gece_uyanmasi_odadan_dis_bekleme": {
+        "day_1_min": 5,
+        "day_1_max": 20,
+        "day_2_increase": "+5 dakika",
+        "day_3_increase": "+5 dakika",
+        "rule": "Her gece bekleme süresi artar; asla 5 dk altına inmez.",
+        "source_lesson": "kayıt36"
+      },
+      "egitim_kisa_gunduz_uykusu_dis_bekleme": {
+        "day_1": 5,
+        "day_2": 10,
+        "day_3": 15,
+        "rule": "Dış bekleme + içeri dön süreleri toplamda 45 dk olmalı. (5+40, 10+35, 15+30)",
+        "source_lesson": "kayıt36"
+      },
+      "yatir_cik_sonrasi_dis_bekleme": {
+        "schedule": [
+          {"step": 1, "min": 5, "action": "İçeri gir, sakinleştir, çık"},
+          {"step": 2, "min": 10, "action": "İçeri gir, sakinleştir, çık"},
+          {"step": 3, "min": 15, "action": "İçeri gir, sakinleştir, çık"},
+          {"step": 4, "min": 20, "action": "İçeri gir, sakinleştir, çık"}
+        ],
+        "max_increase_to": 25,
+        "max_emergency_increase": 45,
+        "note": "Max 20-25 dk, daha fazla artırma yapılmaz. 21 gün hiç dalmazsa 45 dk'ya çıkarılabilir.",
+        "source_lesson": "kayıt37"
+      },
+      "B_plan_1_saat_direnç": {
+        "step_1_duration_min": 60,
+        "step_1_action": "Bebek 1 saat ağlarsa odadan çıkar (gündüz) veya odada minik rutin yap (gece)",
+        "step_2_duration_min": 15,
+        "step_2_action": "Minik rutin (15 dk)",
+        "step_3_duration_min": 45,
+        "step_3_action": "Tekrar 45 dk dene",
+        "max_repetitions": 3,
+        "if_3rd_fails_day": "Bebek arabasıyla dışarıda uyut, gün başarısız",
+        "if_3rd_fails_night": "Destek ver, uyut",
+        "frequency_note": "Çok nadiren tetiklenir, ortalama hiç tetiklenmez.",
+        "source_lesson": "kayıt37"
+      },
+      "egitim_buyuk_cocuk_40_ay": {
+        "max_duration_hours": 3,
+        "movement_break_after_min": 45,
+        "movement_break_max_min": 90,
+        "movement_break_duration_min": 5,
+        "note": "Kortizol hormonu hareket gerektirir; oyun değil, sadece odada gezinti.",
+        "source_lesson": "kayıt38"
+      }
+    },
+    "egitim_gunleri_kademeli_uzaklasma": {
+      "5_gun_standart": {
+        "day_1": "Yatak/beşik yanı (sandalyeyle veya ayakta)",
+        "day_2": "Yatak/beşik yanı (devam)",
+        "day_3": "Oda ortası (sandalye), temas YOK, sadece pış-pış",
+        "day_4": "Kapı eşiği (içerden, ses desteği azaltılır)",
+        "day_5": "Yatır-çık (odadan tamamen çıkış)",
+        "source_lesson": "kayıt36, kayıt37"
+      },
+      "13_gun_dirençli": {
+        "day_1_3": "Beşik yanı",
+        "day_4_6": "Oda ortası",
+        "day_7_9": "Kapı (içerden)",
+        "day_10_12": "Kapı eşiği (yarı görünür)",
+        "day_13": "Yatır-çık",
+        "source_lesson": "kayıt36"
+      },
+      "6_gun_buyuk_cocuk_40_ay": {
+        "day_1": "Yatak yanı",
+        "day_2": "Yatak yanı",
+        "day_3": "Oda ortası (sandalye veya ayakta)",
+        "day_4": "Kapı (içerden, gözler kapalı, uyuyor numarası)",
+        "day_5": "Kapı eşiği (yarı görünür)",
+        "day_6": "Yatır-çık + anne kendi yatağına git",
+        "critical": "6. gün uygulanmazsa eğitim 3 hafta içinde %99 bozulur",
+        "source_lesson": "kayıt38"
+      }
+    }
+  },
+  "conditional_rules": [
+    {
+      "condition": "Bebek 5 ayını doldurmadı",
+      "action": "Uyku eğitimi UYGULANMAZ. Kademeli kavram gelişmediği için ALINMAZ.",
+      "source_lesson": "kayıt37"
+    },
+    {
+      "condition": "Bebek 8 aylık ve emzik kullanıyor + ağzına kendi takamıyor",
+      "action": "Eğitim sırasında emzik kullanılmaz. Eğitim öncesi 3 hafta emzik bağımlılığı azaltma planı uygula.",
+      "source_lesson": "kayıt37, kayıt40"
+    },
+    {
+      "condition": "Bebek emziği gün içerisinde ağzına kendi takabiliyor (8 ay+ tipik)",
+      "action": "Emzikle eğitim verilebilir.",
+      "source_lesson": "kayıt40"
+    },
+    {
+      "condition": "Bebek 8 aylık ve güne 6:00'dan geç başlıyor",
+      "action": "3. gündüz uykusunu reddeder → gece uyanma bitmez. Güne başlama 6 ZORUNLU.",
+      "source_lesson": "kayıt39"
+    },
+    {
+      "condition": "Bebek 6-7 aylık ve anne 6'da kaldıramıyor (iş saati)",
+      "action": "Esneklik tanınabilir (özel duruma göre).",
+      "source_lesson": "kayıt39"
+    },
+    {
+      "condition": "Bebek 11 aylık ve 1. gündüz uykusunda 1 saati geçti",
+      "action": "2. gündüz uykusunu reddeder → gece uyanma tetiklenir. 1 saatte kaldır.",
+      "source_lesson": "kayıt43"
+    },
+    {
+      "condition": "Bebek 9-12 ay ve 2 gündüz uykusu toplam 2 saat altında VEYA 16:00 öncesi kalkıyor",
+      "action": "İlave bir kestirme uyku ekle.",
+      "source_lesson": "kayıt41"
+    },
+    {
+      "condition": "Bebek 12-18 ay ve öğlen uykusu 2 saat altında kalıyor",
+      "action": "Tek uyku YAPAMAZ. 2 uyku ile devam et VEYA tek uyku yapıyorsa 30 dk kestirme ekle.",
+      "source_lesson": "kayıt44"
+    },
+    {
+      "condition": "Bebek 3-5 ay ve 4 gündüz uykusunda toplam 4 saat altında uyuyor",
+      "action": "30 dakikalık kestirme uyku ZORUNLU (her ay için aynı kural).",
+      "source_lesson": "kayıt47"
+    },
+    {
+      "condition": "Bebek 6 aylık ve gece 4'ten fazla kez uyanıyor",
+      "action": "Önce emerek uyuma alışkanlığı değiştirilir. Saatler 2-2.5h max 3h uyanıklık + 3 nap olarak ayarlanır.",
+      "source_lesson": "kayıt46"
+    },
+    {
+      "condition": "Bebek doğumda 40 haftadan eksik (örn. 36 hf)",
+      "action": "Tablodaki uyanıklık penceresi süreleri eksik hafta sayısı / 4 = ay olarak GERİDEN devam eder (örn. 36 hf → 6 ayda 5 ay gibi).",
+      "source_lesson": "kayıt40"
+    },
+    {
+      "condition": "Bebekte sağlık problemi var (kalp, ritim bozukluğu, epilepsi, astım, nefes)",
+      "action": "Doktor onayı ZORUNLU. Doktor onaylamadan eğitim başlatılmaz.",
+      "source_lesson": "kayıt40"
+    },
+    {
+      "condition": "Bebek meme alıyor (mama almıyor)",
+      "action": "Eğitimde daha fazla ağlama beklenir (emme refleksiyle sakinleşme alışkanlığı). Süreç planlamasında dikkate al.",
+      "source_lesson": "kayıt40"
+    },
+    {
+      "condition": "Aile aynı odayı paylaşıyor",
+      "action": "Bebek anneyi GÖRMEYECEK pozisyonda uyumalı. Paravan/perde gerekli.",
+      "source_lesson": "kayıt40, kayıt37"
+    },
+    {
+      "condition": "Bebek emerek uyuyan tipte",
+      "action": "Eğitim öncesi birkaç gün sallanarak uyutma (destek değiştirme, en az 3 kez başarı).",
+      "source_lesson": "kayıt40"
+    },
+    {
+      "condition": "Bebek tutunup kalkabiliyor",
+      "action": "Devamlı yatırma YAPILMAZ. Her yatırma arasında 1, 3, 5, 7 dakika bekleme.",
+      "source_lesson": "kayıt40"
+    },
+    {
+      "condition": "Eğitim sırasında bebek 1 saat boyunca ağlıyor",
+      "action": "Odadan çıkar (gündüz) veya minik rutin (gece) 15 dk → 45 dk daha dene. Max 3 tekrar.",
+      "source_lesson": "kayıt37"
+    },
+    {
+      "condition": "B planı 3 kez tekrarlandı, bebek hala uyumadı (gündüz, max 17:00 öncesi)",
+      "action": "Bebek arabasıyla dışarıda hareketle uyutma. Gün başarısız sayılır.",
+      "source_lesson": "kayıt37"
+    },
+    {
+      "condition": "B planı 3 kez tekrarlandı (gece)",
+      "action": "Destek ver, bebek uyusun. Gün başarısız sayılır.",
+      "source_lesson": "kayıt37"
+    },
+    {
+      "condition": "Bebek hastalandı ve ateşi var",
+      "action": "Eğitim 1-2. gün protokolüne dön (temas serbest). Ateş geçtiği an YATIR-ÇIK gününe geç (3. güne DEĞİL).",
+      "source_lesson": "kayıt36"
+    },
+    {
+      "condition": "Bebek diş çıkarıyor",
+      "action": "Eğitim DEĞİŞMEZ. Şiddetli ise doktor onayıyla ağrı kesici, sonra standart eğitim devam.",
+      "source_lesson": "kayıt36"
+    },
+    {
+      "condition": "Bebek histerik ağlamaya geçti (\"ha-ha katılma noktası\")",
+      "action": "Hiçbir bekleme süresi uygulanmaz. DOĞRUDAN müdahale.",
+      "source_lesson": "kayıt36, kayıt37"
+    },
+    {
+      "condition": "Anne yatır-çık yapmıyor (5. gün adımını atlıyor)",
+      "action": "Eğitim 3 hafta içinde %99 bozulur. 6 günde uygulanmazsa 'altıncı gün eğitiminin altın kuralı.'",
+      "source_lesson": "kayıt36, kayıt38"
+    },
+    {
+      "condition": "Anne eğitim sonrası pat-pat/pış-pış desteği vermeye devam ediyor",
+      "action": "Eğitim 3-6 hafta içinde %80 oranında bozulur. Max 3 ay (büyük bebek max 6 ay) içinde tamamen bozulur.",
+      "source_lesson": "kayıt36"
+    },
+    {
+      "condition": "Anne uykudan önce su veriyor",
+      "action": "Su bağımlılığı oluşur. Anekdot: 36 aylık çocukta hâlâ süregelen vaka.",
+      "source_lesson": "kayıt36"
+    },
+    {
+      "condition": "Anne mayıştırıp yatırıyor (sallayıp yatırma, masaj sonrası yatırma vb.)",
+      "action": "Destekli uyku sayılır. Eğitim bozulur. KESİNLİKLE YAPILMAZ.",
+      "source_lesson": "kayıt36, kayıt37"
+    },
+    {
+      "condition": "40 aylık çocuk yatak geçişi sonrası gece anne-baba odasına geliyor",
+      "action": "Önce sözlü pozitif yönlendirme ('Yarın seninle X yapacağız'). Reddederse fiziksel olarak kendi yatağına götür. Anne kendi yatağında yatıyor, ışıklar kapalı.",
+      "source_lesson": "kayıt38"
+    },
+    {
+      "condition": "Bebek yatakta ayağa kalkıyor (yatak içinde)",
+      "action": "Devamlı yatırma YAPILMAZ. Yatağın içinde kaldığı sürece izin ver.",
+      "source_lesson": "kayıt38, kayıt40"
+    },
+    {
+      "condition": "Bebek 21 gün boyunca hiç kendi başına uykuya geri dönemedi",
+      "action": "Bekleme süresini max 45 dakikaya çıkar VEYA tıbbi yönlendirme yap.",
+      "source_lesson": "kayıt37"
+    }
+  ],
+  "red_flags": [
+    {
+      "indicator": "Bebek histerik ağlamaya geçti (nefessiz kalırcasına, \"ha-ha\" katılma)",
+      "recommendation": "Bekleme süresi UYGULANMAZ. Doğrudan müdahale. Anne ses kaydı/video gönderebilir, İlayda değerlendirir.",
+      "source_lesson": "kayıt36, kayıt37"
+    },
+    {
+      "indicator": "Bebek 21 gün boyunca hiç kendi başına uykuya geri dönemedi",
+      "recommendation": "Tıbbi yönlendirme yap (45 günlük bekleme süresi sınırı denemeden).",
+      "source_lesson": "kayıt37"
+    },
+    {
+      "indicator": "Bebekte kalp rahatsızlığı, ritim bozukluğu, epilepsi, astım, nefes problemleri",
+      "recommendation": "Eğitime DOKTOR ONAYIYLA başla. Doktor onaylamadan kesinlikle eğitim verilmez.",
+      "source_lesson": "kayıt40"
+    },
+    {
+      "indicator": "Eğitim sonrası anne sürekli pat-pat/pış-pış vermeye devam ediyor (gece uyanma bitti diye)",
+      "recommendation": "UYARI: Eğitim 3-6 hafta içinde %80 oranında bozulur. Yatır-çık yapmaya geri dön.",
+      "source_lesson": "kayıt36"
+    },
+    {
+      "indicator": "Bebek ağlaması sırasında istifra etti veya öğürdü",
+      "recommendation": "Temizle, eğitim devam. Bu en kötü senaryo, korkutucu değil.",
+      "source_lesson": "kayıt36"
+    },
+    {
+      "indicator": "Aile aynı odayı paylaşıyor ve bebek anneyi görüyor",
+      "recommendation": "Paravan/perde gerekli. Aksi halde gece uyanmaları çözülmez.",
+      "source_lesson": "kayıt40"
+    },
+    {
+      "indicator": "Bebek 6 aylık ve gece 4'ten fazla uyanıyor",
+      "recommendation": "Önce emerek uyuma alışkanlığını değiştir. Gerekirse 3 nap düzenine geç. Toplam 3 saat uyku dolmadan gece uykusuna geçirme.",
+      "source_lesson": "kayıt46"
+    },
+    {
+      "indicator": "40 aylık çocuk korkudan bahsediyor (\"oradan canavar çıkacak\")",
+      "recommendation": "Pedagog desteği alınabilir. Korkuyu görmezden gelme, destekleyerek uykuya yönlendir.",
+      "source_lesson": "kayıt38"
+    },
+    {
+      "indicator": "Bebek prematüre (40 hf altında doğmuş)",
+      "recommendation": "Düzeltilmiş yaşa göre uyku eğitimi yapılır (her 4 hf erkenlik = 1 ay geriden).",
+      "source_lesson": "kayıt40"
+    }
+  ],
+  "success_criteria": [
+    {
+      "metric": "1. günde başarı tanımı",
+      "threshold": "Birinci uykuda en az 1 kez yatağına yatıp ağlayarak da olsa uykuya geçmesi",
+      "source_lesson": "kayıt36"
+    },
+    {
+      "metric": "2. günde adaptasyon",
+      "threshold": "Direnç süresi 10 dakikaya düşer (genelde %90 bebek)",
+      "source_lesson": "kayıt38, kayıt36"
+    },
+    {
+      "metric": "Yatır-çık günü başarı",
+      "threshold": "Bebek desteksiz, sessiz, kendi başına en az 1 kez uykuya dalsın",
+      "source_lesson": "kayıt36"
+    },
+    {
+      "metric": "Tek uyku geçiş hazırlık",
+      "threshold": "Öğlen uykusu min 2h dolduruyor + 5-6h uyanık kalabiliyor",
+      "source_lesson": "kayıt44"
+    },
+    {
+      "metric": "Gündüz uyku yeterliliği",
+      "threshold": "Yaş bazlı min uyku süresinin (3-12 ay ortalama 3 saat) doldurulması",
+      "source_lesson": "kayıt46, kayıt47"
+    },
+    {
+      "metric": "9-12 ay 2 nap yeterliliği",
+      "threshold": "Toplam 2h uyku + 16:00 öncesi son nap'tan kalkmamış",
+      "source_lesson": "kayıt41"
+    },
+    {
+      "metric": "21 gün kuralı",
+      "threshold": "21 gün içinde bebek kendi başına en az 1 kez uykuya geri dönmüş olmalı",
+      "source_lesson": "kayıt37"
+    },
+    {
+      "metric": "Eğitim sürdürülebilirliği",
+      "threshold": "Yatır-çık eğitim sonrası da devam ediyor (anne pış-pış'a geri dönmemiş)",
+      "source_lesson": "kayıt36"
+    }
+  ],
+  "communication_protocol": {
+    "morning_report": "Anne güne başladığında İlayda'ya yazmalı.",
+    "before_room_entry": "Odaya girmeden önce İlayda'ya bilgi verilmeli.",
+    "report_format": "İlayda'nın gönderdiği tablo formatında (notpad'de değil).",
+    "videos": "Eğitim 1-5. günlerden video iletilebilir.",
+    "ses_dosyasi": "Histerik ağlama tanımı için ses kaydı gönderilebilir.",
+    "ilayda_response": "Yanlış varsa düzeltir, doğruyu teyit etmez.",
+    "no_reply_periods": "Gece saatleri, çocuk okul saatleri.",
+    "source_lesson": "kayıt36"
+  },
+  "completeness_assessment": {
+    "uyaniklik_penceresi": "tam (3 ay-18 ay+ ay bazlı tablo + 40 ay büyük çocuk; 0-3 ay hariç)",
+    "gece_beslenme": "tam (6 ay özelinde net; 6+ ay genel kural)",
+    "gunduz_uyku_sureleri": "tam (3-12 ay ay bazlı; 12-18 ay; 18+ tek uyku)",
+    "bekleme_sureleri": "tam (4 farklı senaryo: kucak, gece uyanma, kısa gündüz, yatır-çık sonrası)",
+    "egitim_gun_protokolu": "tam (5 günlük + 13 günlük dirençli + 6 günlük büyük çocuk)",
+    "B_plan_1_saat_direnç": "tam (3 tekrar + bebek arabası fallback)",
+    "red_flags": "tam (9 risk göstergesi)",
+    "success_criteria": "tam (8 başarı metriği)",
+    "kademeli_uzaklasma": "tam (3 farklı kademe planı)",
+    "histerik_aglama": "tam (tanım + müdahale)",
+    "egitim_oncesi_degerlendirme": "tam (8 maddelik checklist)",
+    "prematüre_düzeltme": "tam (4 haftada 1 ay kuralı)",
+    "yatak_gecisi": "tam (40 ay vaka + 5 oyuncak + motivasyon panosu + Montessori vs park yatak)",
+    "0-3_ay_yenidogan": "yok",
+    "regresyon_4_8_12_18_ay_spesifik_basliklar": "kismi (genel müdahale tanımı var ama 'X ay regresyonu' diye etiketli içerik yok)",
+    "ikiz_coğul_uyku": "yok",
+    "anne_sutu_kesme": "yok",
+    "overall_decision_tree_ready": true,
+    "premium_plan_engine_ready": true,
+    "premium_plan_ready_for_age_buckets": ["3-5 ay (kismi)", "6-12 ay (tam)", "12-18 ay (tam)", "18-36 ay (kismi)", "36+ ay (yatak geçişi vakası ile başlangıç)"],
+    "missing_for_production": [
+      "0-3 ay (0-2 ay) yenidoğan dönemi için içerik (ürünün hedef yaş aralığını 4 ay+ olarak konumlamak en güvenli)",
+      "4 ay regresyonu spesifik etiketle protokol kaydı",
+      "8 ay regresyonu spesifik kayıt",
+      "12 ay regresyonu spesifik kayıt",
+      "18 ay regresyonu spesifik kayıt",
+      "İkiz/çoğul uyku senkronizasyonu (en az 1 dedicated kayıt)",
+      "Anne sütü kesme süreci + uyku düzeni etkileşimi (10-15 dk dedicated)",
+      "Beşik→yatak geçişi 18-30 ay için ara yaş kaydı (kayıt38 40 ay üzerine, daha küçük yaş eksik)",
+      "Hastalık tipi bazında özel uyarılar (kayıt36 sadece ateş için katı kural koyuyor)"
+    ]
+  }
+}

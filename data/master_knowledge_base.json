@@ -1,0 +1,486 @@
+{
+  "generated_at": "2026-05-18",
+  "version": "v3 (audio + visual merged)",
+  "description": "Tavşan Uykusu için 3 veri kaynağını birleştiren resmi parametre veritabanı. Premium plan motoru için bu dosya kullanılmalı.",
+  "sources": {
+    "audio": "transcripts/analysis/decision_tree_extraction.json (47 ses kaydı, 89 karar kuralı)",
+    "visual": "transcripts/analysis/batch_3_visual_data.json (29 markalı görsel uyku tablosu)",
+    "coverage": "transcripts/analysis/coverage_matrix_v2.json (47 ders × konu/yaş matrisi)"
+  },
+  "yas_buckets": {
+    "0-6_hafta": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "45-60 Dakika",
+        "from_visual_master_tablo (0-2 ay)": "40 Dakika - 1 Saat 20 Dakika",
+        "from_audio_decision_tree": "yok",
+        "RESMI_DEGER_genel_kullanim": "40-60 Dakika"
+      },
+      "uyku_sayisi": {"from_visual": "4-6 ve üzeri", "RESMI_DEGER": "4-6+"},
+      "yatma_vakti": "21:00 - 23:00",
+      "toplam_uyku_24h": "14-17 Saat",
+      "gunduz_uyku_total": "4 - 8 Saat",
+      "gunduz_uyku_bitirme": "20:00",
+      "gece_uyku": "9-12 Saat",
+      "egitim_uygunlugu": false,
+      "egitim_uygunlugu_aciklama": "Eğitim 5+ ay (kademeli kavram gelişimi) sonrası verilir. Bu yaşta sadece saat planlaması yapılır.",
+      "ilgili_dersler": [],
+      "ilgili_gorseller": ["01_yas_tablolari/00_06_haftalik.jpeg", "02_ozet_master_tablolar/MASTER_TABLO_yasa_gore.jpeg"]
+    },
+    "7-12_hafta": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "60-90 Dakika",
+        "from_visual_master_tablo (0-2 ay)": "40 Dakika - 1 Saat 20 Dakika",
+        "RESMI_DEGER_genel_kullanim": "60-90 Dakika"
+      },
+      "uyku_sayisi": {"from_visual": "4 ve üzeri", "RESMI_DEGER": "4+"},
+      "yatma_vakti": "19:00 - 22:00",
+      "toplam_uyku_24h": "14-17 Saat",
+      "gunduz_uyku_total": "4 - 7 Saat",
+      "gunduz_uyku_bitirme": "20:00",
+      "gece_uyku": "9-12 Saat",
+      "egitim_uygunlugu": false,
+      "ilgili_dersler": [],
+      "ilgili_gorseller": ["01_yas_tablolari/07_12_haftalik.jpeg"]
+    },
+    "3_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "90 Dakika",
+        "from_visual_master_tablo (3-5 ay)": "1 Saat 30 Dakika - 2 Saat 15 Dakika",
+        "from_audio (kayıt47, 3-5 ay aralığı)": "1.5 - 2.25 Saat",
+        "RESMI_DEGER_genel_kullanim": "90 Dakika"
+      },
+      "uyku_sayisi": {"from_visual": "3-5", "RESMI_DEGER": "3-5"},
+      "yatma_vakti": "19:00 - 22:00",
+      "toplam_uyku_24h": "14-17 Saat",
+      "gunduz_uyku_total": "4-7 Saat",
+      "gunduz_uyku_bitirme": "17:30 - 20:30",
+      "gece_uyku": "10-12 Saat",
+      "egitim_uygunlugu": false,
+      "egitim_uygunlugu_aciklama": "Eğitim ALMAZ. Saat planlaması yapılabilir.",
+      "if_min_total_uyku_not_filled": "+30 dakika kestirme uyku ZORUNLU (kayıt47)",
+      "ilgili_dersler": ["kayıt47"],
+      "ilgili_gorseller": ["01_yas_tablolari/03_aylik.jpeg"]
+    },
+    "4_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "90-120 Dakika",
+        "from_visual_master_tablo (3-5 ay)": "1 Saat 30 Dakika - 2 Saat 15 Dakika",
+        "from_audio (kayıt47, 3-5 ay)": "1.5 - 2.25 Saat",
+        "RESMI_DEGER_genel_kullanim": "90-120 Dakika"
+      },
+      "uyku_sayisi": {"from_visual": "3-4", "RESMI_DEGER": "3-4"},
+      "yatma_vakti": "18:00 - 20:00",
+      "toplam_uyku_24h": "12-15 Saat",
+      "gunduz_uyku_total": "3-4.5 Saat",
+      "gunduz_uyku_bitirme": "16:00-18:00",
+      "gece_uyku": "10-12 Saat",
+      "egitim_uygunlugu": false,
+      "ornek_gunluk_program_basit_referans": "gunluk_program_basit.4_uyku_4_5_aylik_v2",
+      "ornek_gunluk_program_detayli_referans": "gunluk_program_detayli.04_06_aylik_detayli (4-6 ay aralığı)",
+      "ilgili_dersler": ["kayıt47"],
+      "ilgili_gorseller": ["01_yas_tablolari/04_aylik.jpeg", "03_gunluk_program_basit/4_uyku_4_5_aylik_v2.jpeg"]
+    },
+    "5_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "1.5 - 2.5 Saat",
+        "from_visual_master_tablo (3-5 ay)": "1 Saat 30 Dakika - 2 Saat 15 Dakika",
+        "from_audio (kayıt47, 3-5 ay)": "1.5 - 2.25 Saat",
+        "RESMI_DEGER_genel_kullanim": "1.5 - 2.5 Saat"
+      },
+      "uyku_sayisi": {"from_visual": "3-4", "RESMI_DEGER": "3-4"},
+      "yatma_vakti": "18:00 - 20:00",
+      "toplam_uyku_24h": "12-15 Saat",
+      "gunduz_uyku_total": "3-4 Saat",
+      "gunduz_uyku_bitirme": "17:30",
+      "gece_uyku": "10-12 Saat",
+      "egitim_uygunlugu_konusunda_kritik_kural": "kayıt37: 5. ayın DOLMASIYLA eğitim verilebilir. 5+0 → 5+30 gün arası seçimle.",
+      "ilgili_dersler": ["kayıt47", "kayıt37"],
+      "ilgili_gorseller": ["01_yas_tablolari/05_aylik.jpeg"]
+    },
+    "6_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "2-3 Saat",
+        "from_visual_master_tablo (6-8 ay)": "2-3 Saat",
+        "from_audio_decision_tree (kayıt47)": "2 Saat 15 Dakika - 2 Saat 30 Dakika",
+        "RESMI_DEGER_genel_kullanim": "2-3 Saat",
+        "RESMI_DEGER_egitim_sirasi": "2 Saat 15 Dakika - 2 Saat 30 Dakika",
+        "yorum": "Görsel tablo geniş aralık veriyor (anneye uygulanabilir esneklik); ses kaydı eğitim sırasındaki dar/spesifik hedefi veriyor."
+      },
+      "uyku_sayisi": {"from_visual": "2-3", "from_audio": 3, "RESMI_DEGER": 3, "yorum": "Görselde 2-3 yazıyor; ses kayıtlarında 6 ayda 3 nap düzeni vurgulanıyor. Karar ağacı için 3 nap önerilir, 2 nap geçiş durumunda istisna."},
+      "yatma_vakti": "18:00 - 20:00",
+      "toplam_uyku_24h": "12-15 Saat",
+      "gunduz_uyku_total": "3-4 Saat",
+      "gunduz_uyku_bitirme": "17:30",
+      "gece_uyku": "10-12 Saat",
+      "ornek_gunluk_program_basit": {
+        "07:00": "Uyanma",
+        "09:00": "1. Uyku max 1 saat",
+        "12:30": "2. Uyku max 1 saat",
+        "16:00": "3. Uyku max 1 saat",
+        "20:00": "Gece Uykusu"
+      },
+      "ornek_gunluk_program_detayli_referans": "gunluk_program_detayli.04_06_aylik_detayli (4-6 ay aralığı)",
+      "gece_beslenme": {
+        "from_audio (kayıt46)": "Max 2 öğün, saat 00:00 ve 04:00, UYKUDAYKEN besle, UYANDIĞINDA DEĞİL",
+        "if_weight_good": "1 öğüne düşülebilir (sadece 00:00 veya sadece 02:00)"
+      },
+      "if_4_plus_gece_uyanma_kayit46": "Önce emerek uyuma alışkanlığını değiştir. 2-2.5h max 3h uyanıklık + 3 nap düzeni planla. Toplam 3 saat uyku dolmazsa +30 dk kestirme zorunlu.",
+      "egitim_uygunlugu": true,
+      "ilgili_dersler": ["kayıt46", "kayıt47", "kaıyt1", "kayıt 2", "kayıt6", "kayıt7", "kayıt8", "kayıt27", "kayıt35", "kayıt36", "kayıt37"],
+      "ilgili_gorseller": ["01_yas_tablolari/06_aylik.jpeg", "03_gunluk_program_basit/3_uyku_6_7_aylik.jpeg", "04_gunluk_program_detayli/04_06_aylik_detayli.jpeg"]
+    },
+    "7_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "2.25-3.5 Saat",
+        "from_visual_master_tablo (6-8 ay)": "2-3 Saat",
+        "from_audio_decision_tree (kayıt47)": "2 Saat 30 Dakika - 2 Saat 45 Dakika",
+        "RESMI_DEGER_genel_kullanim": "2.25 - 3.5 Saat",
+        "RESMI_DEGER_egitim_sirasi": "2 Saat 30 Dakika - 2 Saat 45 Dakika"
+      },
+      "uyku_sayisi": {"from_visual": "2-3", "from_audio": 3, "RESMI_DEGER": 3},
+      "yatma_vakti": "18:00 - 20:00",
+      "toplam_uyku_24h": "12-15 Saat",
+      "gunduz_uyku_total": "2.5-3.5 Saat",
+      "gunduz_uyku_bitirme": "16:00",
+      "gece_uyku": "10-12 Saat",
+      "ornek_gunluk_program_basit_referans": "gunluk_program_basit.3_uyku_6_7_aylik",
+      "ilgili_dersler": ["kayıt47", "kaıyt1"],
+      "ilgili_gorseller": ["01_yas_tablolari/07_aylik.jpeg", "03_gunluk_program_basit/3_uyku_6_7_aylik.jpeg"]
+    },
+    "8_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "2.5-3.5 Saat",
+        "from_visual_master_tablo (6-8 ay)": "2-3 Saat",
+        "from_audio_decision_tree (kayıt47)": "2 Saat 45 Dakika - 3 Saat",
+        "RESMI_DEGER_genel_kullanim": "2.5 - 3.5 Saat",
+        "RESMI_DEGER_egitim_sirasi": "2 Saat 45 Dakika - 3 Saat"
+      },
+      "uyku_sayisi": {"from_visual": "2-3", "from_audio": "2-3 (genelde 3 ama 2'ye geçiş başlayabilir)", "RESMI_DEGER": "2-3"},
+      "yatma_vakti": "18:00 - 20:00",
+      "toplam_uyku_24h": "12-15 Saat",
+      "gunduz_uyku_total": "2.5-3.5 Saat",
+      "gunduz_uyku_bitirme": "16:00",
+      "gece_uyku": "10-12 Saat",
+      "wake_up_time_strict_audio (kayıt39)": "06:00 KATI — esnetilemez. 06'dan geç başlama → 3. nap reddi → gece uyanma bitmez",
+      "ornek_gunluk_program_basit_8plus_2plus1": "gunluk_program_basit.2plus1_uyku_8ay_v1",
+      "ornek_gunluk_program_detayli_referans": "gunluk_program_detayli.08_10_aylik_detayli",
+      "egitim_uygunlugu": true,
+      "emzik_kurali_kayit40": "8 ay öncesi emzikle eğitim verilemez. 8 ay+ ama düşen emziğini AĞZINA KENDİ TAKABİLİYORSA emzikle eğitim olur.",
+      "ilgili_dersler": ["kayıt47", "kayıt39", "kayıt40"],
+      "ilgili_gorseller": ["01_yas_tablolari/08_aylik.jpeg", "03_gunluk_program_basit/2plus1_uyku_8ay_v1.jpeg", "04_gunluk_program_detayli/08_10_aylik_detayli.jpeg"]
+    },
+    "9_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "2.5 - 3.5 Saat",
+        "from_visual_master_tablo (9-12 ay)": "3-4 Saat",
+        "from_audio_decision_tree (kayıt42)": "3 Saat 15 Dakika - 3 Saat 30 Dakika",
+        "RESMI_DEGER_genel_kullanim": "2.5 - 3.5 Saat (görsel) / 3-4 Saat (master)",
+        "RESMI_DEGER_egitim_sirasi": "3 Saat 15 Dakika - 3 Saat 30 Dakika",
+        "yorum": "Görsel ve master tablo arasında uyumsuzluk var. Eğitimde ses kaydı hedef alınır."
+      },
+      "uyku_sayisi": {"from_visual": 2, "from_audio (kayıt41)": "2 (koşul: toplam 2h ≥ uyku + 16:00 öncesi son nap)", "RESMI_DEGER": 2},
+      "yatma_vakti": "18:00 - 20:00",
+      "toplam_uyku_24h": "12-15 Saat",
+      "gunduz_uyku_total": "2-3 Saat",
+      "gunduz_uyku_bitirme": "16:00",
+      "gece_uyku": "10-12 Saat",
+      "1_uyku_max_saat (kayıt43)": "1.5 saat",
+      "2_uyku_max_saat (kayıt43)": "1.5 saat",
+      "egitim_uygunlugu": true,
+      "ilgili_dersler": ["kayıt41", "kayıt42", "kayıt43"],
+      "ilgili_gorseller": ["01_yas_tablolari/09_aylik.jpeg", "03_gunluk_program_basit/2_uyku_9_14_aylik.jpeg"]
+    },
+    "10_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "3-3.5 Saat",
+        "from_visual_master_tablo (9-12 ay)": "3-4 Saat",
+        "from_audio_decision_tree (kayıt42)": "3 Saat 30 Dakika - 3 Saat 45 Dakika",
+        "RESMI_DEGER_genel_kullanim": "3 - 3.5 Saat",
+        "RESMI_DEGER_egitim_sirasi": "3 Saat 30 Dakika - 3 Saat 45 Dakika"
+      },
+      "uyku_sayisi": {"from_visual": 2, "from_audio": 2, "RESMI_DEGER": 2},
+      "yatma_vakti": "18:00 - 20:00",
+      "toplam_uyku_24h": "12-15 Saat",
+      "gunduz_uyku_total": "2-3 Saat",
+      "gunduz_uyku_bitirme": "16:00",
+      "gece_uyku": "10-12 Saat",
+      "1_uyku_max_saat (kayıt43)": "1 saat",
+      "2_uyku_max_saat (kayıt43)": "1.5 saat",
+      "ornek_gunluk_program_basit_referans": "gunluk_program_basit.2_uyku_9_14_aylik",
+      "ornek_gunluk_program_detayli_referans": "gunluk_program_detayli.10_14_aylik_detayli",
+      "ilgili_dersler": ["kayıt42", "kayıt43"],
+      "ilgili_gorseller": ["01_yas_tablolari/10_aylik.jpeg", "04_gunluk_program_detayli/10_14_aylik_detayli.jpeg"]
+    },
+    "11_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "3-4 Saat",
+        "from_visual_master_tablo (9-12 ay)": "3-4 Saat",
+        "from_audio_decision_tree (kayıt42)": "3 Saat 45 Dakika",
+        "RESMI_DEGER_genel_kullanim": "3 - 4 Saat",
+        "RESMI_DEGER_egitim_sirasi": "3 Saat 45 Dakika"
+      },
+      "uyku_sayisi": {"from_visual": 2, "RESMI_DEGER": 2},
+      "yatma_vakti": "18:00 - 20:00",
+      "toplam_uyku_24h": "12-15 Saat",
+      "gunduz_uyku_total": "2-2.5 Saat",
+      "gunduz_uyku_bitirme": "16:00",
+      "gece_uyku": "10-12 Saat",
+      "1_uyku_max_saat (kayıt43)": "1 saat (KRITIK — geçerse 2. nap reddi → gece uyanma)",
+      "2_uyku_max_saat (kayıt43)": "1-1.5 saat",
+      "ilgili_dersler": ["kayıt42", "kayıt43"],
+      "ilgili_gorseller": ["01_yas_tablolari/11_aylik.jpeg"]
+    },
+    "12_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_yas_tablosu": "3.5-5 Saat",
+        "from_visual_master_tablo (9-12 ay)": "3-4 Saat",
+        "from_audio_decision_tree (kayıt42)": "3 Saat 45 Dakika - 4 Saat",
+        "RESMI_DEGER_genel_kullanim": "3.5 - 5 Saat",
+        "RESMI_DEGER_egitim_sirasi": "3 Saat 45 Dakika - 4 Saat"
+      },
+      "uyku_sayisi": {"from_visual": "1-2", "from_audio (kayıt44)": "2 önerilir; tek uyku 12 ayda teknik mümkün ama önerilmez", "RESMI_DEGER": 2},
+      "yatma_vakti": "18:00 - 20:00",
+      "toplam_uyku_24h": "12-15 Saat",
+      "gunduz_uyku_total": "2-3 Saat",
+      "gunduz_uyku_bitirme": "16:00",
+      "gece_uyku": "10-12 Saat",
+      "1_uyku_max_saat (kayıt43)": "1 saat",
+      "2_uyku_max_saat (kayıt43)": "1 saat",
+      "tek_uyku_kurali (kayıt44)": "12 ayda tek uyku ÖNERİLMİYOR. En erken 15-18 ay, en rahat 18+ ay.",
+      "ilgili_dersler": ["kayıt42", "kayıt43", "kayıt44"],
+      "ilgili_gorseller": ["01_yas_tablolari/12_aylik.jpeg"]
+    },
+    "12-13_ay": {
+      "from_audio_decision_tree (kayıt45)": "4-4.5 saat uyanıklık + 1h x 2 uyku. Düzen: 06 başla → 4h sonra 1h uyku → 4h15 sonra 1h uyku → 4h sonra gece",
+      "uyku_sayisi": 2,
+      "ornek_gunluk_program_basit_referans": "gunluk_program_basit.2_uyku_9_14_aylik",
+      "ornek_gunluk_program_detayli_referans": "gunluk_program_detayli.10_14_aylik_detayli",
+      "ilgili_dersler": ["kayıt45"],
+      "ilgili_gorseller": ["04_gunluk_program_detayli/10_14_aylik_detayli.jpeg"]
+    },
+    "14_ay": {
+      "from_audio_decision_tree (kayıt45)": "13 ay ile aynı veriler kullanılır",
+      "uyku_sayisi": 2,
+      "ilgili_dersler": ["kayıt45"],
+      "ilgili_gorseller": ["04_gunluk_program_detayli/10_14_aylik_detayli.jpeg"]
+    },
+    "15-17_ay": {
+      "from_audio_decision_tree (kayıt45)": "06 başla → 4h sonra 1h uyku → 4h30 sonra 1h uyku → 4h sonra gece",
+      "uyku_sayisi": 2,
+      "ornek_gunluk_program_detayli_referans": "gunluk_program_detayli.14_18_aylik_detayli",
+      "ilgili_dersler": ["kayıt45"],
+      "ilgili_gorseller": ["04_gunluk_program_detayli/14_18_aylik_detayli.jpeg"]
+    },
+    "18_ay": {
+      "uyaniklik_penceresi": {
+        "from_visual_master_tablo (18-24 ay)": "5-6 Saat",
+        "from_audio_decision_tree (kayıt44, kayıt45)": "5-6 Saat",
+        "RESMI_DEGER": "5-6 Saat"
+      },
+      "uyku_sayisi": {"from_visual": 1, "from_audio": 1, "RESMI_DEGER": 1},
+      "tek_uyku_koşul (kayıt44)": "5-6h uyanıklık + min 2h öğlen uyku. Aksi halde 2 uyku ile devam.",
+      "tek_uyku_2h_alti (kayıt44)": "30 dakika kestirme uyku ZORUNLU (yoksa gece uyanma)",
+      "ornek_gunluk_program_detayli_referans": "gunluk_program_detayli.14_18_aylik_detayli",
+      "ilgili_dersler": ["kayıt44", "kayıt45"],
+      "ilgili_gorseller": ["04_gunluk_program_detayli/14_18_aylik_detayli.jpeg"]
+    },
+    "18-24_ay": {
+      "uyaniklik_penceresi": "5-6 Saat",
+      "uyku_sayisi": 1,
+      "gunduz_uyku_suresi": "2 Saat",
+      "gece_uyku_suresi": "10-11 Saat",
+      "toplam_gunluk_uyku": "12-13 Saat",
+      "son_uyku_bitirme": "14:30",
+      "ornek_gunluk_program_detayli_referans": "gunluk_program_detayli.18_36_aylik_detayli",
+      "ilgili_gorseller": ["02_ozet_master_tablolar/MASTER_TABLO_yasa_gore.jpeg", "04_gunluk_program_detayli/18_36_aylik_detayli.jpeg"]
+    },
+    "2-3_yas": {
+      "uyaniklik_penceresi": "5 Saat 30 Dakika - 7 Saat",
+      "uyku_sayisi": 1,
+      "gunduz_uyku_suresi": "1-2 Saat",
+      "gece_uyku_suresi": "10-11 Saat",
+      "toplam_gunluk_uyku": "11-12.5 Saat",
+      "son_uyku_bitirme": "14:00",
+      "ornek_gunluk_program_detayli_referans": "gunluk_program_detayli.18_36_aylik_detayli",
+      "ilgili_gorseller": ["02_ozet_master_tablolar/MASTER_TABLO_yasa_gore.jpeg", "04_gunluk_program_detayli/18_36_aylik_detayli.jpeg"]
+    },
+    "40_ay_buyuk_cocuk": {
+      "uyaniklik_penceresi": "tüm gün (öğlen uykusu önerilmiyor)",
+      "uyku_sayisi": 0,
+      "wake_up_time": "07-08 (max 09)",
+      "bedtime_normal": "21:00-21:30",
+      "from_audio (kayıt38)": "Büyük çocuk eğitim 6 günlük plan (6. gün yatır-çık kritik, atlanırsa %99 bozulma)",
+      "metodolojiler": ["5 oyuncak metodu", "Motivasyon panosu", "Bilinçaltına konuşma", "Pozitif teşvik", "Park yatak vs Montessori farkları"],
+      "ilgili_dersler": ["kayıt38"],
+      "ilgili_gorseller": []
+    }
+  },
+  "global_rules": {
+    "egitim_oncesi_8_madde_checklist_kayit40": [
+      "1. Doğum tarihi/haftası (prematüre düzeltme: her 4 hf erkenlik = 1 ay geriden)",
+      "2. Emzik kullanımı (8 ay öncesi emzikle eğitim olmaz; 8 ay+ ağzına kendi takabilen bebeklerde olur)",
+      "3. Oda durumu (anne ile aynı odadaysa görmeyeceği bir alan / paravan / perde)",
+      "4. Beslenme tipi (meme vs mama — meme alan bebek daha çok ağlar)",
+      "5. Eğitim öncesi destek değiştirme (emerek uyuyan → sallanarak uyutma, en az 3 başarı)",
+      "6. Beyaz gürültü/ses desteği (5. güne kadar kullanılabilir, uykuya geçtiği an kapatılır)",
+      "7. Motor gelişim (tutunup kalkma → devamlı yatırma yapılmaz, bekleme süreleri artar)",
+      "8. Sağlık problemleri (kalp, ritim, epilepsi, astım, nefes) → DOKTOR ONAYI ZORUNLU"
+    ],
+    "yas_alt_siniri (kayıt37)": "Eğitim 5. ayın dolmasıyla verilir; kademeli kavram bu yaşta gelişir.",
+    "prematüre_düzeltme (kayıt40)": "Her 4 hafta erkenlik = 1 ay geriden değerlendirme (örn. 36 hf doğum → 6 ayda 5 ay gibi).",
+    "kademeli_uzaklasma_5_gun": {
+      "day_1_2": "Beşik yanı (sandalye veya ayakta)",
+      "day_3": "Oda ortası (temas YOK, sadece pış-pış)",
+      "day_4": "Kapı eşiği (içerden, ses desteği azaltılır)",
+      "day_5": "Yatır-çık (odadan tamamen çıkış)"
+    },
+    "kademeli_uzaklasma_13_gun_dirençli": {
+      "day_1_3": "Beşik yanı",
+      "day_4_6": "Oda ortası",
+      "day_7_9": "Kapı (içerden)",
+      "day_10_12": "Kapı eşiği (yarı görünür)",
+      "day_13": "Yatır-çık"
+    },
+    "bekleme_sureleri": {
+      "egitim_kucaktan_almak": "30s → 1dk → 1.5dk → 2dk artış",
+      "egitim_gece_uyanmasi": "Gün 1: 5dk → gece içinde her seferde +5. Gün 2: 5-10dk başla. Asla 5dk altı.",
+      "egitim_kisa_gunduz_uykusu": "Gün 1: dış 5dk + iç 40dk. Gün 2: 10+35. Gün 3: 15+30. Toplam 45dk.",
+      "yatir_cik_sonrasi": "5 → 10 → 15 → 20 → max 25 dakika. 21 gün hiç dalmazsa max 45dk veya tıbbi yönlendirme.",
+      "B_plan_1_saat_direnç": "1 saat ağlama → 15 dk rutin → 45 dk dene → max 3 tekrar"
+    },
+    "red_flags_kayit36_37_40": [
+      "Histerik ağlama (\"ha-ha katılma noktası\") → bekleme uygulanmaz, doğrudan müdahale",
+      "21 gün boyunca hiç kendi başına geri dönmedi → tıbbi yönlendirme",
+      "Kalp, ritim, epilepsi, astım, nefes problemi → doktor onayı zorunlu",
+      "Anne pış-pış/pat-pat'a geri döndü → 3-6 hafta içinde %80 bozulma",
+      "Su uyutmak için verildi → su bağımlılığı oluşur",
+      "Mayıştırıp yatırma → eğitim mutlaka bozulur",
+      "Aynı oda + bebek anneyi görüyor → eğitim verim alamaz, paravan zorunlu",
+      "6 aylık + 4+ uyanma → emerek uyuma alışkanlığı değiştir, 3 nap düzeni",
+      "Prematüre (40 hf altı) → düzeltilmiş yaşa göre uygula"
+    ],
+    "success_criteria_kayit36_38": [
+      "1. günde başarı: en az 1 kez yatağında uykuya geçti (ağlayarak da olsa)",
+      "2. günde direnç 10 dakikaya düşmüş olmalı (%90 bebek)",
+      "Yatır-çık günü: desteksiz, sessiz, en az 1 kez kendi başına uykuya dalma",
+      "21 gün içinde min 1 kez kendi başına geri dönme",
+      "Tek uyku geçiş hazırlık: öğlen min 2h + 5-6h uyanık kalabilme",
+      "Eğitim sürdürülebilirliği: yatır-çık devam ediyor (pış-pış'a dönmedi)"
+    ],
+    "gece_beslenme_genel": {
+      "6_ay_ozelinde_kayit46": "Max 2 öğün (00:00 ve 04:00), uykudayken besle. Kilo iyi ise 1 öğüne düş.",
+      "6+_ay_genel_kayit37": "Biyolojik gece beslenme ihtiyacı yok. Ebeveynlik tercihi. 9-12 ayda doktor onayıyla kesilebilir."
+    },
+    "oda_kosullari_kayit37": {
+      "sicaklik_kis": "19-22°C",
+      "sicaklik_yaz": "max 25°C",
+      "nem": "%40-60 (batch_1 kayıt17)",
+      "isik_gunduz": "Loş",
+      "isik_gece": "Zifiri karanlık"
+    },
+    "beslenme_uyku_iliskisi (kayıt36, kayıt37)": "Uykudan minimum 30 dakika, ideal 45 dakika veya 1 saat önce bitmiş olmalı.",
+    "rutinler_kayit37": {
+      "sure": "15-25 dakika",
+      "gunduz_rutin_ornek": "Kitap → ninni → alt değiştirme → tulum → yatağa",
+      "gece_rutin_ek": "Masaj veya duş (gündüzden farklı 1 aktivite)",
+      "son_cumle": "İyi uykular anneciğim (koşullanma için sabit kalmalı)"
+    }
+  },
+  "tutarsizlik_raporu": [
+    {
+      "yas": "6_ay",
+      "parametre": "uyaniklik_penceresi",
+      "kaynak_1": "Görsel yaş tablosu: 2-3 saat",
+      "kaynak_2": "Ses karar ağacı (kayıt47): 2h15-2h30",
+      "fark": "Görsel ~45 dk daha geniş aralık",
+      "karar": "İki kullanım senaryosu: 'genel rutin' için görsel değer; 'eğitim sırasında' için ses kaydı dar değer"
+    },
+    {
+      "yas": "9_ay",
+      "parametre": "uyaniklik_penceresi",
+      "kaynak_1": "Görsel yaş tablosu (9 aylık): 2.5-3.5 saat",
+      "kaynak_2": "Görsel MASTER tablo (9-12 ay): 3-4 saat",
+      "kaynak_3": "Ses karar ağacı (kayıt42): 3h15-3h30",
+      "fark": "Yaş tablosu MASTER ile uyumlu değil (yaş tablosu daha geniş alt sınır). Ses kaydı orta noktada.",
+      "karar": "Eğitimde ses kaydı kullanılır. Anneye genel: 9 ayda 3-3.5 saat hedef."
+    },
+    {
+      "yas": "10_ay",
+      "parametre": "uyaniklik_penceresi",
+      "kaynak_1": "Görsel yaş tablosu: 3-3.5 saat",
+      "kaynak_2": "Ses karar ağacı (kayıt42): 3h30-3h45",
+      "fark": "Görsel alt sınır 3'ten başlıyor, ses kaydı 3h30'dan",
+      "karar": "Eğitim sırası: 3h30-3h45. Genel rutin: 3-3.5 saat."
+    },
+    {
+      "yas": "11_ay",
+      "parametre": "1_uyku_max_süre",
+      "kaynak_1": "Görsel: belirtilmemiş (genel gündüz 2-2.5 saat toplam)",
+      "kaynak_2": "Ses kayıt43: 1 saat KESIN — geçerse 2. nap reddi",
+      "karar": "Karar ağacında 1 saat sınırı kullanılır (gece uyanma riskinden ötürü)"
+    },
+    {
+      "yas": "12_ay",
+      "parametre": "uyku_sayisi",
+      "kaynak_1": "Görsel yaş tablosu: 1-2",
+      "kaynak_2": "Ses kayıt44: 2 önerilir, tek uyku 'teknik mümkün ama önerilmez' (15-18 ay en erken)",
+      "karar": "12 ayda kuralı: 2 nap. Tek uykuya geçiş 15-18 ay arası."
+    },
+    {
+      "yas": "0-2_ay",
+      "parametre": "uyaniklik_penceresi",
+      "kaynak_1": "Görsel yaş tablosu 0-6 hafta: 45-60 Dakika",
+      "kaynak_2": "Görsel yaş tablosu 7-12 hafta: 60-90 Dakika",
+      "kaynak_3": "Görsel MASTER 0-2 ay: 40 Dakika - 1 Saat 20 Dakika",
+      "fark": "MASTER tablo daha geniş alt sınır (40 dk) ve daha dar üst sınır (80 dk)",
+      "karar": "Yaş bazlı tablolar haftalık kırılım veriyor, MASTER genel. Premium plan için hafta/ay bazlı tablo kullanılır."
+    },
+    {
+      "yas": "gunduz_uyku_sayisi_master_tablosu",
+      "parametre": "10-30_aylik satırı",
+      "kaynak": "Görsel gunduz_uyku_sayisi.jpeg",
+      "fark": "Tabloda '12-18 Aylık: 1-2' satırının altında '10-30 Aylık: 1' satırı yer alıyor. Muhtemelen yazım hatası ('19-30 Aylık' olması gerekiyor).",
+      "karar": "Premium plan motorunda bu satır 19-30 Aylık olarak alınır. RAG çıktısında uyarı eklenmelidir."
+    },
+    {
+      "yas": "gunduz_uyku_8_ay_son_uyku_bitirme",
+      "parametre": "son_uyku_bitirme",
+      "kaynak_1": "Görsel 'son_uyku_bitirme': 7-9 Aylık → 16:00",
+      "kaynak_2": "Görsel '08_aylik' yaş tablosu: 16:00",
+      "kaynak_3": "Ses kayıt39: 6-8 ay güne başlama 06:00 katı (8 ayda 6'dan başlamazsa 3. nap olmaz → 16'dan önce bitebilir)",
+      "karar": "Tutarlı (16:00). Sadece güne başlama saati 06 olduğunda 16'da bitmiş oluyor."
+    },
+    {
+      "yas": "gunluk_program_8_ay_v3_duplicate",
+      "kaynak": "03_gunluk_program_basit",
+      "fark": "2plus1_uyku_8ay_v1 ve _v3 görselleri birebir aynı içerik (07:00-09:00-12:30-16:30-20:00)",
+      "karar": "İlayda'ya bilgi: v3 olası mükerrer gönderim. Premium plan kullanırken v1 referans alınır."
+    }
+  ],
+  "premium_plan_engine_decision_logic": {
+    "input_required": [
+      "bebek_yas (ay)",
+      "dogum_haftasi (40 < ise prematüre düzeltme)",
+      "emzik_kullanimi (var/yok, varsa ağzına takabiliyor mu)",
+      "oda_durumu (ayrı/aynı oda)",
+      "beslenme_tipi (anne sütü/mama/karışık)",
+      "destek_tipi (emerek/sallanarak/pat-pat/destek yok)",
+      "ses_desteği (beyaz gürültü/ninni/yok)",
+      "motor_gelisim (tutunup kalkıyor mu, dönüyor mu)",
+      "saglık_problemleri (varsa doktor onayı şart)"
+    ],
+    "output": [
+      "yas_bucket_yorumu (prematüre düzeltilmiş)",
+      "uyaniklik_penceresi (genel + eğitim sırası)",
+      "gunluk_program_basit (saat saat)",
+      "gunluk_program_detayli_with_routine",
+      "5_gunluk_egitim_plani (bekleme süreleri kademeli)",
+      "B_plan_protokolu (1 saat direnç)",
+      "gece_uyanma_protokolu",
+      "kisa_gunduz_uykusu_uzatma_protokolu",
+      "red_flag_uyarilari (kişiye özel)",
+      "ilgili_dersler (RAG için)",
+      "ilgili_gorseller (UI'da gösterilecek)"
+    ]
+  }
+}
