@@ -2,8 +2,6 @@
 import streamlit as st
 from dotenv import load_dotenv
 
-from engine.session_init import init_session_state
-
 load_dotenv()
 
 st.set_page_config(
@@ -12,9 +10,19 @@ st.set_page_config(
     layout="centered",
 )
 
-# Tüm session_state değişkenlerini tek yerde başlat
-# Multipage'de her sayfa bağımsız çalıştığı için pages/ dosyaları da aynı init'i çağırıyor
-init_session_state()
+# Inline session state init (multipage'de her sayfa kendi başına yapıyor)
+if "profile" not in st.session_state:
+    st.session_state.profile = {}
+if "tamamlandi" not in st.session_state:
+    st.session_state.tamamlandi = set()
+if "step" not in st.session_state:
+    st.session_state.step = 0
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "plan" not in st.session_state:
+    st.session_state.plan = None
+if "param" not in st.session_state:
+    st.session_state.param = None
 
 st.title("🐰 Tavşan Uykusu Premium Demo")
 

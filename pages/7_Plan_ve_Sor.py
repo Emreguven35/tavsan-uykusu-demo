@@ -1,8 +1,23 @@
 """Plan + Chatbot sayfası — 37 cevap üzerinden plan üret ve soru-cevap."""
+import streamlit as st
+
+# Streamlit multipage'de her sayfa bağımsız çalışır — inline session state init
+if "profile" not in st.session_state:
+    st.session_state.profile = {}
+if "tamamlandi" not in st.session_state:
+    st.session_state.tamamlandi = set()
+if "step" not in st.session_state:
+    st.session_state.step = 0
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "plan" not in st.session_state:
+    st.session_state.plan = None
+if "param" not in st.session_state:
+    st.session_state.param = None
+
 import sys
 from pathlib import Path
 
-import streamlit as st
 from dotenv import load_dotenv
 
 # engine paketini import edebilmek için
@@ -12,13 +27,9 @@ if str(ROOT) not in sys.path:
 
 load_dotenv()
 
-from engine.session_init import init_session_state  # noqa: E402
 from engine.parameter_engine import parametre_uret  # noqa: E402
 from engine.plan_generator import plan_uret  # noqa: E402
 from engine.chatbot import cevapla, init_index  # noqa: E402
-
-# Streamlit multipage'de her sayfa bağımsız çalışır — her sayfada init zorunlu
-init_session_state()
 
 st.set_page_config(page_title="Plan ve Sor", page_icon="🐰", layout="centered")
 st.title("🐰 Kişisel Uyku Eğitimi Planınız")

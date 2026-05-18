@@ -1,15 +1,19 @@
 """Bölüm 5: Gelişim (Sorular 28-30)."""
-import sys
-from pathlib import Path
-
 import streamlit as st
 
-# Engine import yolu
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from engine.session_init import init_session_state
-
-# Streamlit multipage'de her sayfa bağımsız çalışır — her sayfada init zorunlu
-init_session_state()
+# Streamlit multipage'de her sayfa bağımsız çalışır — inline session state init
+if "profile" not in st.session_state:
+    st.session_state.profile = {}
+if "tamamlandi" not in st.session_state:
+    st.session_state.tamamlandi = set()
+if "step" not in st.session_state:
+    st.session_state.step = 0
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "plan" not in st.session_state:
+    st.session_state.plan = None
+if "param" not in st.session_state:
+    st.session_state.param = None
 
 st.set_page_config(page_title="Gelişim", page_icon="🐰", layout="centered")
 st.title("Bölüm 5: Gelişim ve Mizaç")
