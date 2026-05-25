@@ -1,4 +1,7 @@
-"""Tavşan Uykusu Premium Demo — ana giriş sayfası."""
+"""Tavşan Uykusu Premium Demo — ana giriş sayfası (karşılama + soru-cevap)."""
+import sys
+from pathlib import Path
+
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -24,48 +27,71 @@ if "plan" not in st.session_state:
 if "param" not in st.session_state:
     st.session_state.param = None
 
-st.title("🐰 Tavşan Uykusu Premium Demo")
+# engine paketini import edebilmek için (pages/'deki desen)
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from engine.chatbot import cevapla, init_index  # noqa: E402
+
+st.title("🐰 Tavşan Uykusu")
 
 st.markdown(
-    """
-### İlayda Kani için hazırlanan kişisel uyku eğitimi planı demosu
+    "Bebeğinizin uykusuyla ilgili sorularınızı aşağıdan sorabilir veya "
+    "sol menüden kişiselleştirilmiş uyku planı oluşturabilirsiniz. "
+    "Cevaplar, İlayda Hanım'ın eğitim içeriklerinden üretilir."
+)
 
-Bu sistem, sizin **47 ses eğitim kaydınızdan** ve **29 görsel tablonuzdan** oluşturulan
-karar mekanizmasını kullanarak kişiselleştirilmiş uyku planı üretir.
+st.divider()
 
-**Akış:**
-1. **37 soruluk profil formu** — yaklaşık 5 dakika sürer (6 bölüm)
-2. **Otomatik plan üretimi** — yaş, mizaç, beslenme bilgisine göre
-3. **Soru-cevap (chatbot)** — eğitim sırasında aklınıza takılan her şey
+# ---------------------------------------------------------------------------
+# Soru-Cevap (ana sayfada doğrudan erişim, plandan bağımsız)
+# ---------------------------------------------------------------------------
+st.subheader("💬 Soru-Cevap")
 
-> Sol menüden adımları takip edin. Her bölümü tamamladıktan sonra "İleri ➡️" butonuna basın.
+# Index'i sayfa açılışında initialize et (ilk soruda spinner görünmesin)
+try:
+    init_index()
+except Exception as e:
+    st.warning(f"Soru-cevap motoru yüklenemedi: {e}")
 
----
-"""
+# Mevcut konuşma
+for msg in st.session_state.chat_history:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# Yeni soru
+if soru := st.chat_input("Sorunuzu yazın..."):
+    st.session_state.chat_history.append({"role": "user", "content": soru})
+    with st.chat_message("user"):
+        st.markdown(soru)
+    with st.chat_message("assistant"):
+        with st.spinner("Düşünüyor..."):
+            try:
+                cevap = cevapla(soru)
+            except Exception as e:
+                cevap = f"❌ Cevap üretilemedi: {e}"
+        st.markdown(cevap)
+        st.session_state.chat_history.append({"role": "assistant", "content": cevap})
+
+if st.session_state.chat_history:
+    if st.button("🧹 Sohbeti temizle"):
+        st.session_state.chat_history = []
+        st.rerun()
+
+st.divider()
+
+st.caption(
+    "ℹ️ Kişisel uyku planı için sol menüden **1 Bebek Bilgileri** ile başlayın "
+    "(37 soruluk profil, yaklaşık 5 dakika)."
 )
 
 if st.session_state.profile:
     st.success(f"📋 Şu an kayıtlı **{len(st.session_state.profile)} cevap** var.")
-    if st.button("🔄 Sıfırla ve yeniden başla"):
-        # Plan + chatbot cache'lerini de temizle ki tekrar üretilsin
+    if st.button("🔄 Profili sıfırla ve yeniden başla"):
         st.session_state.profile = {}
         st.session_state.tamamlandi = set()
         st.session_state.plan = None
         st.session_state.param = None
         st.session_state.chat_history = []
         st.rerun()
-
-st.info(
-    "**Başlamak için sol menüden** *1 Bebek Bilgileri* sayfasına gidin."
-)
-
-with st.expander("ℹ️ Bu demonun mimarisi"):
-    st.markdown(
-        """
-- **Parameter Engine** — `master_knowledge_base.json` üzerinden lookup + 89 karar kuralı (deterministik). Sayısal değerler asla değiştirilmez.
-- **Plan Generator** — Claude API ile parametreleri Türkçe plana dönüştürme. LLM sadece "yazar" rolünde.
-- **Chatbot** — TF-IDF + Claude ile RAG soru-cevap (463 chunk, 47 ders).
-
-**Önemli:** Bu demo İlayda Hanım'ın gerçek metodolojisine dayalıdır. Görsel embed yok, kaynak referansı gösterilmiyor (anneye tek tip profesyonel cevap).
-"""
-    )
