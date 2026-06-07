@@ -15,6 +15,7 @@ if "plan" not in st.session_state:
 if "param" not in st.session_state:
     st.session_state.param = None
 
+import os
 import sys
 from pathlib import Path
 
@@ -79,6 +80,28 @@ st.download_button(
     file_name=f"{profile.get('bebek_ad', 'bebek')}_uyku_plani.md",
     mime="text/markdown",
 )
+
+# ---------------------------------------------------------------------------
+# Aşama pozisyon görselleri — assets/positions/ içinde dosya varsa göster.
+# Fotoğraflar henüz eklenmediyse (dosya yoksa) bölüm tamamen gizli kalır.
+# ---------------------------------------------------------------------------
+POZISYON_GORSELLERI = [
+    ("besik_yani.jpg", "Gün 1-3: Beşik/yatak yanında sandalyede veya ayakta bekleyin"),
+    ("oda_ortasi.jpg", "Gün 4-6: Odanın ortasında sandalyede bekleyin"),
+    ("kapi_icerden.jpg", "Gün 7-9: Kapıda, içerden ve bebeğe tam görünür şekilde bekleyin"),
+    ("kapi_esigi.jpg", "Gün 10-12: Kapı eşiğinde (bebeğe tam görünür) bekleyin"),
+]
+_pozisyon_dir = ROOT / "assets" / "positions"
+_mevcut_gorseller = [
+    (fname, caption)
+    for fname, caption in POZISYON_GORSELLERI
+    if os.path.exists(_pozisyon_dir / fname)
+]
+if _mevcut_gorseller:
+    st.divider()
+    st.subheader("📸 Aşama Pozisyonları")
+    for _fname, _caption in _mevcut_gorseller:
+        st.image(str(_pozisyon_dir / _fname), caption=_caption, use_container_width=True)
 
 st.divider()
 

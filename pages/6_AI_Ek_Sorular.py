@@ -28,6 +28,7 @@ with st.form("ek_sorular_form"):
             "5 günlük standart plan (daha hızlı, daha çok ağlama olabilir)",
             "13 günlük kademeli plan (daha yumuşak, daha uzun süreç)",
             "İlayda Hanım'ın önereceği plan (bebeğe göre)",
+            "1 aylık program (ilk 2 hafta destekle uyku — sadece saat ve rutin düzeni)",
         ],
         index=2,
     )

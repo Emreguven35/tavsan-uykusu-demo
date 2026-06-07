@@ -322,7 +322,7 @@
       "3. Oda durumu (anne ile aynı odadaysa görmeyeceği bir alan / paravan / perde)",
       "4. Beslenme tipi (meme vs mama — meme alan bebek daha çok ağlar)",
       "5. Eğitim öncesi destek değiştirme (emerek uyuyan → sallanarak uyutma, en az 3 başarı)",
-      "6. Beyaz gürültü/ses desteği (5. güne kadar kullanılabilir, uykuya geçtiği an kapatılır)",
+      "6. Beyaz gürültü/ses desteği (her uykuda bir kademe kısılarak azaltılır; ihtiyaç varsa kullanılmaya devam edilebilir, ama her uyku bir öncekinden daha kısık olmalı)",
       "7. Motor gelişim (tutunup kalkma → devamlı yatırma yapılmaz, bekleme süreleri artar)",
       "8. Sağlık problemleri (kalp, ritim, epilepsi, astım, nefes) → DOKTOR ONAYI ZORUNLU"
     ],
@@ -330,15 +330,15 @@
     "prematüre_düzeltme (kayıt40)": "Her 4 hafta erkenlik = 1 ay geriden değerlendirme (örn. 36 hf doğum → 6 ayda 5 ay gibi).",
     "kademeli_uzaklasma_5_gun": {
       "day_1_2": "Beşik yanı (sandalye veya ayakta)",
-      "day_3": "Oda ortası (temas YOK, sadece pış-pış)",
-      "day_4": "Kapı eşiği (içerden, ses desteği azaltılır)",
+      "day_3": "Oda ortası (temas ihtiyacını kademeli azaltma; gerekirse temas edip sandalyeye geri dönülür)",
+      "day_4": "Kapı eşiği (içerden, anneye tam görünür, ses desteği azaltılır)",
       "day_5": "Yatır-çık (odadan tamamen çıkış)"
     },
     "kademeli_uzaklasma_13_gun_dirençli": {
       "day_1_3": "Beşik yanı",
       "day_4_6": "Oda ortası",
-      "day_7_9": "Kapı (içerden)",
-      "day_10_12": "Kapı eşiği (yarı görünür)",
+      "day_7_9": "Kapı (içerden, anneye tam görünür)",
+      "day_10_12": "Kapı eşiği (anneye tam görünür — oda müsaitse; 12. güne kadar tam görünürlük)",
       "day_13": "Yatır-çık"
     },
     "bekleme_sureleri": {
@@ -346,7 +346,7 @@
       "egitim_gece_uyanmasi": "Gün 1: 5dk → gece içinde her seferde +5. Gün 2: 5-10dk başla. Asla 5dk altı.",
       "egitim_kisa_gunduz_uykusu": "Gün 1: dış 5dk + iç 40dk. Gün 2: 10+35. Gün 3: 15+30. Toplam 45dk.",
       "yatir_cik_sonrasi": "5 → 10 → 15 → 20 → max 25 dakika. 21 gün hiç dalmazsa max 45dk veya tıbbi yönlendirme.",
-      "B_plan_1_saat_direnç": "1 saat ağlama → 15 dk rutin → 45 dk dene → max 3 tekrar"
+      "B_plan_direnç": "45 dakika direnç → 15 dakika rutin molası → 45 dakika yeniden deneme. Çok dirençli bebekte rutin molası 30 dakikaya çıkarılabilir. Max 3 tekrar. 3 tekrar sonrası da uyumuyorsa: uyku denemesi sonlandırılır, yaşa uygun uyanıklık süresi kadar uyanık tutulur, bir sonraki uykuda eğitime devam edilir."
     },
     "red_flags_kayit36_37_40": [
       "Histerik ağlama (\"ha-ha katılma noktası\") → bekleme uygulanmaz, doğrudan müdahale",
@@ -384,7 +384,8 @@
       "gunduz_rutin_ornek": "Kitap → ninni → alt değiştirme → tulum → yatağa",
       "gece_rutin_ek": "Masaj veya duş (gündüzden farklı 1 aktivite)",
       "son_cumle": "İyi uykular anneciğim (koşullanma için sabit kalmalı)"
-    }
+    },
+    "son_gunduz_uykusu_bitis_esnekligi (İlayda ek not 2026-05-26)": "Son gündüz uykusunun bitiş saati (ör. 16:00) KATI DEĞİLDİR. Öncelik, bebeğin o yaşa ait minimum gündüz uyku süresini (gunduz_uyku_total) ve günlük toplam uyku hedefini (toplam_uyku_24h) doldurmasıdır. Minimum gündüz/toplam uyku dolmadıysa, bitiş saati aşılsa bile İLAVE bir gündüz uykusu yapılır (bebek yeterince uyumadıysa 16:00'da bitirmenin kıymeti yoktur). İlave uykudan sonra yaşa uygun uyanıklık penceresi kadar uyanık kalıp gece uykusuna geçilir; gece uykusu gecikse de minimum gündüz/toplam uyku önceliklidir. Gerekirse o yaşın normal nap sayısının bir fazlasına çıkılır (ör. 8 ay: 3 yerine 4 uyku). Eğitim sonrasında da geçerlidir. Yaş bazlı minimum süreler yalnızca mevcut tablolardan alınır."
   },
   "tutarsizlik_raporu": [
     {
@@ -475,7 +476,7 @@
       "gunluk_program_basit (saat saat)",
       "gunluk_program_detayli_with_routine",
       "5_gunluk_egitim_plani (bekleme süreleri kademeli)",
-      "B_plan_protokolu (1 saat direnç)",
+      "B_plan_protokolu (yoğun direnç)",
       "gece_uyanma_protokolu",
       "kisa_gunduz_uykusu_uzatma_protokolu",
       "red_flag_uyarilari (kişiye özel)",

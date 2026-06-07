@@ -233,15 +233,15 @@
         "note": "Max 20-25 dk, daha fazla artırma yapılmaz. 21 gün hiç dalmazsa 45 dk'ya çıkarılabilir.",
         "source_lesson": "kayıt37"
       },
-      "B_plan_1_saat_direnç": {
-        "step_1_duration_min": 60,
-        "step_1_action": "Bebek 1 saat ağlarsa odadan çıkar (gündüz) veya odada minik rutin yap (gece)",
+      "B_plan_direnç": {
+        "step_1_duration_min": 45,
+        "step_1_action": "45 dakika direnç olursa o uyku denemesine ara ver (gündüz odadan çık, gece odada minik rutin yap)",
         "step_2_duration_min": 15,
-        "step_2_action": "Minik rutin (15 dk)",
+        "step_2_action": "15 dakika rutin molası (çok dirençli bebekte 30 dakikaya çıkarılabilir)",
         "step_3_duration_min": 45,
-        "step_3_action": "Tekrar 45 dk dene",
+        "step_3_action": "45 dakika yeniden dene",
         "max_repetitions": 3,
-        "if_3rd_fails_day": "Bebek arabasıyla dışarıda uyut, gün başarısız",
+        "if_3rd_fails_day": "Uyku denemesi sonlandırılır; bebek yaşına uygun uyanıklık süresi kadar uyanık tutulur, bir sonraki uyku denemesinde eğitime devam edilir. Gün başarısız sayılır.",
         "if_3rd_fails_night": "Destek ver, uyut",
         "frequency_note": "Çok nadiren tetiklenir, ortalama hiç tetiklenmez.",
         "source_lesson": "kayıt37"
@@ -259,7 +259,7 @@
       "5_gun_standart": {
         "day_1": "Yatak/beşik yanı (sandalyeyle veya ayakta)",
         "day_2": "Yatak/beşik yanı (devam)",
-        "day_3": "Oda ortası (sandalye), temas YOK, sadece pış-pış",
+        "day_3": "Oda ortası (sandalye); temas ihtiyacını kademeli azaltma, gerekirse temas edip sandalyeye geri dönülür",
         "day_4": "Kapı eşiği (içerden, ses desteği azaltılır)",
         "day_5": "Yatır-çık (odadan tamamen çıkış)",
         "source_lesson": "kayıt36, kayıt37"
@@ -267,8 +267,8 @@
       "13_gun_dirençli": {
         "day_1_3": "Beşik yanı",
         "day_4_6": "Oda ortası",
-        "day_7_9": "Kapı (içerden)",
-        "day_10_12": "Kapı eşiği (yarı görünür)",
+        "day_7_9": "Kapı (içerden, anneye tam görünür)",
+        "day_10_12": "Kapı eşiği (anneye tam görünür — oda müsaitse; 12. güne kadar tam görünürlük)",
         "day_13": "Yatır-çık",
         "source_lesson": "kayıt36"
       },
@@ -277,7 +277,7 @@
         "day_2": "Yatak yanı",
         "day_3": "Oda ortası (sandalye veya ayakta)",
         "day_4": "Kapı (içerden, gözler kapalı, uyuyor numarası)",
-        "day_5": "Kapı eşiği (yarı görünür)",
+        "day_5": "Kapı eşiği (çocuğa tam görünür)",
         "day_6": "Yatır-çık + anne kendi yatağına git",
         "critical": "6. gün uygulanmazsa eğitim 3 hafta içinde %99 bozulur",
         "source_lesson": "kayıt38"
@@ -319,6 +319,11 @@
       "condition": "Bebek 9-12 ay ve 2 gündüz uykusu toplam 2 saat altında VEYA 16:00 öncesi kalkıyor",
       "action": "İlave bir kestirme uyku ekle.",
       "source_lesson": "kayıt41"
+    },
+    {
+      "condition": "Herhangi bir yaşta, son gündüz uykusunun bitiş saati (ör. 16:00) geldi ama bebek o yaşa ait minimum gündüz uyku süresini (gunduz_uyku_by_age / yas_buckets.gunduz_uyku_total) ya da günlük toplam uykuyu (toplam_uyku_24h) dolduramadı",
+      "action": "Bitiş saatine takılma; bitiş saati aşılsa bile İLAVE bir gündüz uykusu yaptır. Bu uykudan sonra yaşa uygun uyanıklık penceresi kadar uyanık kalıp gece uykusuna geç (gece uykusu gecikse de minimum gündüz/toplam uyku önceliklidir). Gerekirse o yaşın normal nap sayısının bir fazlasına çık (ör. 8 ay: min 3 yerine 4). Eğitim sonrasında da geçerli. Minimum süre değerleri yalnızca mevcut tablolardan alınır; tabloda olmayan yaş için kural üretilmez.",
+      "source_lesson": "ilayda_ek_not_2026-05-26"
     },
     {
       "condition": "Bebek 12-18 ay ve öğlen uykusu 2 saat altında kalıyor",
@@ -366,13 +371,13 @@
       "source_lesson": "kayıt40"
     },
     {
-      "condition": "Eğitim sırasında bebek 1 saat boyunca ağlıyor",
-      "action": "Odadan çıkar (gündüz) veya minik rutin (gece) 15 dk → 45 dk daha dene. Max 3 tekrar.",
+      "condition": "Eğitim sırasında bebek 45 dakika boyunca yoğun direnç gösteriyor",
+      "action": "Uyku denemesine ara ver (gündüz odadan çık, gece minik rutin) → 15 dk rutin molası (çok dirençlide 30 dk) → 45 dk yeniden dene. Max 3 tekrar.",
       "source_lesson": "kayıt37"
     },
     {
-      "condition": "B planı 3 kez tekrarlandı, bebek hala uyumadı (gündüz, max 17:00 öncesi)",
-      "action": "Bebek arabasıyla dışarıda hareketle uyutma. Gün başarısız sayılır.",
+      "condition": "B planı 3 kez tekrarlandı, bebek hala uyumadı (gündüz)",
+      "action": "Uyku denemesi sonlandırılır; bebek yaşına uygun uyanıklık süresi kadar uyanık tutulur ve bir sonraki uyku denemesinde eğitime devam edilir. Gün başarısız sayılır. Hareketle, sallayarak veya gezdirerek uyutma YAPILMAZ.",
       "source_lesson": "kayıt37"
     },
     {
@@ -536,7 +541,7 @@
     "gunduz_uyku_sureleri": "tam (3-12 ay ay bazlı; 12-18 ay; 18+ tek uyku)",
     "bekleme_sureleri": "tam (4 farklı senaryo: kucak, gece uyanma, kısa gündüz, yatır-çık sonrası)",
     "egitim_gun_protokolu": "tam (5 günlük + 13 günlük dirençli + 6 günlük büyük çocuk)",
-    "B_plan_1_saat_direnç": "tam (3 tekrar + bebek arabası fallback)",
+    "B_plan_direnç": "tam (45 dk direnç → 15 dk mola → 45 dk yeniden, max 3 tekrar; sonrasında uyku denemesi sonlandırma)",
     "red_flags": "tam (9 risk göstergesi)",
     "success_criteria": "tam (8 başarı metriği)",
     "kademeli_uzaklasma": "tam (3 farklı kademe planı)",

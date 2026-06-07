@@ -266,8 +266,9 @@ def on_hazirlik_belirle(profile: dict, yas: dict) -> list[dict]:
             "konu": "Beyaz gürültü kullanımı",
             "sure": "Eğitim sırasında",
             "aksiyon": (
-                "Ses desteği eğitimin ilk 5 gününe kadar açık kalabilir AMA bebek "
-                "uykuya geçtiği AN kapatılmalı. 5. günden sonra kademeli kısarak kaldırın."
+                "Beyaz gürültü her uykuda bir kademe kısılarak azaltılır. İhtiyaç varsa "
+                "kullanılmaya devam edilebilir; ancak her uykuda ses bir önceki uykudan daha "
+                "kısık olmalı, bir sonraki uykuda daha da azalmalıdır."
             ),
         })
 
@@ -277,8 +278,26 @@ def on_hazirlik_belirle(profile: dict, yas: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Plan seçimi — 5 günlük standart mı 13 günlük dirençli mi
 # ---------------------------------------------------------------------------
+def _otomatik_yontem_sec(mizac: str, dayanma: str) -> dict:
+    """Mizaç + dayanma sınırına göre 5 mi 13 günlük yöntem mi (1 aylık programın 3-4. haftası için)."""
+    inatci = any(k in mizac for k in ["inatçı", "huysuz", "zor", "kararlı"])
+    hassas = any(k in mizac for k in ["hassas", "duyarlı"])
+    dusuk_dayanma = any(d in dayanma for d in ["10", "15 dakika", "20 dakika", "hiç", "az"])
+    if (inatci and dusuk_dayanma) or hassas:
+        return {
+            "tip": "13_gun_dirençli",
+            "gunler": 13,
+            "aciklama": "13 günlük kademeli yöntem: yatak yanı 1-3 gün, oda ortası 4-6, kapı 7-9, eşik 10-12, yatır-çık 13.",
+        }
+    return {
+        "tip": "5_gun_standart",
+        "gunler": 5,
+        "aciklama": "5 günlük standart yöntem: yatak yanı 1-2, oda ortası 3, kapı eşiği 4, yatır-çık 5.",
+    }
+
+
 def egitim_plani_secimi(profile: dict, yas: dict) -> dict:
-    """5_gun_standart / 13_gun_dirençli / 6_gun_buyuk_cocuk."""
+    """5_gun_standart / 13_gun_dirençli / 6_gun_buyuk_cocuk / 1_ay_program."""
     # Büyük çocuk (24+ ay)
     if yas["duzeltilmis_ay"] >= 24:
         return {
@@ -290,6 +309,24 @@ def egitim_plani_secimi(profile: dict, yas: dict) -> dict:
     tercih = _lowstr(profile.get("yaklasim_tercihi"))
     mizac = _lowstr(profile.get("mizac"))
     dayanma = _lowstr(profile.get("dayanma_siniri"))
+
+    # 1 aylık yumuşak geçiş programı: ilk 2 hafta destekle uyku (sadece düzen), 3-4. hafta eğitim.
+    if "1 ay" in tercih or "aylık program" in tercih:
+        alt = _otomatik_yontem_sec(mizac, dayanma)
+        return {
+            "tip": "1_ay_program",
+            "gunler": 28,
+            "alt_yontem_tip": alt["tip"],
+            "alt_yontem_gunler": alt["gunler"],
+            "alt_yontem_aciklama": alt["aciklama"],
+            "aciklama": (
+                "1 aylık yumuşak geçiş programı. Hafta 1-2 'Düzen Oturtma Dönemi': "
+                "destekle uyku devam eder, yalnızca uyku/beslenme saatleri ve rutinler "
+                "uygulanır (uyku eğitimi tekniği YOK, biyolojik saat oturtulur). "
+                "Hafta 3-4 'Eğitim Dönemi': bebeğe uygun yöntem devreye girer — "
+                f"{alt['aciklama']}"
+            ),
+        }
 
     # Kullanıcı net istek belirttiyse
     if "13" in tercih or "yumuşak" in tercih or "kademeli" in tercih or "uzun" in tercih:
@@ -366,35 +403,39 @@ def bekleme_sureleri_planla(plan_tipi: str) -> dict:
     if plan_tipi == "13_gun_dirençli":
         kademeli_yer = {
             "gun_1_3": "Beşik yanı (sandalye veya ayakta)",
-            "gun_4_6": "Oda ortası (temas YOK, sadece pış-pış)",
-            "gun_7_9": "Kapı (içerden)",
-            "gun_10_12": "Kapı eşiği (yarı görünür)",
+            "gun_4_6": "Oda ortası (temas ihtiyacını kademeli azaltma; gerekirse temas edip sandalyeye geri dönün)",
+            "gun_7_9": "Kapı (içerden, anneye tam görünür)",
+            "gun_10_12": "Kapı eşiği (anneye tam görünür — oda müsaitse)",
             "gun_13": "Yatır-çık",
         }
+        # 13 günlük dirençli planda kısa gündüz uykusunda dışarıda bekleme daha kısa kademelenir.
+        kisa_gunduz = "Dış bekleme kademesi: 1 dakika → 1,5 dakika → 2 dakika (içeri girince o günün pozisyonundan beklemeye devam, toplam ~45 dk hedefi)."
     elif plan_tipi == "6_gun_buyuk_cocuk":
         kademeli_yer = {
             "gun_1_2": "Yatak yanı",
             "gun_3": "Oda ortası (sandalye)",
             "gun_4": "Kapı (içerden, gözler kapalı, uyuyor numarası)",
-            "gun_5": "Kapı eşiği (yarı görünür)",
+            "gun_5": "Kapı eşiği (çocuğa tam görünür)",
             "gun_6": "Yatır-çık + anne kendi yatağına gider",
         }
+        kisa_gunduz = "Gün 1: dış 5 dk + iç 40 dk. Gün 2: 10+35. Gün 3: 15+30. Toplam her seferinde 45 dk."
     else:  # 5_gun_standart
         kademeli_yer = {
             "gun_1_2": "Beşik yanı (sandalye veya ayakta)",
-            "gun_3": "Oda ortası (temas YOK, sadece pış-pış)",
-            "gun_4": "Kapı eşiği (içerden, ses desteği azaltılır)",
+            "gun_3": "Oda ortası (temas ihtiyacını kademeli azaltma; gerekirse temas edip sandalyeye geri dönün)",
+            "gun_4": "Kapı eşiği (içerden, anneye tam görünür, ses desteği azaltılır)",
             "gun_5": "Yatır-çık (odadan tamamen çıkış)",
         }
+        kisa_gunduz = "Gün 1: dış 5 dk + iç 40 dk. Gün 2: 10+35. Gün 3: 15+30. Toplam her seferinde 45 dk."
 
     return {
         "kademeli_uzaklasma": kademeli_yer,
         "kucaktan_almak": "30 saniye → 1 dakika → 1.5 dakika → 2 dakika diye artış",
         "egitim_seans_max": "45 dakika denenme + 15-30 dakika rutin molası + 45 dakika daha (uykuya kadar)",
         "gece_uyanma_dis_bekleme": "1. uyanma 5 dk, sonra her uyanmada +5 dk. Asla 5 dk altına inme.",
-        "kisa_gunduz_uykusu": "Gün 1: dış 5 dk + iç 40 dk. Gün 2: 10+35. Gün 3: 15+30. Toplam her seferinde 45 dk.",
+        "kisa_gunduz_uykusu": kisa_gunduz,
         "yatir_cik_sonrasi": "5 → 10 → 15 → 20 dk. Max 20-25 dk. 21 gün hiç dalmazsa max 45 dk veya tıbbi yönlendirme.",
-        "B_plan_1_saat_direnç": "1 saat ağlama → 15 dk rutin → 45 dk dene → MAX 3 tekrar. 3. tekrar başarısızsa: gündüz bebek arabasıyla dışarıda hareketle uyut.",
+        "B_plan_direnç": "45 dakika direnç olursa → 15 dakika rutin molası → 45 dakika yeniden deneme. Çok dirençli bebeklerde rutin molası 30 dakikaya çıkarılabilir. Maksimum 3 tekrar. 3 tekrar sonrasında da uyumuyorsa: o uyku denemesi sonlandırılır, bebek yaşına uygun uyanıklık süresi kadar uyanık tutulur ve bir sonraki uyku denemesinde eğitime devam edilir.",
     }
 
 
@@ -419,7 +460,9 @@ def parametre_uret(profile: dict) -> dict:
     on_hazirlik = on_hazirlik_belirle(profile, yas)
     plan_secimi = egitim_plani_secimi(profile, yas)
     gece_beslenme = gece_beslenme_planla(profile, yas)
-    bekleme = bekleme_sureleri_planla(plan_secimi["tip"])
+    # 1 aylık programda eğitim (3-4. hafta) alt yöntemin bekleme sürelerini kullanır.
+    bekleme_tip = plan_secimi.get("alt_yontem_tip", plan_secimi["tip"])
+    bekleme = bekleme_sureleri_planla(bekleme_tip)
 
     return {
         "yas": yas,
