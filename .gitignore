@@ -38,3 +38,8 @@ _originals_KVKK_RISK_DO_NOT_PUSH/
 *_backup/
 *_yedek/
 *_original.json
+*.bak_*
+
+# Tek seferlik üretim scriptleri (boşluk kapatma — yeniden üretilebilir, repoya girmez)
+build_bosluk_chunks.py
+patch_bosluk_chunks.py

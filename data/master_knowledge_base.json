@@ -327,6 +327,7 @@
       "8. Sağlık problemleri (kalp, ritim, epilepsi, astım, nefes) → DOKTOR ONAYI ZORUNLU"
     ],
     "yas_alt_siniri (kayıt37)": "Eğitim 5. ayın dolmasıyla verilir; kademeli kavram bu yaşta gelişir.",
+    "yas_giris_ve_ust_sinir (İlayda ek 2026-06-09)": "4. ayın dolmasıyla yalnızca HAZIRLIK/GİRİŞ dönemi başlayabilir (destek değiştirme vb.); asıl eğitim 5. ayın dolmasıyla başlar — min 5 ay kuralı (yas_alt_siniri) DEĞİŞMEZ. Üst sınır ~6 yaş; 2-3 yaş için geç değildir. Asistanın 9-10 ayı işaret etmesi YANLIŞTIR.",
     "prematüre_düzeltme (kayıt40)": "Her 4 hafta erkenlik = 1 ay geriden değerlendirme (örn. 36 hf doğum → 6 ayda 5 ay gibi).",
     "kademeli_uzaklasma_5_gun": {
       "day_1_2": "Beşik yanı (sandalye veya ayakta)",
@@ -369,7 +370,8 @@
     ],
     "gece_beslenme_genel": {
       "6_ay_ozelinde_kayit46": "Max 2 öğün (00:00 ve 04:00), uykudayken besle. Kilo iyi ise 1 öğüne düş.",
-      "6+_ay_genel_kayit37": "Biyolojik gece beslenme ihtiyacı yok. Ebeveynlik tercihi. 9-12 ayda doktor onayıyla kesilebilir."
+      "6+_ay_genel_kayit37": "Biyolojik gece beslenme ihtiyacı yok. Ebeveynlik tercihi. 9-12 ayda doktor onayıyla kesilebilir.",
+      "yas_merdiveni (İlayda ek 2026-06-09)": "Tüm gece beslemeleri bebek UYKUDAYKEN verilir (uyandığında değil). Yaşa göre kademe: 6-7 ay → 2 öğün (00:00 ve 04:00); 8 ay → tek öğün yalnızca 00:00; 9-10 ay → tek öğün yalnızca 02:00; 12 ay ve sonrası → gece beslemesi yok. Mevcut 6_ay değerlerini (max 2 öğün 00:00/04:00) ezmez, ileri yaşlar için kademeyi netleştirir."
     },
     "oda_kosullari_kayit37": {
       "sicaklik_kis": "19-22°C",

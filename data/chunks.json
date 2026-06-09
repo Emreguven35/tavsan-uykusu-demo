@@ -4102,5 +4102,505 @@
     "start_time": 0,
     "end_time": 0,
     "token_count": 223
+  },
+  {
+    "chunk_id": "kural_kundak_birakma_001",
+    "text": "Kundak (kundaklama, kundak bezi, bebeği sarma) ilk dört ay boyunca güvenle kullanılabilir. Dördüncü aydan sonra kundak, ani bebek ölümü sendromu (SIDS) riskini artırabileceği için bırakılmalıdır. Kundağı hemen bırakmak isterseniz bir anda açabilirsiniz; bebeğin alışması için yaklaşık on üç gün sabretmeniz yeterlidir, en geç on üç günde kundaksız uyumaya alışır. Daha az ağlamasını isterseniz kademeli bırakabilirsiniz: ilk üç gün tek kolunu kundaktan çıkarıp öyle uyutursunuz, sonraki üç gün diğer kolunu da çıkarırsınız, sonraki üç günde ise kundağı tamamen kaldırırsınız.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Kundak ne zamana kadar, nasıl bırakılır",
+    "soru_no": "Q77",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 226
+  },
+  {
+    "chunk_id": "kural_uyku_tulumu_battaniye_001",
+    "text": "Uyku tulumu mu battaniye mi sorusunun yanıtı yaşa bağlıdır. Battaniye (yorgan, örtü) ancak iki yaşından sonra güvenlidir; iki yaşına kadar bebeğin üstüne serbest battaniye/yorgan örtmek yerine uyku tulumu (uyku tulumu, sleeping bag) kullanılmalıdır. Yani iki yaşına kadar tulum, iki yaştan sonra battaniye güvenli kabul edilir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Uyku tulumu mu battaniye mi",
+    "soru_no": "Q78",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 125
+  },
+  {
+    "chunk_id": "kural_kendi_odaya_gecis_001",
+    "text": "Bebek ne zaman kendi odasına geçmeli? Bebek, reflü gibi bir sağlık sorunu yoksa beşinci ayını doldurmasıyla kendi odasına (ayrı oda, çocuk odası) geçirilebilir. Reflü, kusma ya da benzeri ekstra sağlık sorunları varsa, bu sorun geçene kadar ya da iki yaşına kadar anne babanın odasında uyumaya devam edebilir. Önemli olan kural şu: bebek aynı odada uyusa bile, uyandığında anne babayı doğrudan göremeyeceği bir alanda (paravan, perde ya da görüş açısı dışında) uyumalıdır. Aynı oda paylaşılabilir, ama bebek uyanınca ebeveyni görmemelidir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Bebek ne zaman kendi odasına geçer",
+    "soru_no": "Q74",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 207
+  },
+  {
+    "chunk_id": "kural_kabus_gece_teroru_001",
+    "text": "Kâbus (rüya, korkulu rüya) ile gece terörü (gece korkusu, night terror) farklı şeylerdir. Gece terörü genellikle uykunun ilk çeyreğinde, gecenin başında görülür; kâbus ise gece yarısından sonra olur. Gece teröründe bebeğin gözleri açık olabilir, çığlık atması çok sık görülür ve sakinleştirmek çok zordur çünkü bilinç kapalıdır; sabah olduğunda çocuk bunu hatırlamaz. Kâbusta ise çocuğu sakinleştirmek kolaydır ve uyandığını sabah hatırlar. En önemli ayırt edici fark budur: gece terörü hatırlanmaz, kâbus hatırlanır. Gece terörü beş ile otuz dakika sürebilir, kâbus ise birkaç dakika sürer. Gece terörü genellikle üç yaşından sonra görülür; örneğin beş aylık bir bebekte gece terörü olmaz.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Kâbus mu gece terörü mü (gece korkusu)",
+    "soru_no": "Q11",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 285
+  },
+  {
+    "chunk_id": "kural_asi_sonrasi_uyku_001",
+    "text": "Aşı sonrasında uyku düzeni temelde değişmez, kurallar aynı kalır. Tek fark aşıya bağlı ateş çıkabilmesidir. Ateş olan günlerde bebeğe, eğitimin ikinci veya üçüncü günündeymiş gibi yaklaşılabilir; ateş geçince kısa sürede yatır-çık uygulamasına geri dönülür. Yani aşı uyku eğitimini bozmaz, sadece ateşli birkaç gün biraz daha esnek davranılır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Aşı sonrası uyku değişir mi",
+    "soru_no": "Q68",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 143
+  },
+  {
+    "chunk_id": "kural_kardes_dogumu_uyku_001",
+    "text": "Kardeş (yeni bebek, ikinci çocuk) doğduğunda büyük bebeğin uykusu odalar ayrıysa genellikle bozulmaz. Odalar ayrı değilse, yani büyük ve küçük bebek aynı odada uyuyorsa ses ve uyaran fazlalığı nedeniyle bozulabilir. Çözüm: ya bebekleri ayrı odalara yaymak, ya aynı odada büyük bebeğin küçüğü göremeyeceği bir alan yaratmak, ya da küçük bebeği başka bir odada uyutmaya devam etmektir. Ayrı odada hiç bozulmaz; aynı odada bozulma ihtimali vardır ama çoğunlukla yönetilebilir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Kardeş doğunca büyük bebeğin uykusu",
+    "soru_no": "Q71",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 202
+  },
+  {
+    "chunk_id": "kural_tasinma_oda_degisikligi_001",
+    "text": "Taşınma, ev değişikliği ya da oda değişikliği sonrasında uyku düzeni bozulursa, kısa bir mini uyku eğitimi ile üç günde toparlanır. İlk gün beşik yanında durulur, ikinci gün kapıda beklenir, üçüncü gün yatır-çık uygulanır. Bu üç günlük kısa tazeleme ile bebek yeni ortamda düzenine geri döner.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Taşınma / oda değişikliği sonrası düzen",
+    "soru_no": "Q72",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 125
+  },
+  {
+    "chunk_id": "kural_banyo_her_aksam_001",
+    "text": "Banyo her akşam şart değildir, özellikle tatilde ve özel durumlarda zorunlu değildir. Banyonun yapılamadığı akşamlarda onun yerine masaj uygulanabilir. Banyo bazı bebeklere iyi gelir ve uykuya hazırlar; bazı bebekleri ise uyarır, daha çok ağlatır ve uykusunu açar. Bunu gözlemlemek gerekir: gece rutininde banyo sonrası bebek cin gibi açılıp uyanık kalmıyorsa banyo rutinde kalabilir; ama banyo bebeği açıyor, uyandırıyorsa akşam banyosu yapılmaz.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Banyo her akşam şart mı",
+    "soru_no": "Q56",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 177
+  },
+  {
+    "chunk_id": "kural_yaz_kis_saati_001",
+    "text": "Yaz/kış saati değişiminde (saat ileri/geri alınması) düzeni korumak için hiçbir şeyi birden değiştirmeye gerek yoktur. Her uyku saatini her gün on beş dakika öne ya da on beş dakika geriye kaydırarak bir saatlik farkı kademeli olarak tamamlayabilirsiniz. Böylece bebek yeni saate sarsılmadan uyum sağlar.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Yaz/kış saati değişiminde düzen",
+    "soru_no": "Q59",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 112
+  },
+  {
+    "chunk_id": "kural_tatil_jetlag_001",
+    "text": "Tatilde, seyahatte ve saat farkı (jet lag, zaman farkı) olan yerlerde uyku, tıpkı bir yetişkinin jet lag'ını yönetmesi gibi yönetilir. Bir-iki saatlik küçük farklarda her gün on beş - otuz dakika yaklaşarak yeni saate geçilir. Daha büyük saat farklarında yeni düzeni kurmak için güne erkenden başlatılır; bu durumda ilk günlerde gece uykusu biraz eksik kalabilir. Fark hangi uykudan çalıyorsa ona göre ayarlanır: gece uykusundan çalıyorsa güne erken başlatılır, gündüz uykusundan çalıyorsa güne biraz geç başlatılır. Tatilde düzeni korumak için park yatak götürmek, gündüz dışarıda uyusa bile gece uykusunu kapalı/sabit bir yerde yaptırmak, bebek arabasında uyuyorsa arabayı sabit tutmak işe yarar.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Tatil / seyahat ve saat farkı (jet lag)",
+    "soru_no": "Q60",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 267
+  },
+  {
+    "chunk_id": "kural_ikiz_uyku_001",
+    "text": "İkiz bebeklerde (ikizler, çoğul gebelik) uyku eğitimi mümkündür. İkizlerin aynı odada ama ayrı yataklarda, anne babadan ise ayrı bir odada uyumasını isteriz. İkizlerin birbirini sesten uyandırmasından çekinmeyiz; çünkü amacımız zaten birbirlerinin sesine alışmalarıdır. Birbirlerinin ağlamasına alıştıkça aynı odada rahatça uyurlar.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — İkiz bebeklerde uyku düzeni ve eğitim",
+    "soru_no": "Q62",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 140
+  },
+  {
+    "chunk_id": "kural_komsu_apartman_aglama_001",
+    "text": "Komşular ağlama sesinden şikayet ediyor; apartmanda ağlamalı uyku eğitimi nasıl yapılır? Apartmanda, komşuların ağlama sesinden şikâyet edebileceği durumlarda ağlamalı uyku eğitimi yönetilebilir. Komşularla samimiyetiniz varsa önceden kısa bir açıklama yapmak en iyisidir: bebeğin sağlığı için, doktor onayıyla bir uyku eğitimi sürecinde olduğunuzu ve birkaç gün ağlama olabileceğini anlatmak komşu ilişkisini ve süreci rahatlatır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Komşu şikâyeti / apartmanda ağlamalı eğitim",
+    "soru_no": "Q93",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 166
+  },
+  {
+    "chunk_id": "kural_besinler_uyku_001",
+    "text": "Hangi besinlerin uykuyu desteklediği konusunda kanıtlanmış kesin bir kural yoktur; 'şu besin kesinlikle uyku getirir' denemez. Yoğurtlu yiyecekler (sade yoğurt, meyveli yoğurt, muzlu yoğurt) hafif bir rahatlama/mayışma hissi verebilir, ama uykuyu desteklediği kanıtlanmış değildir. Uykuyu bozan tarafta ise çikolata gibi kalorisi ve enerjisi yüksek gıdalar vardır; özellikle yüksek miktarda alındığında hareketlilik ve hiperaktivite yaratıp uykuyu zorlaştırabilir. Bu yüzden yatmadan önce yüksek enerjili, şekerli gıdalardan kaçınmak mantıklıdır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Hangi besinler uykuyu destekler/bozar",
+    "soru_no": "Q90",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 226
+  },
+  {
+    "chunk_id": "kural_parmak_emme_001",
+    "text": "Parmak emerek (parmak emme, başparmak emme) uyuma alışkanlığında on sekizinci aya kadar müdahale etmeden beklenir. On sekizinci aydan sonra çocuk hâlâ parmağını emerek uyuyorsa biraz daha zaman tanınır ve doktoruna danışılır. İki yaşına kadar bu duruma esneklik gösterilebilir; ancak iki yaştan sonra parmak emme sürüyorsa parmak engelleyici plastik aparatlar kullanılabilir. Gün içinde parmağını çok emiyorsa azarlamadan, 'yapma etme' demeden ya da acı bir madde sürmeden, dikkatini ve odağını başka şeye yönlendirmek en doğru yaklaşımdır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Parmak emerek uyuma engellenmeli mi",
+    "soru_no": "Q40",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 198
+  },
+  {
+    "chunk_id": "kural_sids_yuzustu_guvenli_uyku_001",
+    "text": "İlk altı ayda bebek güvenlik için sırtüstü yatırılmalıdır; ani bebek ölümü sendromu (SIDS) riskini azaltan en önemli kural budur. Bebek kendi kendine dönmeye (yuvarlanma, sırtüstünden yüzüstüne geçme) başladığında ise artık buna engel olmak mümkün değildir ve her pozisyonda uyuyabilir; kendi başına dönebilen bebeği sürekli geri çevirmeniz gerekmez. Bununla birlikte nefes alıp verme, horlama veya uyku pozisyonuyla ilgili herhangi bir endişeniz varsa mutlaka çocuk doktorunuza (pediatristinize) danışın.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Yüzüstü dönen bebek / güvenli uyku pozisyonu (SIDS)",
+    "soru_no": "Q76",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 199
+  },
+  {
+    "chunk_id": "kural_reflu_gaz_egitim_001",
+    "text": "Reflüsü ya da gazı olan bebekte uyku eğitimi yapılabilir mi? İlayda'nın yöntemine göre reflü ya da gaz, uyku eğitimine prensip olarak engel değildir. Ancak ağlamalı uyku eğitimine başlamadan önce, bebeğinizin reflü tanısı ve eğitime uygunluğu için mutlaka çocuk doktorunuzdan onay alın; doktor değerlendirmesi olmadan başlatılmaz. Doktor onayı alındıktan sonra şu güvenlik detayına dikkat edilir: reflüsü devam eden bebekler ve üstten gaz çıkaran, yani sık geğiren bebekler hâlâ anne babanın odasında, aynı odada uyumalıdır. Bu koşullar sağlandığında reflüsü ya da gazı olan bebek de eğitime uygundur.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Reflü/gazı olan bebekte uyku eğitimi",
+    "soru_no": "Q86",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 238
+  },
+  {
+    "chunk_id": "kural_horlama_apne_001",
+    "text": "Bebeğim horluyor, ağzı açık uyuyor, nefesi duruyor gibi; ne zaman doktora gitmeliyim? Bebekte horlama, horluyor olması, ağzı açık uyuma ya da nefesin durması (uyku apnesi) gibi bir endişe varsa, bu durumlarda mutlaka bir tıbbi kontrol istenir; örneğin geniz eti gibi bir sorun olup olmadığı çocuk doktoru tarafından değerlendirilmelidir. Böyle bir tıbbi durum varken uyku düzeni yine de aynı odada sürdürülebilir, ama önce doktor değerlendirmesi şarttır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Horlama / ağzı açık uyuma / nefes durması endişesi",
+    "soru_no": "Q98",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 181
+  },
+  {
+    "chunk_id": "kural_gece_uyanma_nedenleri_001",
+    "text": "Bebek gece neden bu kadar sık uyanır? Bunun tek bir nedeni yoktur, birkaç neden bir araya gelir. Başlıca nedenler: destekle uyumak (emerek, sallanarak, kucakta uyuma alışkanlığı); gün içinde uyuması gereken toplam uyku süresini doldurmamak; gün içinde uyuması gereken uyku sayısını (nap sayısını) tamamlamamak; güne yanlış/çok erken ya da çok geç saatte başlamak; odanın sıcaklığı, ısısı ve nemi; yatağın konforsuzluğu; uykudan önce parlak ışığa maruz kalmak; beslenmenin uykuya çok yakın bırakılması; uykudan önce çikolata gibi enerji veren gıdalar yemek. Bunların dışında tıbbi nedenler de vardır: magnezyum eksikliği, demir eksikliği, D vitamini eksikliği, uyku apnesi, geniz eti, duygu regülasyon bozukluğu ve duyusal hassasiyetler gece uyanmalarına yol açabilir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Gece neden sık uyanır (toparlayıcı liste)",
+    "soru_no": "Q1",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 307
+  },
+  {
+    "chunk_id": "kural_gece_uyanma_sikligi_normal_001",
+    "text": "Gece uyanmak normaldir; bir bebek gece çok kez bile uyanabilir. Önemli olan uyanma sayısı değil, bebeğin uyandığında kendini tekrar uykuya döndürebilmesidir. Bu yüzden 'şu kadar uyanma normal, bu kadar anormal' diye kesin bir sayı veremeyiz; kendi başına uykuya geri dönebiliyorsa sık uyanma sorun değildir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Gece kaç kez uyanması normal",
+    "soru_no": "Q2",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 118
+  },
+  {
+    "chunk_id": "kural_gece_besleme_merdiveni_001",
+    "text": "Gece beslenmelerini ne zaman ve nasıl keserim? Tüm gece beslemeleri bebek UYKUDAYKEN verilir (uyandığında değil). Yaşa göre kademe (gece beslenmesini azaltma ve kesme): 6-7 ay → 2 öğün (00:00 ve 04:00); 8 ay → tek öğün, yalnızca 00:00; 9-10 ay → tek öğün, yalnızca 02:00; 12 ay ve sonrası → gece beslemesi yok, yani gece beslenmesi tamamen kesilir. Tüm bu öğünler bebek uykudayken verilir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Yaşa göre gece beslenme (uykuda besleme)",
+    "soru_no": "Q4",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 172
+  },
+  {
+    "chunk_id": "kural_mizirdanma_aglama_001",
+    "text": "Bebek gece uyanıp ağlamadan mızırdanıyorsa (mızmızlanma, ses çıkarma, homurdanma) içeri girmeyiz, beklememiz gerekir. Ancak ağlama gerçekten şiddetlenir ve histerik 'katılma' noktasına gelirse müdahale ederiz. Yani sadece mızırdanmada beklenir; histerik, katılmalı ağlamada beklenmez.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Mızırdanıyorsa içeri girmeli miyim",
+    "soru_no": "Q8",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 123
+  },
+  {
+    "chunk_id": "kural_baslama_yasi_001",
+    "text": "Uyku eğitimine en uygun yaş net bir kurala bağlıdır ve dokuz-on ay gibi geç bir yaş DEĞİLDİR. Asıl eğitim beşinci ayın dolmasıyla başlar; bu alt sınır esnetilmez. Dördüncü ayın dolmasıyla yalnızca hazırlık/giriş dönemi başlayabilir (destek değiştirme gibi ön adımlar), ama tam uyku eğitimi beşinci ayın dolmasını bekler. Dördüncü ayda her bebek eğitime uygun olmayabileceği için bu ay sadece giriş kabul edilir. Üst sınır ise yaklaşık altı yaşa kadardır; iki-üç yaş için de geç değildir, bu yaşlarda da uyku eğitimi verilebilir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Uyku eğitimine en uygun yaş",
+    "soru_no": "Q13",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 211
+  },
+  {
+    "chunk_id": "kural_egitimde_kusma_001",
+    "text": "Eğitim sırasında bebek ağlarken kusarsa panik yapmayız. Yatağını sessizce ve hızlıca temizleriz, sanki anormal bir şey olmuş gibi davranmayız, ani ve büyük tepkiler vermeyiz, hiçbir şey olmamış gibi eğitime devam ederiz. Ancak kusma aşırı derecede tekrarlanıyorsa, bebek neredeyse bayılacak kadar çok kusuyorsa ya da tansiyon düşüklüğü gibi bir tablo varsa eğitime ara verilir ve yaklaşık bir hafta sonra yeniden denenir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Eğitim sırasında bebek kusarsa",
+    "soru_no": "Q17",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 166
+  },
+  {
+    "chunk_id": "kural_3_gun_kotulesme_001",
+    "text": "Eğitimin üçüncü gününde durumun daha kötüye gitmesi normaldir (extinction burst, direnç artışı). Genellikle temas üçüncü ya da dördüncü günde kesilir ve bu günlerde her gün bir öncekinden kötü gidiyormuş gibi görünebilir; sonra bir anda iyileşir. Yani geçici kötüleşme sürecin doğal bir parçasıdır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — 3. gün daha kötü oldu, normal mi",
+    "soru_no": "Q18",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 116
+  },
+  {
+    "chunk_id": "kural_yarida_birakma_001",
+    "text": "Eğitimi yarıda bırakırsanız ne olacağı, araya ne kadar zaman girdiğine bağlıdır. Yarıda bırakıp uzun bir süre ara verdiyseniz baştan başlamak gerekir. Ama yarıda bırakıp birkaç gün içinde hemen tekrar devam ediyorsanız, baştan başlamaya gerek yoktur; kaldığınız yerden devam etmek çok daha uygundur.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Eğitimi yarıda bırakırsak baştan mı",
+    "soru_no": "Q19",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 121
+  },
+  {
+    "chunk_id": "kural_aile_direnci_001",
+    "text": "Eş, kayınvalide ya da aile eğitime karşı çıkıp dayanamayarak bebeği kucağa alıyorsa, burada tutarlılık çok önemlidir. Aile araya girip bebeği kucağa aldığında ya da desteğe döndüğünde, bir sonraki uyku daha zor geçer ve süreç uzar. Bu yüzden tüm bakım verenlerin aynı tutumda kalması, kucağa alma yasağına uyması gerekir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Aile karşı çıkıyor, kucağa alıyor",
+    "soru_no": "Q22",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 133
+  },
+  {
+    "chunk_id": "kural_gunduz_gece_ayni_anda_001",
+    "text": "Gündüz uykuları ve gece uykusu eğitimi aynı anda öğretilir, aynı anda başlatılır. Gündüzü ayrı, geceyi ayrı zamana bırakmayız; ikisine birlikte başlanır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Gündüz ve gece eğitimi aynı anda mı",
+    "soru_no": "Q24",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 68
+  },
+  {
+    "chunk_id": "kural_kendine_zarar_sac_bas_001",
+    "text": "Bebek eğitim sırasında başını yatağa vuruyorsa, vurduğu yere yumuşak bir örtü konabilir; örtünün yatağın içine düşmemesine ve güvenli olmasına dikkat edilir. Saçını çekiyorsa, sadece dikkat çekici sesler çıkarırız: alkış yapmak, beyaz gürültü açmak ya da bir oyuncak/kırmızı balık sesi açmak gibi. Bu davranışlara çok büyük tepki verirsek bebek inadına daha çok yapar; bu yüzden tepkiyi küçük tutup dikkatini dağıtmak en doğrusudur.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Saçını çekiyor / başını vuruyor",
+    "soru_no": "Q25",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 177
+  },
+  {
+    "chunk_id": "kural_kademeli_hizli_yontem_001",
+    "text": "Uyku eğitiminde kademeli uzaklaşma yöntemi tavsiye edilir. Bebekten her gün biraz daha uzaklaşılarak ilerlenen bu kademeli yöntem, ani/hızlı bırakma yöntemlerine göre daha yumuşak ve önerilen yaklaşımdır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Kademeli mi hızlı yöntem mi",
+    "soru_no": "Q26",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 81
+  },
+  {
+    "chunk_id": "kural_destekle_uyuma_birakma_001",
+    "text": "Bebeğin sadece üzerinizde uyuyup yatağa koyunca uyanması (transfer sorunu) ya da sadece elinizi tutarak uyuması bir destek alışkanlığıdır ve eğitimle bırakılır. Eğitimde bebeği üstünüzde uyutup sonra yere/yatağa yatırma yapılmaz. Elini tutmadan uyumuyorsa şu teknik kullanılır: bebeğin elini sizin avcunuzun içine alır, kendi elinizi yumruk yaparak onun tutmasına izin vermeden tutarsınız. Bunu birinci gün sık sık yaparsınız, ikinci gün daha az yaparsınız, üçüncü gün ise hiç yapmadan ilerlersiniz. Böylece destek kademeli olarak kaldırılır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Üzerimde/elimi tutarak uyuyor (transfer ve destek)",
+    "soru_no": "Q32",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 213
+  },
+  {
+    "chunk_id": "kural_uyku_arkadasi_guvenlik_001",
+    "text": "Uyku arkadaşı (uyku arkadaşı, sevgi nesnesi, oyuncak, küçük örtü) ilk beş ayda kullanılmasını istemeyiz; beşinci aydan sonra ise güvenlidir. Verilecek uyku arkadaşının tüylü olmaması, gözlerinin boncuk/çıkabilir parça içermemesi, bebeğin yutabileceği ya da koparabileceği parçalar taşımaması gerekir. Boyutu en fazla bir avuç içi ya da bir el kadar olmalıdır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Uyku arkadaşı güvenli mi, hangi yaştan itibaren",
+    "soru_no": "Q37",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 145
+  },
+  {
+    "chunk_id": "kural_yatakta_oynama_001",
+    "text": "Bebek yatakta uyumak yerine oynuyor, dönüyor ya da emekliyorsa ve bu durum bir-iki saat hatta daha uzun sürse bile, uykuyu geçirmiyorsa aslında dinleniyordur. Bu durumda müdahale etmeyiz. Bebek yatağında sessizce, kendi kendine maksimum üç saate kadar oyalanıp dinlenebilir; bu sorun değildir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Yatakta oynuyor, uyumuyor",
+    "soru_no": "Q38",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 115
+  },
+  {
+    "chunk_id": "kural_evde_uyumuyor_kreste_001",
+    "text": "Bebek evde uyumayıp kreşte ya da başkasının yanında uyuyorsa, bunun nedeni genellikle anneyi çok fazla benimsemesidir; anne yanındayken destek bekler. Böyle durumlarda baba ya da bakıcı uyutmada destek olabilir, ama asıl çözüm tutarlılıktır. Çünkü çocuk uykuyu kişiye göre öğrenir; tutarlı davranıldığında annenin yanında da kendi başına uyumayı öğrenir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Evde uyumuyor, kreşte/başkasında uyuyor",
+    "soru_no": "Q45",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 139
+  },
+  {
+    "chunk_id": "kural_gunduz_fazla_az_uyku_001",
+    "text": "Gündüz uykusu gece uykusunu doğrudan etkiler. Bebek gün içinde uyuması gereken süreyi aşacak kadar çok uyursa gece kalkar; uyuması gereken süreyi dolduramayacak kadar az uyursa yine gece kalkar. Yani gündüz uykusu ne çok fazla ne çok az olmalı, yaşına uygun ölçüde tutulmalıdır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Gündüz çok/az uyursa gece uyanır mı",
+    "soru_no": "Q47",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 108
+  },
+  {
+    "chunk_id": "kural_asiri_yorgunluk_belirtileri_001",
+    "text": "Aşırı yorgunluk (overtired), bebeğin uyanıklık penceresini/süresini aşması sonucu ortaya çıkar. Uyanıklık süresi aşılınca kortizol hormonu salgılanır ve bu yüzden bebek uyumaz. Aşırı yorgun bebekte belirtiler şunlardır: gözlerin aşırı açılması, cin gibi kesilme, çok hareketlilik ve uyarılma, enerjisini atmak için koşturma, sanki çok dinlenmiş gibi davranma. Bazı bebeklerde ise tam tersine yoğun huysuzluk ve sürekli ağlama görülür. Çözüm, uyanıklık penceresini aşmadan, yorgunluk sinyallerini kaçırmadan uykuya geçirmektir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Aşırı yorgunluk (overtired) belirtileri",
+    "soru_no": "Q50",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 213
+  },
+  {
+    "chunk_id": "kural_krese_baslama_duzen_001",
+    "text": "Kreşe başlayınca uyku düzeni nasıl korunur? Kreşe başlamak gece düzenini bozmaz; düzen, evde tutarlılık korundukça korunur. Kreşte öğretmenler bebeğe destekli uyutsa bile gece uykusu bozulmaz, yalnızca gündüz uykusu kreşte farklı olabilir. Anne hafta içi ve hafta sonu evde bildiği gibi tutarlı devam ettiğinde bebek kaldığı yerden sürdürür; çünkü çocuk uykuyu kişiye göre öğrenir, kreşteki öğretmenle ve evde anneyle ayrı ayrı nasıl uyuyacağını öğrenir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Kreşe başlayınca düzen korunur mu",
+    "soru_no": "Q52",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 193
+  },
+  {
+    "chunk_id": "kural_hafta_sonu_bozulma_001",
+    "text": "Hafta sonu (ya da herhangi bir nedenle) düzen bozulursa eğitimi kısaca baştan vererek toparlayabiliriz. Ancak düzeni çok sık bozmak bir süre sonra eğitimin toparlanmasını zorlaştırır; bu yüzden ara sıra bozulma yönetilebilir ama sürekli bozmaktan kaçınmak gerekir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Hafta sonu düzen bozulursa",
+    "soru_no": "Q58",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 105
+  },
+  {
+    "chunk_id": "kural_bayram_misafir_001",
+    "text": "Bayram, misafir ya da yoğun sosyal dönemlerde bile bebeğin uyku saatleri geldiğinde, ortamı dinlemeden bebeği yatırmak gerekir. Dışarıdaysanız bebek arabasını sabit tutarak, başka birinin evindeyseniz ya da kendi evinizde park yatakta, saati geldiğinde uyku uygulanır. Yani bayram yoğunluğu uyku saatini ertelemenin gerekçesi olmamalıdır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Bayram/misafir yoğunluğunda düzen",
+    "soru_no": "Q61",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 131
+  },
+  {
+    "chunk_id": "kural_regresyon_donemleri_001",
+    "text": "4 ay, 8-10 ay, 12 ay ve 18 ay uyku gerilemeleri (regresyon dönemleri) gerçek midir, ne kadar sürer? Dördüncü ay (4 ay) uyku gerilemesi gelişimsel bir dirençtir ve gerçektir. Kendi kendine geçer; ama bebeğe desteksiz uykuyu öğrettiğimizde kalıcı bir geçiş sağlanır. Çocuk hâlâ destekle uyuyorsa bu gerileme dönemi (8-10 ay ayrılık kaygısı dönemi dahil) uzayabilir. Sekizinci-onuncu aydaki (8-10 ay) gerileme ile on iki ve on sekizinci aydaki (12 ay ve 18 ay) gerilemeler de aynı mantıktadır ve gelişimseldir. Bu dönemler, biz düzeni bozmazsak genellikle on üç gün içinde kendiliğinden düzelir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — 4 ay / 8-10 ay / 12-18 ay uyku gerilemeleri",
+    "soru_no": "Q63",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 249
+  },
+  {
+    "chunk_id": "kural_buyume_atagi_001",
+    "text": "Büyüme atağı (growth spurt) döneminde bebek gece sık uyanıp beslenmek isteyebilir. Büyüme atağı, gelişimsel gerileme dönemleriyle aynıdır; arada fark yoktur ve dönem geçtikten sonra düzelir. Bu dönemde bebek ağlasa dahi tutarlılığı korumak, mevcut düzenden şaşmamak gerekir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Büyüme atağında gece beslenme",
+    "soru_no": "Q70",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 118
+  },
+  {
+    "chunk_id": "kural_cosleeping_guvenlik_birakma_001",
+    "text": "Aynı yatakta uyumak (co-sleeping, birlikte yatma) aslında risk oluşturur; özellikle dört aydan küçük bebeklerde, prematüre ya da düşük kiloyla doğan bebeklerde risk yüksektir. Bazı araştırmalar sigara ve alkol kullanan annelerde bu riskin daha da arttığını gösterir. Bırakma iki şekilde olur: bir gecede ayırmak da bir yöntemdir, ya da kademeli ayırmak. Evde iki yatak varsa önce gündüz uykuları bebeğin kendi yatağında/kendi alanında yaptırılır, sonra gece uykusuna geçilir. Bebek uyandığında önce uzaktan sesle, sonra dokunarak, sonra yatağında sakinleştirerek destek olunur ve bu destekler giderek azaltılır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Co-sleeping güvenli mi, nasıl bırakılır",
+    "soru_no": "Q75",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 235
+  },
+  {
+    "chunk_id": "kural_besik_guvenligi_001",
+    "text": "Bebek yatakta oturup ayağa kalksa bile beşik güvenli olmaya devam eder; ancak beşiğin güvenli olması gerekir. Bebek kesinlikle beşikten düşmemeli ve içinden çıkamamalıdır; bunun için beşik yüksekliği ve kenarları uygun, çıkmasını engelleyecek şekilde güvenli olmalıdır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Yatakta kalkıyor, beşik güvenli mi",
+    "soru_no": "Q81",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 110
+  },
+  {
+    "chunk_id": "kural_ek_gida_uyku_001",
+    "text": "Ek gıdaya (katı gıda, mama) geçmek uykuyu düzeltmez; aksine düzeni bir süre daha da zorlaştırabilir. Yani 'ek gıdaya başlayınca bebek daha iyi uyur' beklentisi doğru değildir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Ek gıdaya geçince uyku düzelir mi",
+    "soru_no": "Q83",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 73
+  },
+  {
+    "chunk_id": "kural_dream_feed_001",
+    "text": "Yatmadan önceki beslenmenin (akşam öğünü, dream feed) uykudan en az bir saat önce bitmiş olması gerekir. Beslenmeyi uykuya çok yakın bırakmak gece uyanmalarını artırabilir; bu yüzden son öğün uykudan bir saat önce tamamlanmalıdır.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Yatmadan doyurma / dream feed",
+    "soru_no": "Q84",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 92
+  },
+  {
+    "chunk_id": "kural_anne_sutu_uyanma_001",
+    "text": "Anne sütü alan bebeğin biberon/mama alan bebeğe göre daha sık uyandığı doğru değildir; böyle bir kural yoktur. Beslenme tipi tek başına gece daha sık uyanmaya yol açmaz.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Anne sütü bebeği daha mı sık uyandırır",
+    "soru_no": "Q87",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 63
+  },
+  {
+    "chunk_id": "kural_aglamaya_dayanma_001",
+    "text": "Ben dayanamıyorum, bebeğimin ağlamasını duyunca kalbim parçalanıyor, ne yapmalıyım? Bebeğin ağlamasına dayanamamak çok doğal bir histir, ama bir miktar ağlamaya dayanmak sürecin parçasıdır ve geçicidir. Bebekler yalnızca uyku eğitiminde değil; oto koltuğunda, kreşe ya da okula bırakılırken de ağlar. Bir miktar ağlamaya sabırla dayanmak, kısa sürede geçtiğini görmek motivasyonu korur.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Ağlamasına dayanamıyorum",
+    "soru_no": "Q92",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 160
+  },
+  {
+    "chunk_id": "kural_calisan_anne_001",
+    "text": "Çalışan bir anne olarak akşam vaktinizin tamamının ağlamayla geçeceğinden korkmanıza gerek yok; süreç ağlamayla geçmez. Biraz sabretmek gerekir, çünkü düzen ortalama on üç gün içinde oturur. Bu kısa dönemden sonra akşamlarınız ağlamasız, keyifli vakte döner.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Çalışan anne, vaktimiz ağlamayla mı geçecek",
+    "soru_no": "Q95",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 102
+  },
+  {
+    "chunk_id": "kural_coklu_bakici_tutarlilik_001",
+    "text": "Bebek gündüz bakıcıda ya da anneannede kalıyor ve herkes farklı uyutuyorsa, panik yapmaya gerek yok; çünkü çocuk uykuyu kişiye göre öğrenir. Bizim için asıl ölçüt gece uykusudur: bir eğitimin bozulduğunu söylemek için gece uykusunun bozulmuş olması gerekir. Anneanne ya da bakıcı bebeği destekli uyutsa bile, anne eve gelip yatır-çık ile tutarlı ilerlediği sürece eğitim bozulmadan devam eder.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Bakıcı/anneanne farklı uyutuyor",
+    "soru_no": "Q96",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 160
+  },
+  {
+    "chunk_id": "kural_egitilemez_mi_001",
+    "text": "Bir bebeğin 'eğitilemez' denmesi ancak şu durumda söz konusudur: bebek on üç gün boyunca her uykuda kırk beş dakika ve üzeri ağlıyorsa ve uykuyu pış-pış, pat-pat gibi desteklerle bile kabul etmiyorsa, o bebek henüz eğitim için uygun değildir. Bu durumda iki-üç ay sonra yeniden denenmesi gerekir. Yani başarısızlık çoğunlukla 'eğitilemezlik' değil, zamanlama meselesidir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Eğitim başarısız oldu, eğitilemez mi",
+    "soru_no": "Q97",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 155
+  },
+  {
+    "chunk_id": "kural_split_night_001",
+    "text": "Bebeğim gece uyanıp saatlerce uyumuyor, ne yapmalıyım? Gece uyanıp saatlerce uyanık kalma (split night, gece ortasında uzun uyanıklık) durumunda en büyük etken güne çok geç başlamaktır. Güne geç başlatıldığında bebeğin uyku ihtiyacı geceye kayar ve gece saatlerce uyanık kalır; bu durumda bebeğin o uyanıklığı uyumasına izin verilip fark tamamlanır. Asıl çözüm güne başlama saatini düzeltmek, sabah kalkışı öne çekmektir.",
+    "lesson_id": "bosluk_2026_06_09",
+    "lesson_title": "Güncel Kural — Gece saatlerce uyanık kalma (split night)",
+    "soru_no": "Q5",
+    "start_time": 0,
+    "end_time": 0,
+    "token_count": 168
   }
 ]
