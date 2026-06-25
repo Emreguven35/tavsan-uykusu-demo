@@ -10,7 +10,7 @@
 
 ✅ **Tamamlanmış Streamlit web demosu** — 37 soruluk profil + plan üretimi + RAG chatbot
 ✅ **Deterministik karar motoru** — 89 kuralı uygulayan, sayıları LLM'e bırakmayan parameter engine
-✅ **Claude API entegrasyonu** — plan yazımı + chatbot cevapları (claude-opus-4-7)
+✅ **Claude API entegrasyonu** — plan yazımı + chatbot cevapları (claude-sonnet-4-6)
 ✅ **TF-IDF tabanlı RAG** — 463 chunk üzerinde (pgvector gerektirmiyor, Streamlit Cloud uyumlu)
 ✅ **5 test senaryosu çalıştırılmış** — sonuçlar `tests/test_results.json`'da
 ✅ **Git repo init edilmiş** — push'a hazır

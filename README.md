@@ -66,7 +66,7 @@ tavsan_demo/
 
 1. Anne 37 soruyu cevaplar.
 2. `parametre_uret()` → yaş hesabı (prematüre düzeltme dahil), yaş bucket seçimi, red flag tarama, ön hazırlık tespiti, plan tipi seçimi (5 / 13 / 6 gün), gece beslenme planı, bekleme süreleri.
-3. `plan_uret()` → parametreleri Claude'a (claude-opus-4-7) verir. Claude SADECE yazar — sayıları asla değiştirmez.
+3. `plan_uret()` → parametreleri Claude'a (claude-sonnet-4-6) verir. Claude SADECE yazar — sayıları asla değiştirmez.
 4. Chatbot, anne sorduğunda 463 chunk arasında TF-IDF ile en alakalı 5'i bulur, Claude'a verir. Yine sayısal değer üretmez, sadece yeniden ifade eder.
 
 ## Önemli Tasarım Kararları

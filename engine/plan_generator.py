@@ -14,7 +14,7 @@ try:
 except ImportError:
     HAS_ANTHROPIC = False
 
-MODEL_NAME = "claude-opus-4-7"
+from engine.config import MODEL_NAME  # merkezi model adı — tek satırdan değişir
 # 16384: 1 aylık program (4 haftalık + 13 eğitim günü × gün-altı B-Planı protokolleri)
 # 4096 ve 8192'de yarıda kesiliyordu; bu sınır en uzun planın bile tamamlanmasını sağlar.
 MAX_TOKENS = 16384
@@ -145,6 +145,30 @@ Markdown ile yaz, hiçbir görsel referans yok, hiçbir ders adı geçmesin.
 """
 
 
+# Prompt caching ayracı: user promptu PROFIL'den önce ikiye bölünür.
+# Öncesi (İlayda kuralları + üslup + KESIN KURALLAR) HER planda birebir aynıdır → cache'lenir.
+# Sonrası (bu bebeğe özel PROFIL/parametreler) değişkendir → cache'lenMEZ.
+_CACHE_SPLIT_MARKER = "\n\nPROFIL:\n"
+
+
+def _build_cached_content(param: dict) -> list[dict]:
+    """User mesajını iki content bloğuna böler:
+      1) Sabit kurallar ön-eki — cache_control: ephemeral (her planda aynı, cache'lenir).
+      2) Bu bebeğe özel değişken kısım — cache'lenmez.
+    İki bloğun metin birleşimi _build_user_prompt(param) ile BİREBİR aynıdır;
+    model girdisi DEĞİŞMEZ, yalnızca faturalama (input token maliyeti) düşer.
+    """
+    full = _build_user_prompt(param)
+    idx = full.index(_CACHE_SPLIT_MARKER)
+    static_prefix = full[:idx] + "\n\n"   # İlayda kuralları + ayraç (sabit ön-ek)
+    variable_part = full[idx + 2:]        # "PROFIL:" ve sonrası (değişken)
+    return [
+        {"type": "text", "text": static_prefix,
+         "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": variable_part},
+    ]
+
+
 def plan_uret(param: dict) -> str:
     """
     Claude API ile plan üret. API key yoksa fallback olarak deterministik markdown çıktı verir.
@@ -159,7 +183,7 @@ def plan_uret(param: dict) -> str:
         model=MODEL_NAME,
         max_tokens=MAX_TOKENS,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": _build_user_prompt(param)}],
+        messages=[{"role": "user", "content": _build_cached_content(param)}],
     )
     return response.content[0].text
 

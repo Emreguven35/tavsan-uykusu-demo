@@ -19,7 +19,7 @@ try:
 except ImportError:
     HAS_ANTHROPIC = False
 
-MODEL_NAME = "claude-opus-4-7"
+from engine.config import MODEL_NAME  # merkezi model adı — tek satırdan değişir
 MAX_TOKENS = 1024
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -144,7 +144,13 @@ CEVAP:"""
     response = client.messages.create(
         model=MODEL_NAME,
         max_tokens=MAX_TOKENS,
-        system=SYSTEM_PROMPT,
+        # Sabit system prompt'a cache_control ekli. NOT: Sistem prompt'u ~80 token,
+        # Sonnet 4.6 minimum cache eşiği 2048 token → bu blok şu an cache TETİKLEMEZ
+        # (no-op, hata vermez). Asıl değişken maliyet RAG context'i olup soruya göre
+        # değiştiğinden cache'lenemez. Marker yapısal doğruluk + ileride system büyürse
+        # otomatik devreye girsin diye burada. Çıktı birebir aynı kalır.
+        system=[{"type": "text", "text": SYSTEM_PROMPT,
+                 "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": user_prompt}],
     )
 
