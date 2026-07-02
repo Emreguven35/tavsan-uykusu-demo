@@ -3,3 +3,10 @@ anthropic>=0.40.0
 python-dotenv>=1.0.0
 scikit-learn>=1.4.0
 numpy>=1.26.0
+# Semantik retrieval (embedding-tabanlı). torch CPU-only sürümü Streamlit Cloud
+# RAM'ine daha uygun; CPU wheel'i için aşağıdaki --extra-index-url kullanılır.
+# Model/torch yüklenemezse chatbot otomatik TF-IDF fallback'e düşer (yukarıdaki
+# scikit-learn + numpy yeterli).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.0,<3
+sentence-transformers>=2.2,<4
