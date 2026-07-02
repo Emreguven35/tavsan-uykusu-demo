@@ -2,7 +2,7 @@
 Semantik (hibrit) retrieval doğrulama — eşanlamlı/dolaylı soru seti.
 
 TF-IDF'in kaçırdığı ama semantik'in yakalaması gereken soruları chatbot'a sorar
-ve hiçbirinin "danışmanınıza sorun" güvenli düşüşüne gitmediğini doğrular.
+ve hiçbirinin güvenli düşüşe (yetersiz bilgi) gitmediğini doğrular.
 
 Çalıştırma:
     python test_semantik_retrieval.py          # retrieval + (key varsa) canlı cevap
@@ -25,11 +25,11 @@ from engine import chatbot  # noqa: E402
 
 HAS_KEY = bool(os.getenv("ANTHROPIC_API_KEY"))
 
-# "Cevap gelmedi" (güvenli düşüş) işaretleri.
-# DİKKAT: "danışmanlık sürecinde sorabilirsiniz" kapanışı bilgi-dolu cevaplarda da
-# kibar bir kapanış olarak geçebilir → tek başına no-info sayılmaz. Gerçek güvenli
-# düşüş KISA ve disclaimer-baskın olur.
-NO_INFO_MARKERS = ["bilgim yok", "net bir bilgi bulamadım", "farklı şekilde ifade"]
+# "Cevap gelmedi" (güvenli düşüş) işaretleri. Yeni düşüş metni: "Bu konuda elimde
+# yeterli bilgi yok. Sorunuzu biraz farklı ifade ederek tekrar sorabilirsiniz."
+# (Danışmanlık yönlendirmesi kaldırıldı.) Gerçek güvenli düşüş KISA olur.
+NO_INFO_MARKERS = ["bilgim yok", "yeterli bilgi yok", "net bir bilgi bulamadım",
+                   "farklı ifade", "farklı şekilde ifade"]
 
 # (kategori, soru)
 SORULAR = [
@@ -63,7 +63,7 @@ SORULAR = [
 
 def is_no_info(ans: str) -> bool:
     """Gerçek güvenli düşüş: kısa (<260 karakter) ve bir no-info işareti içeren cevap.
-    Uzun, bilgi-dolu cevapların sonundaki kibar 'danışmanlık' kapanışı no-info DEĞİLDİR."""
+    Uzun, bilgi-dolu cevaplar (kısa düşüş işareti içermeyen) no-info DEĞİLDİR."""
     low = ans.lower()
     has_marker = any(k in low for k in NO_INFO_MARKERS)
     return has_marker and len(ans.strip()) < 260
