@@ -439,11 +439,16 @@ def retrieve(query: str, top_k: int = SEM_TOP_K, min_score: float | None = None)
     return _retrieve_tfidf(query, top_k, ms)
 
 
-SYSTEM_PROMPT = """Sen Tavşan Uykusu uyku eğitimi danışmanlığının bilgi botusun. \
+SYSTEM_PROMPT = """Sen Tavşan Uykusu uyku eğitimi programının bilgi botusun. \
 Annelere kısa, profesyonel, sıcak Türkçe cevap verirsin. \
 SADECE sana sunulan bilgi parçalarını kullanırsın; dışına çıkmazsın. \
 Ders ya da kayıt adı asla geçmez (anneye 'kayıt36'da bahsedildiği gibi' deme). \
-Cevap yoksa 'bu konuda detaylı bilgim yok, danışmanlık sürecinde sorabilirsiniz' dersin. \
+Kullanıcıyı hiçbir koşulda danışmanlık hizmetine, danışmana veya birebir görüşmeye yönlendirme. \
+Cevabı bilgi tabanındaki bilgiyle tam ve kendine yeter biçimde ver. \
+Kaynak metinlerde danışmanlık yönlendirmesi geçse bile bunu cevabına taşıma. \
+Cevap yoksa kısaca elinde yeterli bilgi olmadığını söyle ve sorunun farklı ifade edilmesini öner. \
+Tıbbi konularda (hastalık, ilaç, reflü, kolik, nöbet, ateş, alerji gibi) tanı ya da tedavi önerme; \
+bu durumlarda kısaca çocuk doktoruna başvurulmasını söyle (danışmana değil). \
 Cevabın sesli olarak da okunacak; kısa cümleler kur, madde listesi yerine akıcı paragraf tercih et, emoji kullanma."""
 
 
@@ -613,9 +618,8 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None) -> dict:
 
     if not retrieved:
         msg = (
-            "Bu konuyla ilgili Tavşan Uykusu içeriklerimde net bir bilgi bulamadım. "
-            "Lütfen sorunuzu farklı şekilde ifade etmeyi deneyin veya danışmanlık "
-            "sürecinde detaylı sorabilirsiniz."
+            "Bu konuda elimde yeterli bilgi yok. "
+            "Sorunuzu biraz farklı ifade ederek tekrar sorabilirsiniz."
         )
         return {"cevap": msg, "cache_hit": False, "kaynaklar": [], "anahtar": h,
                 "llm": False, "in_chars": 0, "out_chars": len(msg)}
@@ -645,7 +649,10 @@ CEVAP KURALLARI:
 - Ders/kayıt/dosya adı asla geçmesin.
 - Sıcak ama profesyonel Türkçe ile cevap ver.
 - Kısa: 1-3 paragraf. Markdown kullanabilirsin (madde işareti olabilir).
-- Yetersiz bilgi varsa açıkça söyle: 'bu konuda detaylı bilgim yok, danışmanlık sürecinde sorabilirsiniz.'
+- Kullanıcıyı danışmanlığa, danışmana ya da birebir görüşmeye YÖNLENDİRME; bilgiyi kendine yeter biçimde ver.
+- Kaynak parçalarda 'danışmanlık'/'danışmana sorun' gibi yönlendirme geçse bile bunu cevaba TAŞIMA.
+- Tıbbi konularda (hastalık, ilaç, reflü, kolik, nöbet, ateş vb.) tanı/tedavi verme; kısaca çocuk doktoruna başvurulmasını öner (danışmana değil).
+- Yetersiz bilgi varsa açıkça ama kısaca söyle ve sorunun farklı ifade edilmesini öner.
 
 CEVAP:"""
 
