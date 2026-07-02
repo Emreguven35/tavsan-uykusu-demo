@@ -68,7 +68,11 @@ if soru := st.chat_input("Sorunuzu yazın..."):
     with st.chat_message("assistant"):
         with st.spinner("Düşünüyor..."):
             try:
-                cevap = cevapla(soru)
+                # Profil/plan varsa yaş bandını cache anahtarına geçir; yoksa None
+                # (yalnızca exact-match cache). param page 7'de set edilir.
+                _param = st.session_state.get("param")
+                _band = _param.get("bucket") if _param else None
+                cevap = cevapla(soru, yas_bandi=_band)
             except Exception as e:
                 cevap = f"❌ Cevap üretilemedi: {e}"
         st.markdown(cevap)

@@ -135,7 +135,8 @@ if soru := st.chat_input("Sorunuzu yazın..."):
     with st.chat_message("assistant"):
         with st.spinner("Düşünüyor..."):
             try:
-                cevap = cevapla(soru)
+                # Yaş bandı (bucket) cache anahtarına girer → yaşa özel cevap/cache
+                cevap = cevapla(soru, yas_bandi=param.get("bucket"))
             except Exception as e:
                 cevap = f"❌ Cevap üretilemedi: {e}"
         st.markdown(cevap)
