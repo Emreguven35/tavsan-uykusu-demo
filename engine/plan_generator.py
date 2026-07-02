@@ -14,7 +14,7 @@ try:
 except ImportError:
     HAS_ANTHROPIC = False
 
-from engine.config import MODEL_NAME  # merkezi model adı — tek satırdan değişir
+from engine.config import PLAN_MODEL  # plan üretici modeli (sonnet — merkezi)
 # 16384: 1 aylık program (4 haftalık + 13 eğitim günü × gün-altı B-Planı protokolleri)
 # 4096 ve 8192'de yarıda kesiliyordu; bu sınır en uzun planın bile tamamlanmasını sağlar.
 MAX_TOKENS = 16384
@@ -180,7 +180,7 @@ def plan_uret(param: dict) -> str:
 
     client = Anthropic(api_key=api_key)
     response = client.messages.create(
-        model=MODEL_NAME,
+        model=PLAN_MODEL,
         max_tokens=MAX_TOKENS,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": _build_cached_content(param)}],

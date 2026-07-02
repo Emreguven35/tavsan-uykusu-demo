@@ -33,7 +33,8 @@ try:
 except ImportError:
     HAS_ANTHROPIC = False
 
-from engine.config import MODEL_NAME  # merkezi model adı — tek satırdan değişir
+from engine.config import CHATBOT_MODEL  # chatbot/RAG modeli (haiku — merkezi)
+from engine.config import MODEL_NAME  # noqa: F401 — build_embeddings doc2query re-export
 
 MAX_TOKENS = 1024
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -484,10 +485,10 @@ CEVAP:"""
 
     client = Anthropic(api_key=api_key)
     response = client.messages.create(
-        model=MODEL_NAME,
+        model=CHATBOT_MODEL,
         max_tokens=MAX_TOKENS,
         # Sabit system prompt'a cache_control ekli. NOT: Sistem prompt'u ~80 token,
-        # Sonnet 4.6 minimum cache eşiği 2048 token → bu blok şu an cache TETİKLEMEZ
+        # Haiku 4.5 minimum cache eşiği 4096 token → bu blok şu an cache TETİKLEMEZ
         # (no-op, hata vermez). Asıl değişken maliyet RAG context'i olup soruya göre
         # değiştiğinden cache'lenemez. Marker yapısal doğruluk + ileride system büyürse
         # otomatik devreye girsin diye burada. Çıktı birebir aynı kalır.
