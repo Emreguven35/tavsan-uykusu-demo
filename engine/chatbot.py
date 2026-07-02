@@ -522,9 +522,11 @@ def _embed_query(soru: str):
     return np.asarray(v, dtype=np.float32)
 
 
-def _cache_lookup(soru: str, yas_bandi: str | None) -> str | None:
-    """Katman 1 exact (norm soru + bant), Katman 2 semantik (yas_bandi varsa,
-    cosine >= eşik ve aynı bant). Bulunmazsa None."""
+def _cache_lookup_entry(soru: str, yas_bandi: str | None) -> dict | None:
+    """Eşleşen cache KAYDINI döndür (answer + h/hash + band). Katman 1 exact
+    (norm soru + bant), Katman 2 semantik (yas_bandi varsa, cosine >= eşik ve
+    aynı bant). Bulunmazsa None. Dönen kaydın 'h' alanı, ses cache dosya adıyla
+    (aynı hash) hizalıdır — API bunu MP3 dosya adı olarak kullanır."""
     _load_cache()
     norm = _cache_norm(soru)
 
@@ -533,7 +535,7 @@ def _cache_lookup(soru: str, yas_bandi: str | None) -> str | None:
     for e in _cache_state["entries"]:
         if e["h"] == h:
             logger.info("Cache HIT (exact) [bant=%s]: %r", yas_bandi, soru[:60])
-            return e["answer"]
+            return e
 
     # Katman 2 — semantik (yaş bandı yoksa atla)
     if yas_bandi is None:
@@ -551,8 +553,14 @@ def _cache_lookup(soru: str, yas_bandi: str | None) -> str | None:
         if entry.get("band") == yas_bandi:            # aynı bant şartı
             logger.info("Cache HIT (semantik, cos=%.3f) [bant=%s]: %r",
                         float(sims[best]), yas_bandi, soru[:60])
-            return entry["answer"]
+            return entry
     return None
+
+
+def _cache_lookup(soru: str, yas_bandi: str | None) -> str | None:
+    """Geriye dönük: eşleşen cevabı (str) döndür, yoksa None."""
+    entry = _cache_lookup_entry(soru, yas_bandi)
+    return entry["answer"] if entry is not None else None
 
 
 def _cache_store(soru: str, yas_bandi: str | None, answer: str) -> None:
@@ -576,24 +584,40 @@ def _cache_store(soru: str, yas_bandi: str | None, answer: str) -> None:
     _persist_cache()
 
 
-def cevapla(soru: str, yas_bandi: str | None = None) -> str:
-    """RAG ile cevap üret. Anthropic key yoksa fallback verir.
+def _kaynak_ozet(units: list[dict]) -> list[dict]:
+    """Retrieval birimlerini API/istemci için sade kaynak listesine indir."""
+    return [{"chunk_id": u.get("chunk_id"), "label": u.get("label"),
+             "source": u.get("source"), "score": round(float(u.get("_score", 0.0)), 4)}
+            for u in units]
 
-    yas_bandi: 19 yaş bucket'ından biri (örn. '8_ay'). Cache anahtarına girer;
-    None ise yalnızca exact-match cache kullanılır (semantik cache atlanır).
-    LLM çağrısından ÖNCE cevap cache'i kontrol edilir (exact + semantik)."""
-    cached = _cache_lookup(soru, yas_bandi)
-    if cached is not None:
-        return cached
+
+def _cevap_uret(soru: str, yas_bandi: str | None = None) -> dict:
+    """RAG cevabını YAPISAL üret — cevapla() ve API katmanı bunu ortak kullanır.
+    Döner: {cevap, cache_hit, kaynaklar, anahtar(hash), llm, in_chars, out_chars}.
+
+    Akış cevapla() ile BİREBİR aynıdır (davranış korunur): LLM'den ÖNCE cache
+    (exact+semantik) → yoksa retrieval → yoksa/anahtarsız fallback → Haiku + store.
+    'anahtar', cevabın kanonik hash'idir (ses cache dosya adıyla hizalı)."""
+    h = _cache_hash(_cache_norm(soru), yas_bandi)
+
+    entry = _cache_lookup_entry(soru, yas_bandi)
+    if entry is not None:
+        # cache hit: retrieval YAPILMAZ (davranış korunur). Ses, eşleşen kaydın
+        # hash'iyle (entry['h']) hizalanır ki hazır MP3 yeniden kullanılabilsin.
+        return {"cevap": entry["answer"], "cache_hit": True, "kaynaklar": [],
+                "anahtar": entry["h"], "llm": False, "in_chars": 0,
+                "out_chars": len(entry["answer"])}
 
     retrieved = retrieve(soru, top_k=SEM_TOP_K)
 
     if not retrieved:
-        return (
+        msg = (
             "Bu konuyla ilgili Tavşan Uykusu içeriklerimde net bir bilgi bulamadım. "
             "Lütfen sorunuzu farklı şekilde ifade etmeyi deneyin veya danışmanlık "
             "sürecinde detaylı sorabilirsiniz."
         )
+        return {"cevap": msg, "cache_hit": False, "kaynaklar": [], "anahtar": h,
+                "llm": False, "in_chars": 0, "out_chars": len(msg)}
 
     context = "\n\n".join([f"- {c['text']}" for c in retrieved])
 
@@ -601,12 +625,14 @@ def cevapla(soru: str, yas_bandi: str | None = None) -> str:
     if not api_key or not HAS_ANTHROPIC:
         # Fallback: doğrudan en alakalı snippet'i kısalt ve döndür
         snippet = retrieved[0]["text"][:800].strip()
-        return (
+        msg = (
             "*Not: API anahtarı bulunmadığı için Tavşan Uykusu içeriğinden doğrudan en "
             "alakalı kısa parça gösteriliyor. Tam cevap için ANTHROPIC_API_KEY eklendiğinde "
             "Claude tarafından özetlenir.*\n\n"
             + snippet
         )
+        return {"cevap": msg, "cache_hit": False, "kaynaklar": _kaynak_ozet(retrieved),
+                "anahtar": h, "llm": False, "in_chars": 0, "out_chars": len(msg)}
 
     user_prompt = f"""ANNE SORUSU: {soru}
 
@@ -638,4 +664,17 @@ CEVAP:"""
 
     answer = response.content[0].text
     _cache_store(soru, yas_bandi, answer)   # sonraki aynı/benzer soru için sakla
-    return answer
+    return {"cevap": answer, "cache_hit": False, "kaynaklar": _kaynak_ozet(retrieved),
+            "anahtar": h, "llm": True,
+            "in_chars": len(SYSTEM_PROMPT) + len(user_prompt), "out_chars": len(answer)}
+
+
+def cevapla(soru: str, yas_bandi: str | None = None) -> str:
+    """RAG ile cevap üret (str). Anthropic key yoksa fallback verir.
+
+    yas_bandi: 19 yaş bucket'ından biri (örn. '8_ay'). Cache anahtarına girer;
+    None ise yalnızca exact-match cache kullanılır (semantik cache atlanır).
+    LLM çağrısından ÖNCE cevap cache'i kontrol edilir (exact + semantik).
+    NOT: Yapısal sürüm için _cevap_uret(); bu ince sarmalayıcı yalnız metni döner
+    (Streamlit arayüzü ve 151-item suite ile davranış BİREBİR aynı)."""
+    return _cevap_uret(soru, yas_bandi)["cevap"]

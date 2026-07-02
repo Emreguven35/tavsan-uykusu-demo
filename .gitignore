@@ -46,3 +46,6 @@ patch_bosluk_chunks.py
 
 # Runtime cevap cache'i (kullanıcı trafiğiyle dolar — repoya girmez)
 data/answer_cache.json
+
+# Runtime ses cache'i (ElevenLabs MP3'leri — repoya girmez)
+data/audio_cache/
