@@ -16,6 +16,8 @@ from pathlib import Path
 
 import requests
 
+from api.konusma_metni import konusma_metnine_cevir  # TTS öncesi metin temizliği
+
 logger = logging.getLogger("tavsan.tts")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -97,7 +99,10 @@ def ensure_audio(anahtar: str, text: str) -> dict:
         return {"ses_url": f"/audio/{anahtar}.mp3", "tts_usd": 0.0,
                 "tts_called": False, "cached": True}
 
-    audio = synthesize(text)
+    # TTS öncesi temizlik: yalnız SESE giden metin değişir. Dosya adı (anahtar)
+    # cevap-cache anahtarından gelir; bu temizlik hash'i ETKİLEMEZ.
+    konusma = konusma_metnine_cevir(text)
+    audio = synthesize(konusma)
     if audio is None:                            # graceful: ses yok, cevap kalır
         return {"ses_url": None, "tts_usd": 0.0, "tts_called": False, "cached": False}
 
@@ -108,7 +113,7 @@ def ensure_audio(anahtar: str, text: str) -> dict:
         return {"ses_url": None, "tts_usd": 0.0, "tts_called": True, "cached": False}
 
     _enforce_lru()
-    return {"ses_url": f"/audio/{anahtar}.mp3", "tts_usd": tts_cost(text),
+    return {"ses_url": f"/audio/{anahtar}.mp3", "tts_usd": tts_cost(konusma),
             "tts_called": True, "cached": False}
 
 
