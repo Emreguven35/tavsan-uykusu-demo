@@ -43,3 +43,6 @@ _originals_KVKK_RISK_DO_NOT_PUSH/
 # Tek seferlik üretim scriptleri (boşluk kapatma — yeniden üretilebilir, repoya girmez)
 build_bosluk_chunks.py
 patch_bosluk_chunks.py
+
+# Runtime cevap cache'i (kullanıcı trafiğiyle dolar — repoya girmez)
+data/answer_cache.json

@@ -19,6 +19,7 @@ asla tamamen çökmez. Hangi retrieval'ın aktif olduğu loglanır.
 import os
 import json
 import re
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -445,8 +446,146 @@ Ders ya da kayıt adı asla geçmez (anneye 'kayıt36'da bahsedildiği gibi' dem
 Cevap yoksa 'bu konuda detaylı bilgim yok, danışmanlık sürecinde sorabilirsiniz' dersin."""
 
 
-def cevapla(soru: str) -> str:
-    """RAG ile cevap üret. Anthropic key yoksa fallback verir."""
+# ---------------------------------------------------------------------------
+# CEVAP CACHE — iki katman (exact + semantik), yaş bandı anahtarlı
+# ---------------------------------------------------------------------------
+# LLM çağrısından ÖNCE kontrol edilir: aynı normalize soru + aynı yaş bandı daha
+# önce cevaplandıysa API'ye gidilmez (exact). Semantik katman, mevcut retrieval
+# embedding modelini kullanır (YENİ model yüklenmez); cosine >= eşik VE aynı bant
+# ise döner. Yaş bandı yoksa semantik atlanır, yalnızca exact çalışır.
+# Depolama: küçük JSON dosyası (Streamlit Cloud runtime'ında yazılabilir). Modül
+# global olduğundan Streamlit rerun'larında korunur (@st.cache_resource'a gerek
+# yok; chatbot streamlit'e bağımlı değil — testlerde de aynı kod çalışır). LRU:
+# son CACHE_MAX kayıt tutulur. Cache HIT loglanır (debug), kullanıcıya gösterilmez.
+
+CACHE_PATH = DATA_DIR / "answer_cache.json"
+CACHE_MAX = 500                 # LRU sınırı (son N cevap)
+SEM_CACHE_THRESHOLD = 0.95      # semantik cache cosine eşiği (spesifikasyon)
+
+_cache_state: dict[str, Any] = {
+    "loaded": False,
+    "entries": [],       # [{"h","band","q","answer","emb":[float]|None}]
+    "emb_matrix": None,  # (M, dim) float32 — emb'i olan kayıtların matrisi
+    "emb_idx": [],       # emb_matrix satır -> entries index eşlemesi
+}
+
+
+def _cache_norm(soru: str) -> str:
+    """Cache anahtarı için normalize (lowercase, noktalama/fazla boşluk temizle).
+    Mevcut TF-IDF normalizer'ı yeniden kullanır — davranış tutarlı."""
+    return _normalize(soru)
+
+
+def _cache_hash(norm_q: str, band: str | None) -> str:
+    return hashlib.sha256(f"{band or ''}||{norm_q}".encode("utf-8")).hexdigest()
+
+
+def _rebuild_emb_matrix() -> None:
+    """emb'i olan kayıtlardan (M, dim) matris kur — semantik arama için."""
+    embs, idxs = [], []
+    for i, e in enumerate(_cache_state["entries"]):
+        if e.get("emb"):
+            embs.append(e["emb"])
+            idxs.append(i)
+    _cache_state["emb_matrix"] = np.asarray(embs, dtype=np.float32) if embs else None
+    _cache_state["emb_idx"] = idxs
+
+
+def _load_cache() -> None:
+    if _cache_state["loaded"]:
+        return
+    if CACHE_PATH.exists():
+        try:
+            data = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                _cache_state["entries"] = data
+        except Exception as e:
+            logger.warning("answer_cache.json okunamadı, sıfırlanıyor: %s", e)
+    _cache_state["loaded"] = True
+    _rebuild_emb_matrix()
+
+
+def _persist_cache() -> None:
+    try:
+        CACHE_PATH.write_text(
+            json.dumps(_cache_state["entries"], ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        logger.warning("answer_cache.json yazılamadı: %s", e)
+
+
+def _embed_query(soru: str):
+    """Sorguyu MEVCUT retrieval modeliyle embed et (yoksa None → semantik atlanır)."""
+    model = _state.get("model")
+    if model is None:
+        return None
+    v = model.encode([soru], normalize_embeddings=True)[0]
+    return np.asarray(v, dtype=np.float32)
+
+
+def _cache_lookup(soru: str, yas_bandi: str | None) -> str | None:
+    """Katman 1 exact (norm soru + bant), Katman 2 semantik (yas_bandi varsa,
+    cosine >= eşik ve aynı bant). Bulunmazsa None."""
+    _load_cache()
+    norm = _cache_norm(soru)
+
+    # Katman 1 — exact
+    h = _cache_hash(norm, yas_bandi)
+    for e in _cache_state["entries"]:
+        if e["h"] == h:
+            logger.info("Cache HIT (exact) [bant=%s]: %r", yas_bandi, soru[:60])
+            return e["answer"]
+
+    # Katman 2 — semantik (yaş bandı yoksa atla)
+    if yas_bandi is None:
+        return None
+    mat = _cache_state["emb_matrix"]
+    if mat is None:
+        return None
+    qv = _embed_query(soru)
+    if qv is None:
+        return None
+    sims = mat @ qv                       # normalize edilmiş → dot = cosine
+    best = int(sims.argmax())
+    if sims[best] >= SEM_CACHE_THRESHOLD:
+        entry = _cache_state["entries"][_cache_state["emb_idx"][best]]
+        if entry.get("band") == yas_bandi:            # aynı bant şartı
+            logger.info("Cache HIT (semantik, cos=%.3f) [bant=%s]: %r",
+                        float(sims[best]), yas_bandi, soru[:60])
+            return entry["answer"]
+    return None
+
+
+def _cache_store(soru: str, yas_bandi: str | None, answer: str) -> None:
+    """Cevabı cache'e ekle (LRU: son CACHE_MAX). Yaş bandı varsa embedding de
+    saklanır — gelecekteki semantik aramalar için."""
+    _load_cache()
+    norm = _cache_norm(soru)
+    h = _cache_hash(norm, yas_bandi)
+    # Aynı anahtar varsa çıkar + sona ekle (recency)
+    _cache_state["entries"] = [e for e in _cache_state["entries"] if e["h"] != h]
+    emb = None
+    if yas_bandi is not None:
+        qv = _embed_query(soru)
+        if qv is not None:
+            emb = [float(x) for x in qv]
+    _cache_state["entries"].append(
+        {"h": h, "band": yas_bandi, "q": norm, "answer": answer, "emb": emb})
+    if len(_cache_state["entries"]) > CACHE_MAX:      # LRU sınırı
+        _cache_state["entries"] = _cache_state["entries"][-CACHE_MAX:]
+    _rebuild_emb_matrix()
+    _persist_cache()
+
+
+def cevapla(soru: str, yas_bandi: str | None = None) -> str:
+    """RAG ile cevap üret. Anthropic key yoksa fallback verir.
+
+    yas_bandi: 19 yaş bucket'ından biri (örn. '8_ay'). Cache anahtarına girer;
+    None ise yalnızca exact-match cache kullanılır (semantik cache atlanır).
+    LLM çağrısından ÖNCE cevap cache'i kontrol edilir (exact + semantik)."""
+    cached = _cache_lookup(soru, yas_bandi)
+    if cached is not None:
+        return cached
+
     retrieved = retrieve(soru, top_k=SEM_TOP_K)
 
     if not retrieved:
@@ -497,4 +636,6 @@ CEVAP:"""
         messages=[{"role": "user", "content": user_prompt}],
     )
 
-    return response.content[0].text
+    answer = response.content[0].text
+    _cache_store(soru, yas_bandi, answer)   # sonraki aynı/benzer soru için sakla
+    return answer
