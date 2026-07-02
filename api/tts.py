@@ -1,7 +1,7 @@
 """
 ElevenLabs TTS + ses cache.
 
-- Türkçe metin → MP3 (eleven_multilingual_v2), doğrudan REST (requests) ile.
+- Türkçe metin → MP3 (TTS_MODEL = eleven_flash_v2_5), doğrudan REST (requests) ile.
 - Ses cache: MP3'ler data/audio_cache/ altında, dosya adı = CEVAP CACHE'İYLE AYNI
   hash (chatbot._cevap_uret'in döndürdüğü 'anahtar'). Böylece cevap cache HIT olunca
   aynı hash'li MP3 varsa TTS'e HİÇ gidilmez.
@@ -23,14 +23,18 @@ logger = logging.getLogger("tavsan.tts")
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 AUDIO_DIR = DATA_DIR / "audio_cache"
 
-ELEVENLABS_MODEL = "eleven_multilingual_v2"     # Türkçe destekli çok dilli model
+# Aktif TTS modeli (merkezi sabit). Flash v2.5 çok dillidir (Türkçe destekli),
+# multilingual_v2'ye göre daha hızlı ve karakter başına YARI kredi tüketir.
+TTS_MODEL = "eleven_flash_v2_5"
+MULTILINGUAL_MODEL = "eleven_multilingual_v2"   # kıyas/geri-dönüş için
 ELEVENLABS_BASE = "https://api.elevenlabs.io/v1/text-to-speech"
 TTS_TIMEOUT_S = 30
 
-# ElevenLabs karakter (kredi) bazlı ücretlendirir; ~1 karakter ≈ 1 kredi.
-# Creator planı: $22 / 100.000 kredi → ~$0.00022/karakter. Plan değişirse güncelle.
-# Kaynak: elevenlabs.io/pricing (Creator tier). Bu SABİT bir yaklaşık maliyettir.
-ELEVENLABS_USD_PER_CHAR = 0.00022
+# ElevenLabs karakter (kredi) bazlı ücretlendirir. Flash v2.5 = 0.5 kredi/karakter
+# (multilingual_v2 = 1 kredi/karakter). Creator planı $22 / 100.000 kredi →
+# ~$0.00022/kredi. Dolayısıyla Flash: 0.5 × 0.00022 = ~0.00011 $/karakter.
+# Kaynak: elevenlabs.io/pricing + modeller (Flash v2.5, kredi/krktr), 2026-07-02.
+ELEVENLABS_USD_PER_CHAR = 0.00011
 
 AUDIO_MAX_FILES = 500
 AUDIO_MAX_BYTES = 100 * 1024 * 1024             # 100 MB
@@ -64,8 +68,9 @@ def _enforce_lru() -> None:
             logger.warning("Ses cache LRU silme hatası: %s", e)
 
 
-def synthesize(text: str) -> bytes | None:
-    """Metni MP3 byte'larına çevir. Anahtar yok / hata → None (endpoint çökmesin)."""
+def synthesize(text: str, model: str | None = None) -> bytes | None:
+    """Metni MP3 byte'larına çevir. Anahtar yok / hata → None (endpoint çökmesin).
+    model verilmezse merkezi TTS_MODEL (flash v2.5) kullanılır."""
     key = os.getenv("ELEVENLABS_API_KEY")
     voice = os.getenv("ELEVENLABS_VOICE_ID")
     if not key or not voice:
@@ -76,7 +81,7 @@ def synthesize(text: str) -> bytes | None:
             f"{ELEVENLABS_BASE}/{voice}",
             headers={"xi-api-key": key, "Content-Type": "application/json",
                      "Accept": "audio/mpeg"},
-            json={"text": text, "model_id": ELEVENLABS_MODEL},
+            json={"text": text, "model_id": model or TTS_MODEL},
             timeout=TTS_TIMEOUT_S,
         )
         r.raise_for_status()
