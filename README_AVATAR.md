@@ -216,8 +216,7 @@ düğmeleri ekler. `test_avatar_audio.mjs` (yeni) formatı 9/9 doğrular.
 - `5e79c2e` — feat(avatar): backend token endpoint + test
 - `96959ed` — feat(avatar): avatar.html test sayfası (ilk sürüm — binary)
 - `f62e959` — docs(avatar): README_AVATAR.md ilk sürüm
-- **`<FIX>`** — fix(avatar): repeatAudio base64 düzeltmesi + A/B + birim test
-  *(`git log --oneline -1` ile güncel hash)*
+- `271fe25` — fix(avatar): repeatAudio **base64** düzeltmesi (kök neden) + A/B + birim test
 
 **Geri alma (rollback):**
 ```bash
