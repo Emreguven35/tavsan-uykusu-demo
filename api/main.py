@@ -25,6 +25,7 @@ load_dotenv()
 
 from engine import chatbot   # noqa: E402 — mevcut RAG/cache/LLM motoru
 from api import tts          # noqa: E402 — ElevenLabs + ses cache
+from api import avatar       # noqa: E402 — LiveAvatar LITE session token (görüntü katmanı)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tavsan.api")
@@ -111,6 +112,27 @@ def ask(req: AskReq):
         "ses_url": audio["ses_url"],
         "sure_ms": sure_ms,
         "maliyet": {"llm_usd": llm_usd, "tts_usd": audio["tts_usd"]},
+    }
+
+
+@app.post("/avatar-session")
+def avatar_session():
+    """LiveAvatar LITE mode oturum token'ı üret (frontend Web SDK bununla başlar).
+
+    API key ASLA dönmez; yalnız kısa ömürlü session_token + avatar meta döner.
+    Hata (key yok / kota / ağ) → anlamlı JSON hata + uygun HTTP kodu (ham 500 çökme yok).
+    """
+    r = avatar.create_session_token()
+    if not r.get("ok"):
+        # HTTPException gövdesi {"detail": "..."} → anlamlı JSON. status: 500/502.
+        raise HTTPException(status_code=r.get("status", 502),
+                            detail=r.get("error", "avatar oturumu açılamadı"))
+    return {
+        "session_token": r["session_token"],
+        "session_id": r["session_id"],
+        "avatar_id": r["avatar_id"],
+        "is_sandbox": r["is_sandbox"],
+        "mode": r["mode"],
     }
 
 
