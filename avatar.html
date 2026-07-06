@@ -52,6 +52,13 @@
     <button id="btnStop" disabled>Oturumu Kapat</button>
   </div>
 
+  <!-- Debug: aynı (son) cevabın sesini iki farklı formatla besle -->
+  <div class="row">
+    <small class="mono">Debug ses formatı (son cevabı yeniden besle):</small>
+    <button id="btnA" disabled title="BASE64(PCM16/24k) — SDK demo ile doğrulanan doğru yol">Yöntem A: base64</button>
+    <button id="btnB" disabled title="Ham binary string — eski/yanlış davranış (kıyas)">Yöntem B: binary</button>
+  </div>
+
   <div id="warn"></div>
   <div id="err"></div>
 
@@ -74,9 +81,11 @@
    Ses besleme yöntemi (resmi SDK yolu, LITE mode):
      - new LiveAvatarSession(session_token, {voiceChat:false})
      - session.on(SESSION_STREAM_READY) -> session.attach(<video>)  (video+audio track)
-     - session.repeatAudio(pcmString)   // AVATAR_SPEAK_AUDIO -> WS 'agent.speak'
-       * pcmString = ham 16-bit signed PCM @24kHz mono, "binary string" (1 char = 1 byte).
-         SDK bunu 400ms/1s parçalara böler; base64 DEĞİL (bkz. README_AVATAR.md notu).
+     - session.repeatAudio(speakStr)    // AVATAR_SPEAK_AUDIO -> WS 'agent.speak'
+       * speakStr = BASE64( ham 16-bit signed PCM, 24kHz, mono ).  <-- DÜZELTİLDİ
+         (SDK demosunda ElevenLabs pcm_24000 audio_base64 doğrudan repeatAudio'ya
+          veriliyor. Önceki ham "binary string" WebSocket'te UTF-8'e kaçıp bozuluyordu;
+          bu yüzden avatar konuşmuyordu → fallback. Bkz. README_AVATAR.md § Sorun Giderme.)
      - session.stop() -> sunucu oturumu kapatır (kredi sayacı durur).
    ========================================================================== */
 
@@ -86,19 +95,25 @@ import {
   SessionState,
   AgentEventsEnum,
 } from "https://esm.sh/@heygen/liveavatar-web-sdk@0.0.18";
+import { pcmToSpeakString, PCM_SAMPLE_RATE } from "./avatar_audio.js";
 
 // --- Yapılandırma (gerekirse değiştirin) ------------------------------------
 const API_URL = "http://localhost:8000";     // mevcut FastAPI backend tabanı
 const HARD_CAP_MS = 90_000;                    // free plan max 2 dk → 90 sn'de kapat
-const SPEAK_TIMEOUT_MS = 6_000;                // avatar konuşmaya başlamazsa fallback
+const SPEAK_TIMEOUT_MS = 4_000;                // avatar bu sürede konuşmazsa → fallback + neden logu
 // Avatar, beslenen sesi KENDİ audio track'inde geri çalar (attach ile duyulur).
 // Eğer avatardan ses gelmezse bunu false yapın: fallback <audio> her zaman çalar.
 const AVATAR_PROVIDES_AUDIO = true;
+// repeatAudio kodlaması: "base64" = DOĞRU (SDK demo'suyla doğrulandı). A/B düğmeleri
+// canlı testte bunu geçici olarak değiştirir; varsayılan akış hep base64 kullanır.
+let SPEAK_ENCODING = "base64";                 // "base64" | "binary"
+let lastSesUrl = null;                         // A/B düğmeleri için son cevabın sesi
 
 // --- DOM ---------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const videoEl = $("avatarVideo"), placeholder = $("placeholder");
 const btnStart = $("btnStart"), btnMic = $("btnMic"), btnStop = $("btnStop");
+const btnA = $("btnA"), btnB = $("btnB");
 const statusEl = $("status"), timerEl = $("timer"), modeEl = $("mode");
 const bubble = $("bubble"), warnEl = $("warn"), errEl = $("err");
 const fallbackAudio = $("fallbackAudio"), logEl = $("log");
@@ -169,15 +184,21 @@ async function openSession() {
       placeholder.style.display = "none";
       log("stream hazır → video attach edildi");
     });
-    session.on(AgentEventsEnum.AVATAR_SPEAK_STARTED, () => {
+    session.on(AgentEventsEnum.AVATAR_SPEAK_STARTED, (e) => {
       speaking = true;
       if (speakTimer) { clearTimeout(speakTimer); speakTimer = null; }
-      log("avatar konuşmaya başladı (dudak senkron)");
+      log("✅ AVATAR_SPEAK_STARTED (dudak senkron başladı) " + JSON.stringify(e || {}));
     });
-    session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, () => {
+    session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, (e) => {
       speaking = false;
-      log("avatar konuşmayı bitirdi");
+      log("AVATAR_SPEAK_ENDED (konuşma bitti) " + JSON.stringify(e || {}));
     });
+    // Görünürlük için tüm ilgili event/callback'leri console'a bağla.
+    session.on(SessionEvent.SESSION_STATE_CHANGED, (st) => log("SESSION_STATE_CHANGED: " + st));
+    session.on(SessionEvent.SESSION_CONNECTION_QUALITY_CHANGED, (q) => console.log("[avatar] conn quality:", q));
+    session.on(AgentEventsEnum.SESSION_STATE_UPDATED, (e) => log("SESSION_STATE_UPDATED " + JSON.stringify(e || {})));
+    session.on(AgentEventsEnum.SESSION_STOPPED, (e) => log("SESSION_STOPPED " + JSON.stringify(e || {})));
+    session.on(AgentEventsEnum.AVATAR_TRANSCRIPTION, (e) => console.log("[avatar] avatar.transcription:", e));
     session.on(SessionEvent.SESSION_DISCONNECTED, (reason) => {
       log("oturum koptu/bitti: " + reason);
       onSessionClosed(`kapandı (${reason})`);
@@ -221,65 +242,60 @@ function onSessionClosed(extra = "") {
   timerEl.textContent = "";
   setStatus("off", extra);
   btnStart.disabled = false; btnMic.disabled = true; btnStop.disabled = true;
+  btnA.disabled = true; btnB.disabled = true;
   placeholder.style.display = "flex";
 }
 
-// --- Ses: İlayda MP3 → PCM16 24kHz mono "binary string" ----------------------
-async function mp3UrlToPcm24kString(url) {
+// --- Ses: İlayda MP3 → 24kHz mono Float32 örnekler ---------------------------
+async function mp3UrlToFloat32_24kMono(url) {
   const buf = await (await fetch(url)).arrayBuffer();
   const AC = window.AudioContext || window.webkitAudioContext;
   const tmp = new AC();
   const decoded = await tmp.decodeAudioData(buf.slice(0));
   try { tmp.close(); } catch {}
   // 24kHz mono'ya yeniden örnekle (OfflineAudioContext).
-  const rate = 24000;
-  const frames = Math.max(1, Math.ceil(decoded.duration * rate));
-  const off = new OfflineAudioContext(1, frames, rate);
+  const frames = Math.max(1, Math.ceil(decoded.duration * PCM_SAMPLE_RATE));
+  const off = new OfflineAudioContext(1, frames, PCM_SAMPLE_RATE);
   const src = off.createBufferSource();
   src.buffer = decoded; src.connect(off.destination); src.start(0);
   const rendered = await off.startRendering();
-  const f32 = rendered.getChannelData(0);
-  // Float32 [-1,1] → Int16 LE bytes
-  const bytes = new Uint8Array(f32.length * 2);
-  let bi = 0;
-  for (let i = 0; i < f32.length; i++) {
-    let s = Math.max(-1, Math.min(1, f32[i]));
-    s = s < 0 ? s * 0x8000 : s * 0x7fff;
-    const v = s | 0;
-    bytes[bi++] = v & 0xff; bytes[bi++] = (v >> 8) & 0xff;
-  }
-  // bytes → binary string (yığın taşmasını önlemek için parça parça)
-  let out = "", CH = 0x8000;
-  for (let i = 0; i < bytes.length; i += CH) {
-    out += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
-  }
-  return out;
+  return rendered.getChannelData(0);   // Float32Array, 24kHz mono
 }
 
-async function speakOnAvatar(sesUrl) {
+// encoding: "base64" (varsayılan/doğru) | "binary" (A/B karşılaştırma için).
+async function speakOnAvatar(sesUrl, encoding = SPEAK_ENCODING) {
   const fullUrl = sesUrl.startsWith("http") ? sesUrl : `${API_URL}${sesUrl}`;
-  // Fallback: avatara besleme başarısız olursa normal oynatıcı.
+  lastSesUrl = sesUrl;
+  clearWarn();
+  // Fallback: avatara besleme başarısız olursa normal oynatıcı — NEDENİYLE loglanır.
   const fallback = (why) => {
-    showWarn("Avatar senkron başarısız — ses normal oynatılıyor. (" + why + ")");
+    log("↩ FALLBACK <audio>: " + why);
+    showWarn("Avatar senkron başarısız — ses normal oynatılıyor. Neden: " + why);
     fallbackAudio.src = fullUrl;
     fallbackAudio.play().catch((e) => log("fallback audio play hata: " + e.message));
   };
   try {
-    if (!session || !sessionOpen) throw new Error("oturum kapalı");
-    const pcm = await mp3UrlToPcm24kString(fullUrl);
-    log(`PCM üretildi (${pcm.length} bayt) → repeatAudio()`);
+    if (!session || !sessionOpen) throw new Error("oturum kapalı (state != CONNECTED)");
+    if (session.state && session.state !== SessionState.CONNECTED) {
+      throw new Error("oturum durumu " + session.state + " (CONNECTED bekleniyordu)");
+    }
+    const f32 = await mp3UrlToFloat32_24kMono(fullUrl);
+    const speakStr = pcmToSpeakString(f32, encoding);
+    log(`ses hazır: ${f32.length} örnek @${PCM_SAMPLE_RATE}Hz mono → ` +
+        `${encoding} (${speakStr.length} char) → repeatAudio()`);
     speaking = false;
-    session.repeatAudio(pcm);           // resmi LITE ses besleme yolu
-    // Avatar SPEAK_STARTED yayınlamazsa fallback'e düş.
+    const eventId = session.repeatAudio(speakStr);   // resmi LITE ses besleme yolu
+    log("repeatAudio çağrıldı (event_id=" + eventId + ", encoding=" + encoding + ")");
+    // Avatar SPEAK_STARTED yayınlamazsa fallback'e düş — timeout NEDENİYLE loglanır.
     if (speakTimer) clearTimeout(speakTimer);
     speakTimer = setTimeout(() => {
-      if (!speaking) fallback("avatar zamanında konuşmaya başlamadı");
+      if (!speaking) fallback(`timeout: avatar ${SPEAK_TIMEOUT_MS / 1000} sn içinde ` +
+                              `konuşmaya başlamadı (AVATAR_SPEAK_STARTED gelmedi)`);
     }, SPEAK_TIMEOUT_MS);
     // Avatar sesi kendi track'inde çalmıyorsa fallback'i her zaman aç.
-    if (!AVATAR_PROVIDES_AUDIO) fallback("AVATAR_PROVIDES_AUDIO=false");
+    if (!AVATAR_PROVIDES_AUDIO) fallback("AVATAR_PROVIDES_AUDIO=false (yapılandırma)");
   } catch (e) {
-    log("repeatAudio hatası: " + e.message);
-    fallback(e.message);
+    fallback("repeatAudio hata: " + e.message);
   }
 }
 
@@ -306,8 +322,10 @@ async function onMic() {
       const ans = await askBackend(soru);
       bubble.textContent = ans.cevap || "(boş cevap)";
       setStatus("on");
-      if (ans.ses_url) await speakOnAvatar(ans.ses_url);
-      else showWarn("Backend ses üretemedi (ses_url=null) — sadece metin gösteriliyor.");
+      if (ans.ses_url) {
+        await speakOnAvatar(ans.ses_url);
+        btnA.disabled = false; btnB.disabled = false;   // A/B kıyası artık mümkün
+      } else showWarn("Backend ses üretemedi (ses_url=null) — sadece metin gösteriliyor.");
     } catch (e) {
       showErr("Cevap alınamadı: " + e.message);
     }
@@ -321,6 +339,19 @@ async function onMic() {
 btnStart.addEventListener("click", openSession);
 btnMic.addEventListener("click", onMic);
 btnStop.addEventListener("click", async () => { await closeSession(); setStatus("off", "kullanıcı kapattı"); });
+// A/B debug: son cevabın sesini seçilen formatla yeniden besle (interrupt + feed).
+btnA.addEventListener("click", async () => {
+  if (!lastSesUrl) return;
+  try { session && session.interrupt(); } catch {}
+  log("── Yöntem A (base64) deneniyor ──");
+  await speakOnAvatar(lastSesUrl, "base64");
+});
+btnB.addEventListener("click", async () => {
+  if (!lastSesUrl) return;
+  try { session && session.interrupt(); } catch {}
+  log("── Yöntem B (binary — eski/yanlış) deneniyor ──");
+  await speakOnAvatar(lastSesUrl, "binary");
+});
 window.addEventListener("beforeunload", () => { if (sessionOpen && session) session.stop(); });
 
 setStatus("off");
