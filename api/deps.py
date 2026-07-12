@@ -45,3 +45,14 @@ def get_current_user(
     if user is None:                      # silinmiş kullanıcı → token geçersiz
         raise _UNAUTHORIZED
     return user
+
+
+def get_owned_baby(baby_id, db: Session, user: User):
+    """baby_id kullanıcıya ait mi? Değilse/yoksa 404 (kullanıcı kendi verisiyle sınırlı).
+    404 (403 değil) → başka kullanıcının kayıt varlığını sızdırmaz."""
+    from api.models import Baby            # döngüsel import önleme
+    baby = db.get(Baby, baby_id)
+    if baby is None or baby.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Bebek bulunamadı")
+    return baby

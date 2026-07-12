@@ -29,6 +29,7 @@ from api import avatar       # noqa: E402 — LiveAvatar LITE session token (gö
 from api.config import get_settings   # noqa: E402 — merkezi env config
 from api.db import db_healthy         # noqa: E402 — DB sağlık kontrolü
 from api.routers import auth          # noqa: E402 — /api/v1/auth/* (Faz 2)
+from api.routers import babies, logs, plans, subscriptions  # noqa: E402 — Faz 3
 
 # Yapılandırılmış logging: süre/durum/hata bilgisini tek biçimde ver.
 logging.basicConfig(
@@ -111,6 +112,10 @@ async def log_requests(request: Request, call_next):
 # (geriye dönük uyum + Railway healthcheck /health).
 API_V1_PREFIX = "/api/v1"
 app.include_router(auth.router, prefix=API_V1_PREFIX)
+app.include_router(babies.router, prefix=API_V1_PREFIX)
+app.include_router(logs.router, prefix=API_V1_PREFIX)
+app.include_router(plans.router, prefix=API_V1_PREFIX)
+app.include_router(subscriptions.router, prefix=API_V1_PREFIX)
 
 
 class AskReq(BaseModel):
