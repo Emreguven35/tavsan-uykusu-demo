@@ -16,7 +16,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -26,9 +26,16 @@ load_dotenv()
 from engine import chatbot   # noqa: E402 — mevcut RAG/cache/LLM motoru
 from api import tts          # noqa: E402 — ElevenLabs + ses cache
 from api import avatar       # noqa: E402 — LiveAvatar LITE session token (görüntü katmanı)
+from api.config import get_settings   # noqa: E402 — merkezi env config
+from api.db import db_healthy         # noqa: E402 — DB sağlık kontrolü
 
-logging.basicConfig(level=logging.INFO)
+# Yapılandırılmış logging: süre/durum/hata bilgisini tek biçimde ver.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 logger = logging.getLogger("tavsan.api")
+settings = get_settings()
 
 # --- LLM maliyet tahmini (Haiku 4.5: $1/1M in, $5/1M out) --------------------
 # Türkçe için ~4 karakter ≈ 1 token (yaklaşık). count_tokens çağrısı eklemeden
@@ -54,22 +61,47 @@ async def lifespan(app: FastAPI):
                     chatbot.active_retrieval(), chatbot.CHATBOT_MODEL)
     except Exception as e:
         logger.warning("init_index başarısız: %s", e)
+
+    # DB erişilebilirlik kontrolü (şema migration'ı ayrı adım: alembic upgrade head).
+    if db_healthy():
+        logger.info("DB bağlantısı OK (%s)",
+                    "sqlite" if settings.is_sqlite else "postgresql")
+    else:
+        logger.warning("DB'ye ulaşılamadı — DATABASE_URL'i kontrol edin.")
+
+    if settings.jwt_secret_is_default:
+        logger.warning("JWT_SECRET varsayılan/güvensiz — production'da SABİTLEYİN.")
     yield
 
 
 app = FastAPI(title="Tavşan Uykusu API", version="1.0.0", lifespan=lifespan)
 
-# --- CORS: izinli origin'ler env'den (virgülle ayrılmış). Default "*" ---------
-# UYARI: production'da ALLOWED_ORIGINS'i gerçek domain(ler)e sabitleyin; "*"
-# herkese açıktır (rapora bakınız).
-_origins = os.getenv("ALLOWED_ORIGINS", "*").strip()
-_allow = ["*"] if _origins == "*" else [o.strip() for o in _origins.split(",") if o.strip()]
+# --- CORS: izinli origin'ler env'den (ALLOWED_ORIGINS, virgülle ayrılmış). ------
+# UYARI: production'da ALLOWED_ORIGINS'i gerçek EXPO_PUBLIC domain(ler)ine sabitleyin;
+# "*" (default) herkese açıktır — geliştirme kolaylığı için, prod'da daraltın.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allow,
+    allow_origins=settings.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """İstek/yanıt süresi + durum kodu logla. KVKK: gövde/mesaj İÇERİĞİ loglanmaz,
+    yalnız method + path + status + süre."""
+    t0 = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        dt = int((time.perf_counter() - t0) * 1000)
+        logger.exception("%s %s → HATA (%d ms)", request.method, request.url.path, dt)
+        raise
+    dt = int((time.perf_counter() - t0) * 1000)
+    logger.info("%s %s → %d (%d ms)",
+                request.method, request.url.path, response.status_code, dt)
+    return response
 
 
 class AskReq(BaseModel):
@@ -79,6 +111,10 @@ class AskReq(BaseModel):
 
 @app.get("/health")
 def health():
+    """Altyapı sağlığı: DB bağlantısı + RAG index yüklü mü.
+
+    rag_mode: "semantic" (embedding), "tfidf" (fallback) veya null (kurulamadı).
+    Railway healthcheck bu endpoint'i kullanır (railway.json)."""
     rt = chatbot.active_retrieval()
     if rt is None:                     # startup atlanmışsa tembel kur
         try:
@@ -86,7 +122,16 @@ def health():
             rt = chatbot.active_retrieval()
         except Exception:
             rt = None
-    return {"status": "ok", "retrieval": rt, "model": chatbot.CHATBOT_MODEL}
+
+    db_ok = db_healthy()
+    status = "ok" if (db_ok and rt is not None) else "degraded"
+    return {
+        "status": status,
+        "db": "ok" if db_ok else "down",
+        "rag_mode": rt,                # "semantic" | "tfidf" | null
+        "retrieval": rt,               # geriye dönük uyumluluk (eski alan adı)
+        "model": chatbot.CHATBOT_MODEL,
+    }
 
 
 @app.post("/ask")
