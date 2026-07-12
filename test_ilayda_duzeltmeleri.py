@@ -47,6 +47,50 @@ def rec(bolum, kontrol, ok, kanit=""):
 
 
 # ---------------------------------------------------------------------------
+# /chat ENDPOINT REGRESYON MODU (opsiyonel)
+# CHAT_ENDPOINT=1 iken Bölüm C soruları doğrudan chatbot.cevapla yerine YENİ FastAPI
+# /api/v1/chat endpoint'i üzerinden koşulur — endpoint'in chatbot davranışını (tıbbi
+# sınır, danışman yönlendirmesi yok, kucağa alabilirsiniz vb.) KORUDUĞUNU doğrular.
+# Flag kapalıyken davranış BİREBİR eskisi gibidir (Streamlit/engine testi etkilenmez).
+# ---------------------------------------------------------------------------
+USE_CHAT_ENDPOINT = os.getenv("CHAT_ENDPOINT") == "1"
+_chat_client = None
+_chat_headers = None
+
+
+def _ensure_chat_client():
+    global _chat_client, _chat_headers
+    if _chat_client is not None:
+        return
+    os.environ.setdefault("DATABASE_URL", "sqlite:///./_regresyon_chat.db")
+    os.environ.setdefault("JWT_SECRET", "regresyon-secret")
+    from fastapi.testclient import TestClient
+    from api.db import engine
+    from api.db.base import Base
+    import api.models  # noqa: F401 — metadata dolsun
+    Base.metadata.create_all(engine)          # tablo yoksa oluştur (chat_messages dahil)
+    from api.main import app
+    _chat_client = TestClient(app)
+    creds = {"email": "regresyon@ornek.com", "password": "regresyon123"}
+    r = _chat_client.post("/api/v1/auth/register", json=creds)
+    if r.status_code == 409:                   # zaten kayıtlı → login
+        r = _chat_client.post("/api/v1/auth/login", json=creds)
+    if r.status_code not in (200, 201):
+        raise RuntimeError(f"regresyon auth başarısız: {r.status_code} {r.text[:150]}")
+    _chat_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def _chat_answer(soru: str) -> str:
+    """Soruyu /api/v1/chat üzerinden sor, cevabı döndür (endpoint regresyonu)."""
+    _ensure_chat_client()
+    r = _chat_client.post("/api/v1/chat", headers=_chat_headers,
+                          json={"message": soru, "history": []})
+    if r.status_code != 200:
+        raise RuntimeError(f"/chat {r.status_code}: {r.text[:200]}")
+    return r.json()["answer"]
+
+
+# ---------------------------------------------------------------------------
 # Yasaklı ifade desenleri
 # ---------------------------------------------------------------------------
 BANNED = {
@@ -372,13 +416,16 @@ def bolum_C():
             "bebek arabas" not in depr_text,
             f"top={hit_ids[:3]}")
 
-        force = os.getenv("FORCE_REGEN") == "1"
+        # Endpoint regresyon modunda önbelleği atla (taze /chat cevabı iste).
+        force = os.getenv("FORCE_REGEN") == "1" or USE_CHAT_ENDPOINT
         ans_path = OUT_DIR / f"ans_{key}.txt"
         cb_md = OUT_DIR / f"chatbot_{key}.md"
         if ans_path.exists() and not force:
             ans = ans_path.read_text(encoding="utf-8")
         elif cb_md.exists() and not force and "# Cevap" in cb_md.read_text(encoding="utf-8"):
             ans = cb_md.read_text(encoding="utf-8").split("# Cevap", 1)[1].split("\n\n", 1)[1]
+        elif USE_CHAT_ENDPOINT:
+            ans = _chat_answer(soru)          # YENİ: /api/v1/chat üzerinden
         else:
             ans = chatbot.cevapla(soru)
         ans_path.write_text(ans, encoding="utf-8")

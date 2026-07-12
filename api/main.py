@@ -30,6 +30,7 @@ from api.config import get_settings   # noqa: E402 — merkezi env config
 from api.db import db_healthy         # noqa: E402 — DB sağlık kontrolü
 from api.routers import auth          # noqa: E402 — /api/v1/auth/* (Faz 2)
 from api.routers import babies, logs, plans, subscriptions  # noqa: E402 — Faz 3
+from api.routers import chat, voice   # noqa: E402 — Faz 4 (RAG chat + ses)
 
 # Yapılandırılmış logging: süre/durum/hata bilgisini tek biçimde ver.
 logging.basicConfig(
@@ -116,6 +117,8 @@ app.include_router(babies.router, prefix=API_V1_PREFIX)
 app.include_router(logs.router, prefix=API_V1_PREFIX)
 app.include_router(plans.router, prefix=API_V1_PREFIX)
 app.include_router(subscriptions.router, prefix=API_V1_PREFIX)
+app.include_router(chat.router, prefix=API_V1_PREFIX)
+app.include_router(voice.router, prefix=API_V1_PREFIX)
 
 
 class AskReq(BaseModel):
@@ -175,12 +178,13 @@ def ask(req: AskReq):
 
 
 @app.post("/avatar-session")
+@app.post(f"{API_V1_PREFIX}/avatar-session")   # Faz 4: mobil sözleşme için /api/v1 altında da
 def avatar_session():
     """LiveAvatar LITE mode oturum token'ı üret (frontend Web SDK bununla başlar).
 
     API key ASLA dönmez; yalnız kısa ömürlü session_token + avatar meta döner.
     Hata (key yok / kota / ağ) → anlamlı JSON hata + uygun HTTP kodu (ham 500 çökme yok).
-    """
+    NOT: Mobil v1'de KULLANILMAYACAK; mevcut haliyle taşındı (root + /api/v1)."""
     r = avatar.create_session_token()
     if not r.get("ok"):
         # HTTPException gövdesi {"detail": "..."} → anlamlı JSON. status: 500/502.

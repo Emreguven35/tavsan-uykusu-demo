@@ -11,6 +11,7 @@ ElevenLabs TTS + ses cache.
 import os
 import re
 import time
+import hashlib
 import logging
 from pathlib import Path
 
@@ -68,11 +69,13 @@ def _enforce_lru() -> None:
             logger.warning("Ses cache LRU silme hatası: %s", e)
 
 
-def synthesize(text: str, model: str | None = None) -> bytes | None:
+def synthesize(text: str, model: str | None = None,
+               voice_id: str | None = None) -> bytes | None:
     """Metni MP3 byte'larına çevir. Anahtar yok / hata → None (endpoint çökmesin).
-    model verilmezse merkezi TTS_MODEL (flash v2.5) kullanılır."""
+    model verilmezse merkezi TTS_MODEL (flash v2.5); voice_id verilmezse env
+    ELEVENLABS_VOICE_ID (klonlanmış kullanıcı sesi için voice_id geçilir)."""
     key = os.getenv("ELEVENLABS_API_KEY")
-    voice = os.getenv("ELEVENLABS_VOICE_ID")
+    voice = voice_id or os.getenv("ELEVENLABS_VOICE_ID")
     if not key or not voice:
         logger.info("TTS atlandı: ELEVENLABS_API_KEY/VOICE_ID tanımlı değil.")
         return None
@@ -120,6 +123,37 @@ def ensure_audio(anahtar: str, text: str) -> dict:
     _enforce_lru()
     return {"ses_url": f"/audio/{anahtar}.mp3", "tts_usd": tts_cost(konusma),
             "tts_called": True, "cached": False}
+
+
+def voice_audio(voice_id: str, text: str) -> dict:
+    """Belirli bir (klonlanmış) voice_id ile metni seslendir + cache'le.
+
+    Cache anahtarı = sha256(voice_id || temizlenmiş_metin) → aynı ses+metin ikinci
+    kez TTS'e gitmez. Farklı voice_id aynı metinde ayrı dosya (çakışma yok).
+    Döner: {audio_url: str|None, cached: bool, tts_usd: float}.
+
+    Depolama kararı: mevcut data/audio_cache + /audio route yeniden kullanılır
+    (LRU'lu). Railway'de kalıcılık için bu klasöre volume mount edilebilir; ses
+    metinden ucuza yeniden üretilebildiğinden efemer disk de kabul edilebilir."""
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    konusma = konusma_metnine_cevir(text)                # mevcut TTS metin temizliği
+    anahtar = hashlib.sha256(f"{voice_id}||{konusma}".encode("utf-8")).hexdigest()
+    path = audio_path(anahtar)
+
+    if path.exists():
+        return {"audio_url": f"/audio/{anahtar}.mp3", "cached": True, "tts_usd": 0.0}
+
+    audio = synthesize(konusma, voice_id=voice_id)
+    if audio is None:
+        return {"audio_url": None, "cached": False, "tts_usd": 0.0}
+    try:
+        path.write_bytes(audio)
+    except OSError as e:
+        logger.warning("Voice MP3 yazılamadı: %s", e)
+        return {"audio_url": None, "cached": False, "tts_usd": 0.0}
+    _enforce_lru()
+    return {"audio_url": f"/audio/{anahtar}.mp3", "cached": False,
+            "tts_usd": tts_cost(konusma)}
 
 
 def is_safe_name(name: str) -> bool:

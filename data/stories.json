@@ -1,0 +1,62 @@
+{
+  "masallar": [
+    {
+      "id": "masal_uykucu_tavsan",
+      "type": "masal",
+      "title": "Uykucu Tavşan",
+      "duration_hint": "3 dk",
+      "text": "Bir zamanlar yumuşacık bir ormanda, kulakları upuzun küçük bir tavşan yaşarmış. Gün boyu çayırlarda zıplar, papatyalarla oynarmış. Akşam olup da ay gökyüzüne süzülünce, küçük tavşan yuvasına döner, minik gözlerini kapatırmış. Anne tavşan onu usulca sarar, 'İyi geceler minik yüreğim' dermiş. Tavşan derin bir nefes alır, rüyalarında bulutların üstünde zıplarmış. Sen de gözlerini kapat, tıpkı küçük tavşan gibi, yumuşacık bir uykuya dal."
+    },
+    {
+      "id": "masal_ay_dede",
+      "type": "masal",
+      "title": "Ay Dede'nin Işığı",
+      "duration_hint": "3 dk",
+      "text": "Gökyüzünün en tepesinde, herkes uyurken bekçilik eden bir Ay Dede varmış. Her gece yumuşak ışığını yorgan gibi tüm evlerin üstüne sererniş. Küçük çocuklar uyusun diye pencerelerden içeri süzülür, onlara tatlı rüyalar fısıldarmış. 'Korkma' dermiş Ay Dede, 'ben buradayım, sabaha kadar seni izliyorum.' Çocuklar onun ışığında güvende hisseder, mışıl mışıl uyurmuş. Şimdi sen de Ay Dede'nin ışığını hayal et; sıcacık ve güvenli. Gözlerin ağırlaşıyor, uykun geliyor."
+    },
+    {
+      "id": "masal_kucuk_yildiz",
+      "type": "masal",
+      "title": "Küçük Yıldız",
+      "duration_hint": "3 dk",
+      "text": "Gökyüzünde parlamayı yeni öğrenen küçük bir yıldız varmış. Önce çekingenmiş, ışığı soluk kalırmış. Ama diğer yıldızlar ona 'Sen de bizim gibi parlayabilirsin' demiş. Küçük yıldız derin bir nefes almış ve gökyüzünün en tatlı ışığıyla parlamış. O geceden sonra, uyuyan tüm bebeklerin üstüne minik ışıklar serpermiş. Sen uyurken o da seni izliyor, usulca parlıyor. Gözlerini kapat, küçük yıldız sana göz kırpıyor. İyi geceler."
+    },
+    {
+      "id": "masal_ormanin_sessizligi",
+      "type": "masal",
+      "title": "Ormanın Sessizliği",
+      "duration_hint": "3 dk",
+      "text": "Akşam olunca orman yavaşça sakinleşirmiş. Kuşlar yuvalarına döner, kanatlarını katlarmış. Rüzgar ağaçların arasında usulca dolaşır, yaprakları nazikçe sallarmış. Küçük sincap kozalağını bırakır, kuyruğunu yorgan yapıp kıvrılırmış. Her şey sessiz ve huzurluymuş. Sadece derenin şırıltısı duyulurmuş, o da ninni gibiymiş. Sen de bu huzuru hisset; nefesin yavaşlıyor, bedenin gevşiyor. Ormanla birlikte sen de uykuya dalıyorsun."
+    },
+    {
+      "id": "masal_bulut_koyun",
+      "type": "masal",
+      "title": "Bulut Koyunları",
+      "duration_hint": "3 dk",
+      "text": "Gökyüzünde pamuk gibi yumuşacık bulut koyunları yaşarmış. Akşam olunca hepsi bir araya toplanır, uyumak isteyen çocuklara doğru süzülürmüş. Birer birer geçerlermiş: bir koyun, iki koyun, üç koyun... Her geçen koyunla birlikte göz kapakları biraz daha ağırlaşırmış. Bulut koyunları yumuşacık yünlerini serer, çocukları sarıp sarmalarmış. Şimdi sen de say bakalım: bir koyun, iki koyun... Gözlerin kapanıyor, uykun derinleşiyor. Tatlı rüyalar."
+    }
+  ],
+  "ninniler": [
+    {
+      "id": "ninni_dandini",
+      "type": "ninni",
+      "title": "Dandini Dastana",
+      "duration_hint": "2 dk",
+      "text": "Dandini dandini dastana, danalar girmiş bostana. Kov bostancı danayı, yemesin lahanayı. Uyusun da büyüsün ninni, tıpkı bir melek gibi ninni. Yumuşacık yastığında, annesinin kokusuyla. Uyu yavrum uyu, gözlerini kapa. Ninni yavrum ninni, tatlı tatlı uyu."
+    },
+    {
+      "id": "ninni_uyu_yavrum",
+      "type": "ninni",
+      "title": "Uyu Yavrum",
+      "duration_hint": "2 dk",
+      "text": "Uyu yavrum uyu, gecenin sessizliğinde. Ay ışığı üstünde, yıldızlar seni izler. Uyu yavrum uyu, hiçbir şeyden korkma. Annen burada, elini tutuyor. Rüyalarında uç, bulutlara değ. Sabah güneşle uyan, ama şimdi uyu. Ninni ninni ninni, tatlı yavrum ninni."
+    },
+    {
+      "id": "ninni_ay_isigi",
+      "type": "ninni",
+      "title": "Ay Işığı Ninnisi",
+      "duration_hint": "2 dk",
+      "text": "Ay ışığı pencerede, gümüş gibi süzülür. Küçük bebek yatağında, mışıl mışıl uyusun. Rüzgar bile durmuş, kuşlar susmuş dinliyor. Ninni diyor yaprak yaprak, uyu güzel bebeğim. Gözlerini kapat yavaşça, dünya seninle sakin. Ninni ninni ay ışığı, uyu tatlı yavrum uyu."
+    }
+  ]
+}
