@@ -28,6 +28,7 @@ from api import tts          # noqa: E402 — ElevenLabs + ses cache
 from api import avatar       # noqa: E402 — LiveAvatar LITE session token (görüntü katmanı)
 from api.config import get_settings   # noqa: E402 — merkezi env config
 from api.db import db_healthy         # noqa: E402 — DB sağlık kontrolü
+from api.routers import auth          # noqa: E402 — /api/v1/auth/* (Faz 2)
 
 # Yapılandırılmış logging: süre/durum/hata bilgisini tek biçimde ver.
 logging.basicConfig(
@@ -102,6 +103,14 @@ async def log_requests(request: Request, call_next):
     logger.info("%s %s → %d (%d ms)",
                 request.method, request.url.path, response.status_code, dt)
     return response
+
+
+# --- Mobil sözleşmesi: tüm yeni endpoint'ler /api/v1 altında ------------------
+# Mobil EXPO_PUBLIC_API_URL = https://<host>/api/v1 → auth çağrıları /api/v1/auth/*.
+# Mevcut demo endpoint'leri (/ask, /avatar-session, /audio, /health) kök'te kalır
+# (geriye dönük uyum + Railway healthcheck /health).
+API_V1_PREFIX = "/api/v1"
+app.include_router(auth.router, prefix=API_V1_PREFIX)
 
 
 class AskReq(BaseModel):

@@ -24,4 +24,8 @@ alembic>=1.13
 psycopg2-binary>=2.9
 python-jose[cryptography]>=3.3
 passlib[bcrypt]>=1.7
+# bcrypt 4.1+ '__about__' sürüm alanını kaldırdı → passlib 1.7.4 backend'i kırılıyor.
+# 4.0.1 son uyumlu sürüm ve cp36-abi3 wheel'i Python 3.13'te de çalışır (Railway Linux dahil).
+bcrypt<4.1
 python-multipart>=0.0.9
+email-validator>=2.0        # pydantic EmailStr (auth e-posta doğrulaması)

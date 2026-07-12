@@ -28,3 +28,5 @@ class User(Base, TimestampMixin):
                                 cascade="all, delete-orphan", passive_deletes=True)
     voice_profiles = relationship("VoiceProfile", back_populates="user",
                                  cascade="all, delete-orphan", passive_deletes=True)
+    refresh_tokens = relationship("RefreshToken", back_populates="user",
+                                 cascade="all, delete-orphan", passive_deletes=True)
