@@ -16,10 +16,17 @@ class BabyCreate(BaseModel):
     sleep_method: str | None = None
     night_wakes: int | None = None
     night_feeds: int | None = None
+    # Eğitim takibi (Faz 6.1R) — mobilin 14 günlük modülü set eder.
+    training_started_at: date | None = None
+    training_completed_at: date | None = None
 
 
 class BabyUpdate(BaseModel):
-    """Kısmi güncelleme (PATCH) — verilmeyen alanlar değişmez."""
+    """Kısmi güncelleme (PATCH) — verilmeyen alanlar değişmez.
+
+    Mobil 14 günlük eğitim modülü: modül başlarken training_started_at,
+    bitince training_completed_at PATCH'lenir. Regresyon tespiti (İlayda
+    protokolü) training_completed_at'e dayanır."""
     name: str | None = Field(default=None, min_length=1, max_length=120)
     birth_date: date | None = None
     gender: str | None = None
@@ -30,6 +37,8 @@ class BabyUpdate(BaseModel):
     sleep_method: str | None = None
     night_wakes: int | None = None
     night_feeds: int | None = None
+    training_started_at: date | None = None
+    training_completed_at: date | None = None
 
 
 class BabyResp(BaseModel):
@@ -45,6 +54,8 @@ class BabyResp(BaseModel):
     sleep_method: str | None
     night_wakes: int | None
     night_feeds: int | None
+    training_started_at: date | None
+    training_completed_at: date | None
     created_at: datetime
     updated_at: datetime
 

@@ -22,7 +22,7 @@ from api.schemas.auth import (
     LoginReq, MessageResp, RefreshReq, RegisterReq, ResetPasswordReq,
     ResetPasswordRequestReq, ResetPasswordRequestResp, TokenPair,
 )
-from api.services import security
+from api.services import mailer, security
 
 logger = logging.getLogger("tavsan.auth")
 settings = get_settings()
@@ -64,7 +64,13 @@ def register(req: RegisterReq, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Bu e-posta zaten kayıtlı")
     logger.info("Yeni kullanıcı kaydı: user_id=%s", user.id)   # KVKK: e-posta loglanmaz
-    return _issue_token_pair(db, user)
+    tokens = _issue_token_pair(db, user)
+    # Hoş geldin e-postası YAN ETKİDİR — başarısız olsa da kayıt tamamlanır.
+    try:
+        mailer.send_welcome(email)
+    except Exception:                        # mailer zaten yutar; ekstra güvenlik ağı
+        logger.exception("Hoş geldin e-postası gönderilemedi (user_id=%s)", user.id)
+    return tokens
 
 
 @router.post("/login", response_model=TokenPair)
@@ -121,10 +127,9 @@ def logout(req: RefreshReq, db: Session = Depends(get_db),
 def reset_password_request(req: ResetPasswordRequestReq, db: Session = Depends(get_db)):
     """Sıfırlama token'ı üret + hash'ini DB'ye yaz.
 
-    Faz 5R: ham token artık YANITTA DÖNMEZ ve LOGLANMAZ. E-posta kanalı (Resend)
-    Faz 6'da bağlanana kadar token kullanıcıya ulaşamaz — akış kasıtlı olarak
-    tamamlanamaz durumdadır (mobilde "yakında"). Bu, e-postasını bilen birinin
-    hesabı ele geçirmesini engeller.
+    Faz 5R: ham token YANITTA DÖNMEZ (e-postasını bilen biri hesabı ele geçiremesin).
+    Faz 6.3: token artık E-POSTA ile gönderilir (Resend). RESEND_API_KEY yoksa
+    mailer console moduna düşer — gönderim olmaz ama AKIŞ KIRILMAZ.
 
     Kullanıcı sayımını sızdırmamak için e-posta kayıtlı olmasa bile aynı yanıt döner."""
     email = req.email.strip().lower()
@@ -141,10 +146,12 @@ def reset_password_request(req: ResetPasswordRequestReq, db: Session = Depends(g
         used=False,
     ))
     db.commit()
-    # KVKK + güvenlik: ham token hiçbir yere (yanıt/log) yazılmaz; yalnız hash'i DB'de.
-    logger.info("Parola sıfırlama talebi: user_id=%s", user.id)
+
+    # Ham token YALNIZ e-posta kanalına verilir; yanıta ve uygulama loguna YAZILMAZ.
+    result = mailer.send_password_reset(email, raw)
     del raw
-    # TODO(Faz 6 / Resend): raw token'ı e-posta ile gönder (yanıta EKLEME).
+    logger.info("Parola sıfırlama talebi: user_id=%s mail_provider=%s ok=%s",
+                user.id, result.get("provider"), result.get("ok"))
     return ResetPasswordRequestResp(detail=generic)
 
 

@@ -29,3 +29,7 @@ passlib[bcrypt]>=1.7
 bcrypt<4.1
 python-multipart>=0.0.9
 email-validator>=2.0        # pydantic EmailStr (auth e-posta doğrulaması)
+
+# --- Faz 6: bildirim zamanlayıcısı (uygulama içi, ayrı worker yok) ---
+# Yalnız ENVIRONMENT=production'da başlar (bkz. api/services/notifier.py).
+apscheduler>=3.10,<4

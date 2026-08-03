@@ -27,4 +27,10 @@ class Baby(Base, TimestampMixin):
     night_wakes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     night_feeds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # --- Eğitim takibi (Faz 6.1R, İlayda protokolü) --------------------------
+    # Mobildeki 14 günlük eğitim modülü bu tarihleri set eder. Regresyon tespiti
+    # training_completed_at üzerinden çalışır (bkz. services/plan_adapter.py).
+    training_started_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    training_completed_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+
     user = relationship("User", back_populates="babies")

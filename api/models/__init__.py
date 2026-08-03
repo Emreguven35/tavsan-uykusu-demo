@@ -11,9 +11,12 @@ from api.models.chat_message import ChatMessage
 from api.models.voice_profile import VoiceProfile
 from api.models.refresh_token import RefreshToken
 from api.models.password_reset_token import PasswordResetToken
+from api.models.push_token import PushToken
+from api.models.sent_notification import SentNotification
 
 __all__ = [
     "User", "Baby", "SleepLog", "SleepPlan",
     "Subscription", "ChatMessage", "VoiceProfile",
     "RefreshToken", "PasswordResetToken",
+    "PushToken", "SentNotification",
 ]

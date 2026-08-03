@@ -88,3 +88,98 @@ MP3 (`audio/mpeg`) servis eder. Dosya adı yalnız hash kalıbıdır (path-trave
 
 > **Not:** Streamlit demosu ayrı çalışır (Streamlit Cloud). Bu API onu etkilemez;
 > ikisi aynı `engine/` motorunu paylaşır.
+
+---
+
+# Faz 6 — Adaptif plan, bildirim, e-posta
+
+Canlı: `https://tavsan-api-production.up.railway.app` · Mobil taban: `.../api/v1`
+
+## 6.1 Adaptif plan
+
+Plan içeriği artık markdown'a **ek olarak** yapısal alanlar taşır:
+
+```jsonc
+"content": {
+  "markdown": "...",                  // değişmedi (mobil gösterim)
+  "schedule": [                       // YENİ — saat saat çizelge
+    {"key":"wake","type":"wake","start":"07:00","end":"07:00","label":"Sabah uyanış",
+     "start_minute":420,"end_minute":420},
+    {"key":"nap_1","type":"nap","start":"10:00","end":"11:30","label":"1. gündüz uykusu", ...},
+    {"key":"bedtime","type":"night","start":"19:00","end":"07:00","label":"Gece uykusu", ...}
+  ],
+  "night_wake_protocol": {            // YENİ — 45-15-45 gece direnme protokolü
+    "resist_minutes": 45, "routine_minutes": 15, "repeat": true, "aciklama": "..."
+  },
+  "adapted": true, "base_plan_id": "<uuid>", "adaptation": { ... }
+}
+```
+
+| Endpoint | Açıklama |
+|---|---|
+| `POST /plans/adapt?baby_id=` | Son 3 günün kayıtlarına göre çizelgeyi kaydırır. Kayıt yoksa/plan yoksa **409**. |
+| `GET /plans/today?baby_id=` | Bugünün planı; yoksa en güncel plan bugüne adapte edilir (lazy). Hiç plan yoksa **404**. |
+
+**Tekillik:** `generate` ve `adapt` aynı güne yazarken o günün kaydını **günceller** (UPSERT) — satır yığılmaz.
+
+### Kurallar (deterministik, LLM yok)
+
+İki **ayrı katman** vardır, karıştırılmamalıdır:
+
+1. **Günlük ritim kaydırma** (eğitim dışı dönem): gerçek uyanış plandakinden **≥30 dk**
+   saparsa çizelgenin tamamı sapma kadar kaydırılır, **maks ±45 dk**. Kaydırılmış
+   yatış yaş bandının `yatma_vakti` aralığı veya uyanıklık penceresi dışına düşerse
+   kaydırma yapılmaz, plan **tam yeniden üretilir** (`regenerate_required=true`).
+2. **Regresyon protokolü** (İlayda): `training_completed_at` dolu **ve** üzerinden
+   **≥13 gün** geçmiş **ve** son 3 gecenin **≥2**'sinde **≥20 dk** süren `night_wake`
+   varsa → `regression_detected=true`, `restart_program_suggested=true`.
+   **Otomatik hiçbir şey üretilmez.**
+
+### Mobil sözleşmesi (yapılacaklar)
+
+- **14 günlük eğitim modülü** `PATCH /babies/{id}` ile `training_started_at` (modül
+  başlarken) ve `training_completed_at` (bitince) alanlarını set etmelidir.
+  Bu tarihler set edilmezse regresyon tespiti **hiçbir zaman** çalışmaz.
+- `restart_program_suggested=true` geldiğinde kullanıcıya *"Programı baştan başlatmak
+  ister misiniz?"* kartı gösterilir. Onaylanırsa mobil: `POST /plans/generate` +
+  `PATCH /babies/{id}` ile `training_started_at=bugün`.
+- Dashboard `GET /plans/today` çağırır (adaptasyonu tetikler).
+
+## 6.2 Bildirimler (Expo Push)
+
+| Endpoint | Açıklama |
+|---|---|
+| `POST /notifications/register-token` | `{expo_token, platform?, device_name?}` — upsert. Cihaz başka hesaba geçerse token devredilir. |
+| `DELETE /notifications/token` | `{expo_token}` — çıkışta. Token yoksa da 200 (idempotent). |
+| `GET /notifications/preferences` | `{plan_reminders, daily_summary}` — ikisi de varsayılan `true`. |
+| `PATCH /notifications/preferences` | Kısmi güncelleme. |
+
+**Zamanlayıcı:** uygulama içi APScheduler, **15 dakikada bir** (ayrı worker yok).
+Bugünün planı olan her bebek için, önümüzdeki **15–30 dk** penceresinde başlayan uyku
+bloklarına bildirim gönderir. Mükerrerlik `sent_notifications` tablosundaki UNIQUE
+kısıtla engellenir. `DeviceNotRegistered` → token silinir.
+**Yalnız `ENVIRONMENT=production`'da başlar** (lokal test kirliliği önlenir).
+
+> **Ölçek notu:** birden çok instance'a çıkılırsa zamanlayıcı ayrı bir servise
+> taşınmalıdır; şu an mükerrerliği yalnız DB kısıtı engelliyor.
+
+## 6.3 E-posta
+
+`MAIL_PROVIDER` üç moddan biri:
+
+| Mod | Davranış |
+|---|---|
+| `resend` | Gerçek gönderim (`RESEND_API_KEY` gerekir). |
+| `console` | Gönderim yok, içerik **loglanır**. Yalnız lokal geliştirme — token log'a düşer. |
+| `disabled` | Gönderim yok, içerik **hiçbir yere** yazılmaz. Endpoint yine 200 döner. |
+
+Boş bırakılırsa: anahtar varsa `resend`, yoksa production'da `disabled`,
+geliştirmede `console`. **Şu an production `disabled`** — Resend bağlanınca tek env
+değişikliğiyle (`RESEND_API_KEY` + `MAIL_PROVIDER` silinmesi) aktifleşir.
+
+`POST /auth/reset-password-request` → 200 `{detail}`. Token **yanıtta dönmez**;
+`resend` modunda derin bağlantı ile e-postaya gider:
+`tavsan-uykusu://reset-password?token=...` (+ elle girme için düz metin token).
+
+> **Mobil:** Resend bağlanana kadar "Şifremi unuttum" akışı **"yakında"** olarak
+> işaretlenmelidir — `disabled` modda token kullanıcıya ulaşmaz.

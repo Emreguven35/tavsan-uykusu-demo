@@ -32,6 +32,8 @@ from api.deps import require_demo_key # noqa: E402 — /ask + /avatar-session ko
 from api.routers import auth          # noqa: E402 — /api/v1/auth/* (Faz 2)
 from api.routers import babies, logs, plans, subscriptions  # noqa: E402 — Faz 3
 from api.routers import chat, voice   # noqa: E402 — Faz 4 (RAG chat + ses)
+from api.routers import notifications # noqa: E402 — Faz 6.2 (push token + tercihler)
+from api.services import notifier     # noqa: E402 — Faz 6.2 (bildirim zamanlayıcısı)
 
 # Yapılandırılmış logging: süre/durum/hata bilgisini tek biçimde ver.
 logging.basicConfig(
@@ -81,7 +83,13 @@ async def lifespan(app: FastAPI):
             "Mobil native istekler Origin göndermediği için etkilenmez.")
     if not settings.demo_api_key:
         logger.info("DEMO_API_KEY yok → /ask ve /avatar-session KAPALI (503).")
-    yield
+
+    # Bildirim zamanlayıcısı (Faz 6.2) — yalnız production'da başlar.
+    notifier.start_scheduler()
+    try:
+        yield
+    finally:
+        notifier.shutdown_scheduler()
 
 
 app = FastAPI(title="Tavşan Uykusu API", version="1.0.0", lifespan=lifespan)
@@ -126,6 +134,7 @@ app.include_router(plans.router, prefix=API_V1_PREFIX)
 app.include_router(subscriptions.router, prefix=API_V1_PREFIX)
 app.include_router(chat.router, prefix=API_V1_PREFIX)
 app.include_router(voice.router, prefix=API_V1_PREFIX)
+app.include_router(notifications.router, prefix=API_V1_PREFIX)
 
 
 class AskReq(BaseModel):

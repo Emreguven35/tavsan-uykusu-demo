@@ -72,6 +72,29 @@ class Settings:
         # tetikleyicileriydi. Tanımsızsa bu endpoint'ler KAPALIDIR (503).
         self.demo_api_key = (os.getenv("DEMO_API_KEY") or "").strip()
 
+        # --- E-posta (Faz 6.3) ----------------------------------------------
+        # MAIL_PROVIDER üç moddan biri:
+        #   "resend"   → gerçek gönderim (RESEND_API_KEY gerekir)
+        #   "console"  → gönderim yok, içerik LOGLANIR (yalnız lokal geliştirme)
+        #   "disabled" → gönderim yok, içerik HİÇBİR YERE yazılmaz; akış sessizce
+        #                sonlanır. Token ne e-postaya ne loga gider (production
+        #                varsayılanı — sıfırlama token'ı log'a sızmaz).
+        # Açıkça verilmezse: anahtar varsa resend, yoksa production'da disabled,
+        # geliştirmede console.
+        self.resend_api_key = (os.getenv("RESEND_API_KEY") or "").strip()
+        self.mail_from = (os.getenv("MAIL_FROM")
+                          or "Tavşan Uykusu <onboarding@resend.dev>").strip()
+        _provider = (os.getenv("MAIL_PROVIDER") or "").strip().lower()
+        if not _provider:
+            if self.resend_api_key:
+                _provider = "resend"
+            else:
+                _provider = "disabled" if self.is_production else "console"
+        self.mail_provider = _provider
+        # Mobil derin bağlantı şeması (parola sıfırlama e-postasındaki link).
+        self.app_deep_link_scheme = (os.getenv("APP_DEEP_LINK_SCHEME")
+                                     or "tavsan-uykusu").strip()
+
         # CORS — virgülle ayrılmış origin listesi. "*" YALNIZ development'ta geçerli;
         # production'da yok sayılır (aşağıda).
         self.allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").strip()
