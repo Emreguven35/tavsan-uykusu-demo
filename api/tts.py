@@ -104,7 +104,7 @@ def ensure_audio(anahtar: str, text: str) -> dict:
     path = audio_path(anahtar)
 
     if path.exists():                            # ses cache HIT → TTS yok
-        return {"ses_url": f"/audio/{anahtar}.mp3", "tts_usd": 0.0,
+        return {"ses_url": audio_url(anahtar), "tts_usd": 0.0,
                 "tts_called": False, "cached": True}
 
     # TTS öncesi temizlik: yalnız SESE giden metin değişir. Dosya adı (anahtar)
@@ -121,7 +121,7 @@ def ensure_audio(anahtar: str, text: str) -> dict:
         return {"ses_url": None, "tts_usd": 0.0, "tts_called": True, "cached": False}
 
     _enforce_lru()
-    return {"ses_url": f"/audio/{anahtar}.mp3", "tts_usd": tts_cost(konusma),
+    return {"ses_url": audio_url(anahtar), "tts_usd": tts_cost(konusma),
             "tts_called": True, "cached": False}
 
 
@@ -141,7 +141,7 @@ def voice_audio(voice_id: str, text: str) -> dict:
     path = audio_path(anahtar)
 
     if path.exists():
-        return {"audio_url": f"/audio/{anahtar}.mp3", "cached": True, "tts_usd": 0.0}
+        return {"audio_url": audio_url(anahtar), "cached": True, "tts_usd": 0.0}
 
     audio = synthesize(konusma, voice_id=voice_id)
     if audio is None:
@@ -152,8 +152,21 @@ def voice_audio(voice_id: str, text: str) -> dict:
         logger.warning("Voice MP3 yazılamadı: %s", e)
         return {"audio_url": None, "cached": False, "tts_usd": 0.0}
     _enforce_lru()
-    return {"audio_url": f"/audio/{anahtar}.mp3", "cached": False,
+    return {"audio_url": audio_url(anahtar), "cached": False,
             "tts_usd": tts_cost(konusma)}
+
+
+def audio_url(anahtar: str) -> str:
+    """Ses dosyasının istemciye verilecek adresi.
+
+    PUBLIC_BASE_URL tanımlıysa MUTLAK URL döner
+    (https://tavsan-api-production.up.railway.app/audio/<hash>.mp3) — mobilin
+    göreli path'i yanlış tabanla birleştirme riski kökten kalkar.
+    Tanımsızsa göreli path (/audio/<hash>.mp3) — lokal geliştirme davranışı."""
+    from api.config import get_settings          # döngüsel import önleme
+    base = get_settings().public_base_url
+    yol = f"/audio/{anahtar}.mp3"
+    return f"{base}{yol}" if base else yol
 
 
 def is_safe_name(name: str) -> bool:

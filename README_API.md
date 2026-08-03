@@ -279,3 +279,58 @@ Diğer davranışlar:
   cevabı korunur.
 - Gece uyanmaları 12:00'den önceyse **bir önceki günün gecesine** yazılır.
 - KVKK: bebek verisi içeriği uygulama loguna yazılmaz (yalnız `bebek=var|yok`).
+
+## 6.7 Masal kütüphanesi + mutlak ses URL'leri
+
+### Masal kataloğu
+
+`data/stories.json` **statik**tir — metinler `scripts/build_stories.py` ile Claude
+API üzerinden **bir kez** üretilip commit'lenir. `/voice/stories` ve
+`/voice/generate` çalışma zamanında LLM çağırmaz (maliyet + gecikme + tutarlılık).
+
+```sh
+python scripts/build_stories.py           # eksik masalları üret
+python scripts/build_stories.py --force   # hepsini yeniden üret
+```
+
+5 masal (511-629 kelime, ort. 589; `duration_hint: "5 dk"`):
+Keloğlan ile Sihirli Değnek · Kırmızı Başlıklı Kız · Üç Küçük Domuzcuk ·
+Çirkin Ördek Yavrusu · Ayşecik ile Uyku Perisi. **3 ninni değişmedi.**
+
+Uyku öncesi ton kuralları üretim prompt'unda sabit: kısa cümleler, sakin ritim,
+**şiddet/korku yok**, mutlu-sakin son, düz metin (markdown/emoji yok — mevcut TTS
+temizleme katmanından sorunsuz geçer). Kırmızı Başlıklı Kız ve Üç Küçük Domuzcuk
+**yumuşatılmıştır**: kurt kimseyi yemez, ev yıkılmaz, kovalama/avcı/balta yoktur.
+
+### Uzun metin ve `eleven_flash_v2_5`
+
+**Bölme gerekmedi.** `eleven_flash_v2_5` istek başına **40.000 karakter** kabul
+ediyor; 700 kelimelik Türkçe masal ~5.000 karakter — limitin çok altında. Kod
+değiştirilmedi. (Karşılaştırma: `eleven_multilingual_v2` 10.000, `eleven_v3` 5.000.)
+
+### Mutlak ses URL'leri
+
+`PUBLIC_BASE_URL` tanımlıysa `audio_url` ve `sampleUrl` **mutlak** döner:
+
+```
+https://tavsan-api-production.up.railway.app/audio/<hash>.mp3
+```
+
+Tanımsızsa göreli path (`/audio/<hash>.mp3`) — lokal geliştirme davranışı korunur.
+Mobilin göreli path'i yanlış tabanla birleştirme riski böylece kalkar.
+
+`/audio/{dosya}` **auth'suz** erişilebilir: dosya adı tahmin edilemez bir
+SHA-256 hash'idir ve route yalnız hash kalıbını kabul eder (path-traversal
+engelli). Beta için yeterli koruma; kamuya açık ama listelenemez.
+
+### Ses cache (maliyet)
+
+`voice_audio()` anahtarı `sha256(voice_id || temizlenmiş_metin)`. Aynı kullanıcı
+aynı masalı ikinci kez dinlerken **TTS'e gidilmez** — dosya diskten servis edilir,
+`cached: true`, maliyet `0`. Farklı `voice_id` aynı metinde ayrı dosya üretir.
+
+> **Maliyet notu:** 5 masal = **21.124 karakter/kullanıcı** (~**$2.32** @ flash
+> v2.5 kredi fiyatı, $0.00011/karakter). Bu **tek seferliktir** — tekrar dinlemeler
+> cache'ten gelir. LRU sınırı 500 dosya / 100 MB; Railway'de disk efemer
+> olduğundan yeniden deploy sonrası cache boşalır ve ilk dinlemeler yeniden
+> üretilir. Kalıcılık isteniyorsa `data/audio_cache` klasörüne volume mount edilmeli.

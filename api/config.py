@@ -95,6 +95,12 @@ class Settings:
         self.app_deep_link_scheme = (os.getenv("APP_DEEP_LINK_SCHEME")
                                      or "tavsan-uykusu").strip()
 
+        # --- Public taban URL (Faz 6.7) --------------------------------------
+        # Ses dosyası bağlantıları MUTLAK döner (https://.../audio/<hash>.mp3) —
+        # mobilin göreli path birleştirme riski ortadan kalkar. Tanımsızsa
+        # göreli path'e düşülür (lokal geliştirme + mevcut testler bozulmaz).
+        self.public_base_url = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+
         # CORS — virgülle ayrılmış origin listesi. "*" YALNIZ development'ta geçerli;
         # production'da yok sayılır (aşağıda).
         self.allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").strip()
