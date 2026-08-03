@@ -183,3 +183,65 @@ değişikliğiyle (`RESEND_API_KEY` + `MAIL_PROVIDER` silinmesi) aktifleşir.
 
 > **Mobil:** Resend bağlanana kadar "Şifremi unuttum" akışı **"yakında"** olarak
 > işaretlenmelidir — `disabled` modda token kullanıcıya ulaşmaz.
+
+## 6.4 Kademeli fallback zinciri (K1→K4) + kapsama telemetrisi
+
+`/chat` artık "bilgim yok" duvarı örmez; sırayla dener ve hangi katmanda
+cevapladığını raporlar (`ChatResp.retrieval_layer`):
+
+| Katman | Ne zaman | Davranış |
+|---|---|---|
+| **k1** | Alan içi, `top_score ≥ 0.55` | Metodolojiden doğrudan cevap |
+| **k2** | Alan içi, `top_score ≥ 0.40` **veya** yaş bandı çözüldü | Eşik bir kademe düşer (−0.05) + yaş bandı genişletme; "en yakın bilgiye göre" çerçevelenir |
+| **k3** | Alan içi ama skor düşük | Yaş-bağımsız **genel ilkeler** (`global_rule:*`) havuza girer + cevabın sonunda **1 netleştirme sorusu** sorulur |
+| **k4** | Alan sinyali yok ve skor düşük | Kibar kapsam-dışı mesajı (**deterministik, LLM çağrılmaz**) |
+
+**Eşik kalibrasyonu ölçümle yapıldı:** kapsam içi sorular `0.63–0.89`, kapsam dışı
+`0.21–0.53`. Skor tek başına yetmiyor (`"mama tarifi"` 0.526 ile `"odası kaç derece"`
+0.629 çok yakın), bu yüzden K4 kapısı **skor + alan sözlüğü** birlikte değerlendirir.
+Sözlük geniş tutulmuştur: yanlış K4 (geçerli soruyu reddetmek), gereksiz K3'ten
+daha kötüdür. Skor `≥0.55` ise sözlük eşleşmese bile soru alan içi sayılır.
+
+**Değişmezler:** tıbbi sınır hiçbir katmanda gevşemez (tıbbi terim içeren sorular
+asla K4 sayılmaz, doktor yönlendirmesi kapısına düşer); Claude K3'te bile yalnız
+KB ilkelerinden konuşur, serbest bilgi eklemez.
+
+### Kapsama telemetrisi
+
+`chat_messages` tablosuna `retrieval_layer` (k1..k4, indeksli) ve `top_score`
+eklendi (migration `0005`). Cache hit'te ikisi de NULL (retrieval yapılmadı).
+
+Haftalık korpus boşluğu analizi — İlayda ile güncelleme turlarının girdisi:
+
+```sql
+SELECT content, top_score, created_at
+  FROM chat_messages
+ WHERE role = 'user'
+   AND retrieval_layer IN ('k3', 'k4')
+   AND created_at >= now() - interval '7 days'
+ ORDER BY created_at DESC;
+```
+
+## Plan `content` şeması (resmî)
+
+```jsonc
+{
+  "headline": "Elif için 9 ay programı — 2 kısa uyku, 19:00 yatış",
+  "schedule": [
+    {"time": "07:00", "end": "07:00", "type": "wake",  "title": "Sabah uyanışı",
+     "key": "wake", "start_minute": 420, "end_minute": 420},
+    {"time": "10:00", "end": "11:30", "type": "nap",   "title": "1. gündüz uykusu",
+     "note": "Uyanıklık penceresi ~180 dk sonra", "key": "nap_1", ...},
+    {"time": "19:00", "end": "07:00", "type": "sleep", "title": "Gece uykusu", ...}
+  ],
+  "night_wake_protocol": {"resist_minutes": 45, "routine_minutes": 15, "repeat": true, "aciklama": "..."},
+  "markdown": "...",        // KALDI — geriye uyumluluk + detay metni
+  "bucket": "9_ay", "adapted": false, ...
+}
+```
+
+`schedule` **hem** `/plans/generate` **hem** `/plans/adapt` yanıtında doludur.
+`type` enum'u: `wake | nap | sleep | feed | routine` — v1'de yalnız `wake/nap/sleep`
+üretilir (`feed`/`routine` şemada ayrıldı; KB'de bu blokları türetecek veri yok).
+`key`/`start_minute`/`end_minute` dahilidir (kaydırma + bildirim penceresi); mobil
+`time`/`end`/`type`/`title`/`note` alanlarını kullanır.

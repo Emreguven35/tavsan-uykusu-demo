@@ -102,7 +102,8 @@ def _generate_content(baby, req_overrides: dict | None,
         param.get("parametreler", {}), plan_adapter.DEFAULT_WAKE_MIN)
 
     return {
-        "markdown": markdown,
+        "markdown": markdown,                       # KALIR (geriye uyum + detay metni)
+        "headline": plan_adapter.headline(baby.name, param["bucket"], schedule),
         "bucket": param["bucket"],
         "yas": param["yas"],
         "plan_secimi": param["plan_secimi"],
@@ -211,6 +212,9 @@ def _run_adaptation(db: Session, user: User, baby, base_plan: SleepPlan,
         content = base_content
         content.update({
             "schedule": result["schedule"],
+            # Çizelge kaydıysa başlıktaki yatış saati de güncellenmeli.
+            "headline": plan_adapter.headline(
+                baby.name, base_content.get("bucket"), result["schedule"]),
             "adapted": True,
             "regenerated": False,
             "base_plan_id": str(base_plan.id),

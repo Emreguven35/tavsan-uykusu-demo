@@ -628,6 +628,95 @@ def retrieve(query: str, top_k: int = SEM_TOP_K, min_score: float | None = None)
     return _retrieve_tfidf(query, top_k, ms)
 
 
+# ---------------------------------------------------------------------------
+# KADEMELİ FALLBACK ZİNCİRİ (K1→K4) — "cevapsızlık" bitirilir
+# ---------------------------------------------------------------------------
+# K1: normal retrieval → metodolojiden doğrudan cevap.
+# K2: yaş bandı genişletme + bir kademe düşük eşik → "en yakın bilgiye göre".
+# K3: yaş-bağımsız GENEL İLKELER + kullanıcıya 1 netleştirme sorusu (duvar örülmez).
+# K4: gerçekten kapsam dışı → kibarca kapsam dışı de, metodolojinin kapsamını hatırlat.
+#
+# EŞİK KALİBRASYONU (ölçülen top_score'lar): kapsam içi 0.63–0.89, kapsam dışı
+# 0.21–0.53. Skor TEK BAŞINA yeterli değil ("mama tarifi" 0.526 ile "odası kaç
+# derece" 0.629 çok yakın), bu yüzden K4 kapısı skor + ALAN SİNYALİ birlikte
+# değerlendirir. Yanlış K4 (geçerli soruyu reddetmek) en kötü hatadır → şüphede
+# kalınırsa alan içi sayılır.
+K1_MIN_SCORE = 0.55        # bunun üstü: doğrudan cevap
+K2_MIN_SCORE = 0.40        # bunun üstü: en yakın bilgiye göre çerçevele
+K3_ILKE_LIMIT = 6          # genel ilke katmanında bağlama girecek ilke sayısı
+
+# Uyku alanı sözlüğü — soru bu alanla ilgili mi (kök eşleşmesi, ekler serbest).
+# Geniş tutulur: yanlış K4'ten kaçınmak, gereksiz K3'ten daha önemlidir.
+UYKU_ALANI_KOKLERI = (
+    "uyku", "uyu", "uyan", "uyut", "yat", "nap", "şeker", "kestir",
+    "gece", "gündüz", "sabah", "akşam", "rutin", "düzen", "program", "çizelge",
+    "emzik", "emerek", "beşik", "yatak", "oda", "sıcaklık", "derece", "ortam",
+    "karanlık", "ışık", "gürültü", "kundak", "ağla", "kucak", "sallama",
+    "eğitim", "regres", "diş", "büyüme atağ", "biberon", "meme", "beslen",
+)
+# Tıbbi terimler: bu sorular ASLA K4 (kapsam dışı) sayılmaz — tıbbi sınır
+# kapısının çalışması için LLM katmanına düşmeleri gerekir (çocuk doktoru yanıtı).
+MEDIKAL_TERIMLER = (
+    "hasta", "ilaç", "reflü", "kolik", "nöbet", "ateş", "alerji", "kusma",
+    "ishal", "astım", "epilepsi", "nefes", "solunum", "kalp", "doktor",
+)
+
+
+def _alan_sinyali(soru: str, yas_ay: float | None) -> bool:
+    """Soru uyku metodolojisi alanına giriyor mu? (yaş belirtimi de sinyaldir)"""
+    if yas_ay is not None:
+        return True
+    low = tr_lower_safe(soru)
+    return (any(k in low for k in UYKU_ALANI_KOKLERI)
+            or any(k in low for k in MEDIKAL_TERIMLER))
+
+
+def tr_lower_safe(s: str) -> str:
+    """Türkçe güvenli küçültme (I/İ tuzağı) — alan sözlüğü eşleşmesi için."""
+    return (s or "").replace("I", "ı").replace("İ", "i").lower()
+
+
+def _genel_ilke_birimleri(limit: int = K3_ILKE_LIMIT) -> list[dict]:
+    """Yaş-BAĞIMSIZ temel ilkeler (global_rule birimleri) — K3 havuzu.
+
+    Bu birimler her zaman erişilebilir olmalı: spesifik kayıt bulunmasa bile
+    metodolojinin genel çerçevesi (uyku ortamı, rutin, kendine dalma, uyanıklık
+    penceresi mantığı) KB'DEN verilebilsin. Cevap yine KB dışına çıkmaz."""
+    units = (_state.get("units") or []) if isinstance(_state, dict) else []
+    ilkeler = [u for u in units if str(u.get("chunk_id", "")).startswith("global_rule:")]
+    out = []
+    for u in ilkeler[:limit]:
+        ek = dict(u)
+        ek.setdefault("_score", 0.0)
+        out.append(ek)
+    return out
+
+
+def _katman_belirle(top_score: float, alan_ici: bool, bant_var: bool) -> str:
+    """Hangi fallback katmanında cevaplanacak? Dönen: 'k1'|'k2'|'k3'|'k4'."""
+    if alan_ici and top_score >= K1_MIN_SCORE:
+        return "k1"
+    if alan_ici and (top_score >= K2_MIN_SCORE or bant_var):
+        return "k2"
+    if alan_ici:
+        return "k3"
+    # Alan sinyali yok: skor çok yüksekse yine de içeri al (sözlük her şeyi bilemez).
+    if top_score >= K1_MIN_SCORE:
+        return "k1"
+    return "k4"
+
+
+# K4 — kapsam dışı. Deterministik metin: LLM çağrılmaz (maliyet yok, sapma yok).
+KAPSAM_DISI_MESAJ = (
+    "Bu soru Tavşan Uykusu metodolojisinin kapsamı dışında kalıyor. "
+    "Ben bebeğinizin uykusuyla ilgili konularda yardımcı olabiliyorum: "
+    "uyku düzeni ve gündüz uykuları, uyanıklık pencereleri, gece uyanmaları, "
+    "uyku ortamı ve rutinler, kendi kendine uykuya dalma, emzik ve gece "
+    "beslenmesi, uyku eğitimi ve regresyon dönemleri. "
+    "Sorunuzu bu başlıklardan biriyle ilişkilendirirseniz seve seve yardımcı olurum."
+)
+
+
 SYSTEM_PROMPT = """Sen Tavşan Uykusu uyku eğitimi programının bilgi botusun. \
 Annelere kısa, profesyonel, sıcak Türkçe cevap verirsin. \
 SADECE sana sunulan bilgi parçalarını kullanırsın; dışına çıkmazsın. \
@@ -801,27 +890,56 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None) -> dict:
     if entry is not None:
         # cache hit: retrieval YAPILMAZ (davranış korunur). Ses, eşleşen kaydın
         # hash'iyle (entry['h']) hizalanır ki hazır MP3 yeniden kullanılabilsin.
+        # Cache hit: retrieval yapılmadığı için katman/skor ÖLÇÜLMEZ (None).
+        # Telemetride cache'li cevaplar kapsama analizine karışmasın.
         return {"cevap": entry["answer"], "cache_hit": True, "kaynaklar": [],
                 "anahtar": entry["h"], "llm": False, "in_chars": 0,
-                "out_chars": len(entry["answer"])}
+                "out_chars": len(entry["answer"]),
+                "retrieval_layer": None, "top_score": None}
 
+    # --- K1: normal retrieval ------------------------------------------------
     retrieved = retrieve(soru, top_k=SEM_TOP_K)
 
-    # Yaş bandı köprüsü: bandın sayısal parametreleri + o bandın korpustaki
-    # birimleri bağlama EKLENİR (retrieval skorları değişmez → mevcut davranış
-    # korunur, yalnız bant boşluğu kapanır).
+    # Yaş bandı köprüsü (K2 bileşeni): bandın sayısal parametreleri + o bandın
+    # korpustaki birimleri bağlama EKLENİR (retrieval skorları değişmez → mevcut
+    # sıralama davranışı korunur, yalnız bant boşluğu kapanır).
     bantlar, yas_ay = bant_coz(soru, yas_bandi)
     bant_blok = yas_bandi_blok(bantlar, yas_ay)
+
+    # Katman kararı için ham en yüksek skor (eşikten bağımsız ölçülür).
+    _olcum = retrieved or retrieve(soru, top_k=1, min_score=0.0)
+    top_score = float(_olcum[0].get("_score", 0.0)) if _olcum else 0.0
+    katman = _katman_belirle(top_score, _alan_sinyali(soru, yas_ay), bool(bant_blok))
+
+    # --- K4: kapsam dışı → deterministik yanıt, LLM çağrılmaz ---------------
+    if katman == "k4":
+        return {"cevap": KAPSAM_DISI_MESAJ, "cache_hit": False, "kaynaklar": [],
+                "anahtar": h, "llm": False, "in_chars": 0,
+                "out_chars": len(KAPSAM_DISI_MESAJ),
+                "retrieval_layer": "k4", "top_score": top_score}
+
     if bantlar:
         retrieved = _bant_birimleriyle_birlestir(retrieved, bantlar)
 
+    # --- K2: eşiği bir kademe düşür (bağlam hâlâ zayıfsa) -------------------
+    if katman == "k2" and len(retrieved) < SEM_TOP_K:
+        dusuk = max(0.0, SEM_MIN_SCORE - 0.05)
+        for u in retrieve(soru, top_k=SEM_TOP_K, min_score=dusuk):
+            if all(u.get("chunk_id") != r.get("chunk_id") for r in retrieved):
+                retrieved.append(u)
+
+    # --- K3: yaş-bağımsız genel ilkeler havuza EKLENİR ----------------------
+    if katman == "k3":
+        for u in _genel_ilke_birimleri():
+            if all(u.get("chunk_id") != r.get("chunk_id") for r in retrieved):
+                retrieved.append(u)
+
     if not retrieved and not bant_blok:
-        msg = (
-            "Bu konuda elimde yeterli bilgi yok. "
-            "Sorunuzu biraz farklı ifade ederek tekrar sorabilirsiniz."
-        )
-        return {"cevap": msg, "cache_hit": False, "kaynaklar": [], "anahtar": h,
-                "llm": False, "in_chars": 0, "out_chars": len(msg)}
+        # Buraya normalde düşülmez (K3 ilkeleri havuzu doldurur); korpus boşsa olur.
+        return {"cevap": KAPSAM_DISI_MESAJ, "cache_hit": False, "kaynaklar": [],
+                "anahtar": h, "llm": False, "in_chars": 0,
+                "out_chars": len(KAPSAM_DISI_MESAJ),
+                "retrieval_layer": "k4", "top_score": top_score}
 
     context = "\n\n".join([f"- {c['text']}" for c in retrieved])
     if bant_blok:                       # yaş tablosu bloğu bağlamın BAŞINA
@@ -838,7 +956,24 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None) -> dict:
             + snippet
         )
         return {"cevap": msg, "cache_hit": False, "kaynaklar": _kaynak_ozet(retrieved),
-                "anahtar": h, "llm": False, "in_chars": 0, "out_chars": len(msg)}
+                "anahtar": h, "llm": False, "in_chars": 0, "out_chars": len(msg),
+                "retrieval_layer": katman, "top_score": top_score}
+
+    # Katmana özel çerçeveleme kuralı. DEĞİŞMEZLER: tıbbi sınır ve "yalnız KB'den
+    # cevapla" kuralları HİÇBİR katmanda gevşemez (SYSTEM_PROMPT'ta sabit).
+    katman_kurali = {
+        "k1": "",
+        "k2": ("\n- Bu soruda birebir kayıt bulunmayabilir: cevabını EN YAKIN "
+               "bilgiye dayandır ve bunu doğal bir dille belirt "
+               "(örn. 'en yakın yaş bandına göre')."),
+        "k3": ("\n- Bu soruda spesifik kayıt YOK. Yukarıdaki GENEL İLKELERDEN "
+               "yararlanarak genel bir çerçeve ver (uyku ortamı, rutin, kendi "
+               "kendine dalma, uyanıklık penceresi mantığı). Genel ilkelerin "
+               "dışına ÇIKMA, kendi bilgini ekleme."
+               "\n- Cevabın SONUNDA kullanıcıya TEK bir netleştirme sorusu sor "
+               "(örn. bebeğin kaç aylık olduğu, gece kaç kez uyandığı) ki "
+               "sohbet devam edebilsin. Asla 'bilgim yok' deyip bırakma."),
+    }.get(katman, "")
 
     user_prompt = f"""ANNE SORUSU: {soru}
 
@@ -854,7 +989,7 @@ CEVAP KURALLARI:
 - Kaynak parçalarda 'danışmanlık'/'danışmana sorun' gibi yönlendirme geçse bile bunu cevaba TAŞIMA.
 - Tıbbi konularda (hastalık, ilaç, reflü, kolik, nöbet, ateş vb.) tanı/tedavi verme; kısaca çocuk doktoruna başvurulmasını öner (danışmana değil).
 - Yetersiz bilgi varsa açıkça ama kısaca söyle ve sorunun farklı ifade edilmesini öner. ANCAK bu kural YAŞ için geçerli DEĞİLDİR: sorulan yaş için birebir kayıt yoksa YAŞ BANDI PARAMETRELERİ bölümündeki en yakın bandın değerlerini, hangi banda dayandığını belirterek ver; yaş için asla "bilgim yok" deme.
-- Yaş geçiş dönemi belirtilmişse iki bandın aralığını birlikte özetle.
+- Yaş geçiş dönemi belirtilmişse iki bandın aralığını birlikte özetle.{katman_kurali}
 
 CEVAP:"""
 
@@ -876,7 +1011,8 @@ CEVAP:"""
     _cache_store(soru, yas_bandi, answer)   # sonraki aynı/benzer soru için sakla
     return {"cevap": answer, "cache_hit": False, "kaynaklar": _kaynak_ozet(retrieved),
             "anahtar": h, "llm": True,
-            "in_chars": len(SYSTEM_PROMPT) + len(user_prompt), "out_chars": len(answer)}
+            "in_chars": len(SYSTEM_PROMPT) + len(user_prompt), "out_chars": len(answer),
+            "retrieval_layer": katman, "top_score": top_score}
 
 
 def cevapla(soru: str, yas_bandi: str | None = None) -> str:

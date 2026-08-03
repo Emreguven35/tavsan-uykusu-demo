@@ -198,8 +198,15 @@ def build_schedule(bucket_params: dict, wake_minute: int = DEFAULT_WAKE_MIN) -> 
     uyanıklık penceresi eklenerek ilk uyku; her uykudan sonra tekrar pencere kadar
     uyanıklık. Gece yatışı, yaş bandının yatma_vakti aralığına kırpılır.
 
-    Dönen her blok: {key, type, start, end, label, start_minute, end_minute}
-      type: 'wake' | 'nap' | 'night'
+    Dönen her blok (mobil sözleşmesi):
+        {time, end?, type, title, note?, key, start_minute, end_minute}
+      time/end : "HH:MM" duvar saati (mobilin gösterdiği alanlar)
+      type     : 'wake' | 'nap' | 'sleep' | 'feed' | 'routine'
+                 (v1'de yalnız wake/nap/sleep üretilir; feed/routine şemada
+                  ayrılmıştır — KB'de bu blokları türetecek veri henüz yok.)
+      title    : ekranda görünen başlık
+      key/start_minute/end_minute : dahili (kaydırma, bildirim penceresi) —
+                 mobil bunlara bakmak zorunda değildir.
     """
     p = bucket_params or {}
     ww = parse_duration_range(p.get("uyaniklik_penceresi")) or DEFAULT_WAKE_WINDOW
@@ -213,7 +220,7 @@ def build_schedule(bucket_params: dict, wake_minute: int = DEFAULT_WAKE_MIN) -> 
     blocks: list[dict] = [{
         "key": "wake", "type": "wake",
         "start_minute": wake_minute, "end_minute": wake_minute,
-        "label": "Sabah uyanış",
+        "title": "Sabah uyanışı",
     }]
 
     cursor = wake_minute
@@ -225,25 +232,44 @@ def build_schedule(bucket_params: dict, wake_minute: int = DEFAULT_WAKE_MIN) -> 
             blocks.append({
                 "key": f"nap_{i}", "type": "nap",
                 "start_minute": start, "end_minute": end,
-                "label": f"{i}. gündüz uykusu",
+                "title": f"{i}. gündüz uykusu",
+                "note": f"Uyanıklık penceresi ~{ww_mid} dk sonra",
             })
             cursor = end
 
-    bedtime = cursor + ww_mid
-    bedtime = max(bed_range[0], min(bed_range[1], bedtime))   # yaş bandına kırp
-    blocks.append({
-        "key": "bedtime", "type": "night",
+    bedtime_ham = cursor + ww_mid
+    bedtime = max(bed_range[0], min(bed_range[1], bedtime_ham))   # yaş bandına kırp
+    gece = {
+        "key": "bedtime", "type": "sleep",
         "start_minute": bedtime, "end_minute": wake_minute + 24 * 60,
-        "label": "Gece uykusu",
-    })
+        "title": "Gece uykusu",
+    }
+    if bedtime != bedtime_ham:
+        gece["note"] = (f"Yaş bandının yatma aralığına "
+                        f"({_fmt(bed_range[0])}–{_fmt(bed_range[1])}) getirildi")
+    blocks.append(gece)
     return [_with_labels(b) for b in blocks]
 
 
 def _with_labels(b: dict) -> dict:
+    """Dakika alanlarından mobil sözleşmesinin 'time'/'end' alanlarını türet."""
     out = dict(b)
-    out["start"] = _fmt(b["start_minute"])
+    out["time"] = _fmt(b["start_minute"])
     out["end"] = _fmt(b["end_minute"])
     return out
+
+
+def headline(baby_name: str, bucket: str | None, schedule: list[dict]) -> str:
+    """Tek cümlelik kişisel özet — mobil plan kartının başlığı.
+
+    Örn: "Elif için 9 ay programı — 2 kısa uyku, 19:00 yatış" """
+    naps = [b for b in schedule or [] if b.get("type") == "nap"]
+    bed = next((b for b in schedule or [] if b.get("key") == "bedtime"), None)
+    bant = (bucket or "").replace("_", " ").replace("-", "–").strip() or "yaşına özel"
+    parcalar = [f"{len(naps)} kısa uyku"] if naps else ["gündüz uykusuz düzen"]
+    if bed is not None:
+        parcalar.append(f"{bed.get('time')} yatış")
+    return f"{baby_name} için {bant} programı — " + ", ".join(parcalar)
 
 
 def shift_schedule(schedule: list[dict], minutes: int) -> list[dict]:

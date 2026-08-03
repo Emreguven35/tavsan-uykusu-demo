@@ -27,3 +27,11 @@ class ChatResp(BaseModel):
     answer: str
     cached: bool
     sources: list[ChatSource] | None = None
+    # Hangi fallback katmanında cevaplandı (Faz 6.4):
+    #   k1 = metodolojiden doğrudan
+    #   k2 = en yakın bilgi (yaş bandı genişletme / düşük eşik)
+    #   k3 = genel ilke + netleştirme sorusu (mobil bunu "sohbeti sürdür" olarak
+    #        değerlendirebilir)
+    #   k4 = kapsam dışı
+    # Cache hit'te NULL (retrieval yapılmadı).
+    retrieval_layer: str | None = None

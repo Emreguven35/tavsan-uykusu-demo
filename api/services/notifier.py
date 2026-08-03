@@ -138,11 +138,11 @@ def upcoming_blocks(schedule: list[dict], now_local_minute: int,
                     min_ahead: int = WINDOW_MIN_AHEAD,
                     max_ahead: int = WINDOW_MAX_AHEAD) -> list[dict]:
     """Çizelgeden, [şimdi+min_ahead, şimdi+max_ahead] penceresinde BAŞLAYAN uyku
-    bloklarını döndür. Yalnız uyku blokları ('nap'/'night') — 'wake' bildirilmez."""
+    bloklarını döndür. Yalnız uyku blokları ('nap'/'sleep') — 'wake' bildirilmez."""
     lo, hi = now_local_minute + min_ahead, now_local_minute + max_ahead
     out = []
     for b in schedule or []:
-        if b.get("type") not in ("nap", "night"):
+        if b.get("type") not in ("nap", "sleep"):
             continue
         start = b.get("start_minute")
         if start is None:
@@ -218,7 +218,7 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
                 continue
 
             title = "🌙 Uyku vakti yaklaşıyor"
-            body = f"{baby_name} için uyku vakti yaklaşıyor ({block.get('start')})"
+            body = f"{baby_name} için uyku vakti yaklaşıyor ({block.get('time')})"
             sent = push_to_user(db, user.id, title, body,
                                 data={"type": "plan_reminder",
                                       "plan_id": str(plan.id),

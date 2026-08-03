@@ -104,7 +104,7 @@ check("2) Sapma +30dk → +30 kaydırma",
 # İlk blok gerçekten kaydı mı?
 _wake = next(b for b in r["schedule"] if b["key"] == "wake")
 check("2b) Kaydırma çizelgeye yansıdı (wake 07:30)",
-      _wake["start"] == "07:30", f"wake={_wake['start']}")
+      _wake["time"] == "07:30", f"wake={_wake['time']}")
 
 # =============================================================================
 # 3) Büyük pozitif sapma → +45'e kırpılır
@@ -116,8 +116,8 @@ r3 = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, summary, today=TODAY)
 _bed3 = next(b for b in r3["schedule"] if b["key"] == "bedtime")
 check("3) Sapma +90dk → +45'e kırpılır (yatış 19:45, sınır içinde)",
       r3["adjusted"] is True and r3["shift_minutes"] == 45
-      and r3["regenerate_required"] is False and _bed3["start"] == "19:45",
-      f"shift={r3['shift_minutes']} bed={_bed3['start']} "
+      and r3["regenerate_required"] is False and _bed3["time"] == "19:45",
+      f"shift={r3['shift_minutes']} bed={_bed3['time']} "
       f"required={r3['regenerate_required']}")
 check("3b) Kırpma sebebi raporlanır",
       any("kırpıldı" in s for s in r3["reasons"]), f"reasons={r3['reasons']}")
@@ -131,8 +131,8 @@ _bed4 = next(b for b in r4["schedule"] if b["key"] == "bedtime")
 _wake4 = next(b for b in r4["schedule"] if b["key"] == "wake")
 check("4) Sapma -60dk → -45'e kırpılır (uyanış 06:15, yatış 18:15)",
       r4["adjusted"] is True and r4["shift_minutes"] == -45
-      and _wake4["start"] == "06:15" and _bed4["start"] == "18:15",
-      f"shift={r4['shift_minutes']} wake={_wake4['start']} bed={_bed4['start']}")
+      and _wake4["time"] == "06:15" and _bed4["time"] == "18:15",
+      f"shift={r4['shift_minutes']} wake={_wake4['time']} bed={_bed4['time']}")
 
 # =============================================================================
 # 5) Yaş bandı ihlali → regenerate_required, kaydırma YAPILMAZ
@@ -146,7 +146,7 @@ summary = pa.summarize_logs(wake_logs(10, 0), today=TODAY)        # +60dk sapma
 r5 = pa.adapt(late_plan, BUCKET_8AY, summary, today=TODAY)
 check("5) Yaş bandı ihlali → regenerate_required, kaydırma yok",
       r5["regenerate_required"] is True and r5["adjusted"] is False,
-      f"base_bedtime={_late_bed['start']} required={r5['regenerate_required']} "
+      f"base_bedtime={_late_bed['time']} required={r5['regenerate_required']} "
       f"adjusted={r5['adjusted']} reasons={r5['reasons']}")
 
 # =============================================================================
@@ -257,10 +257,10 @@ _naps = [b for b in sch if b["type"] == "nap"]
 _bed = next(b for b in sch if b["key"] == "bedtime")
 _bed_ok = 18 * 60 <= _bed["start_minute"] <= 20 * 60
 # İlk uyku = uyanış + pencere ortası (2.5-3.5 Saat → 180dk) = 10:00
-_first_ok = _naps and _naps[0]["start"] == "10:00"
+_first_ok = _naps and _naps[0]["time"] == "10:00"
 check("9) Çizelge: uyanış+pencere ilk uyku, yatış 18:00-20:00 aralığında",
-      _w["start"] == "07:00" and _first_ok and _bed_ok and len(_naps) == 2,
-      f"wake={_w['start']} naps={[(n['start'],n['end']) for n in _naps]} bed={_bed['start']}")
+      _w["time"] == "07:00" and _first_ok and _bed_ok and len(_naps) == 2,
+      f"wake={_w['time']} naps={[(n['time'],n['end']) for n in _naps]} bed={_bed['time']}")
 
 # =============================================================================
 # 10) Parser'lar — KB'nin tutarsız metin biçimleri
@@ -322,6 +322,38 @@ r13 = pa.adapt(old_plan, BUCKET_8AY, summary13, today=TODAY)
 check("13) Eski plan (schedule yok) → çizelge türetilir, motor çalışır",
       len(r13["schedule"]) > 0 and any("türetildi" in s for s in r13["reasons"]),
       f"blocks={len(r13['schedule'])} reasons={r13['reasons'][:1]}")
+
+# =============================================================================
+# 14) Çizelge şeması (mobil sözleşmesi) + headline
+# =============================================================================
+_sch = pa.build_schedule(BUCKET_8AY, 7 * 60)
+_zorunlu = {"time", "type", "title", "key", "start_minute", "end_minute"}
+_eksik = [b["key"] for b in _sch if not _zorunlu.issubset(b.keys())]
+check("14) Her blokta zorunlu alanlar var (time/type/title)",
+      not _eksik, f"eksik={_eksik} ornek={_sch[0]}")
+
+_gecerli_tipler = {"wake", "nap", "sleep", "feed", "routine"}
+_kotu = [b["type"] for b in _sch if b["type"] not in _gecerli_tipler]
+check("14b) type değerleri sözleşmedeki enum içinde",
+      not _kotu, f"gecersiz={_kotu}")
+
+check("14c) time 'HH:MM' biçiminde",
+      all(len(b["time"]) == 5 and b["time"][2] == ":" for b in _sch),
+      str([b["time"] for b in _sch]))
+
+check("14d) Gece uykusu tipi 'sleep'",
+      next(b for b in _sch if b["key"] == "bedtime")["type"] == "sleep",
+      str(next(b for b in _sch if b["key"] == "bedtime")))
+
+_hl = pa.headline("Elif", "9_ay", _sch)
+check("14e) headline tek cümlelik kişisel özet",
+      "Elif" in _hl and "kısa uyku" in _hl and "yatış" in _hl, _hl)
+print(f"       headline: {_hl}")
+
+# Kaydırma sonrası headline'daki yatış saati de kayar
+_moved = pa.shift_schedule(_sch, 30)
+_hl2 = pa.headline("Elif", "9_ay", _moved)
+check("14f) Kaydırma headline'a yansır", _hl2 != _hl and "19:30" in _hl2, _hl2)
 
 # --- Özet --------------------------------------------------------------------
 print("\n" + "=" * 74)

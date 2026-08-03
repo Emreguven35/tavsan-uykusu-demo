@@ -32,15 +32,24 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
 
     # Her mesaj çifti kaydedilir (ürün özelliği: geçmiş). İçerik DB'de tutulur ama
     # uygulama LOGUNA yazılmaz (KVKK).
-    db.add(ChatMessage(user_id=user.id, role="user", content=req.message, cached=False))
+    # Kapsama telemetrisi (Faz 6.4): katman + skor SORU satırına yazılır — haftalık
+    # "hangi sorular korpusta karşılıksız kaldı" analizi user mesajları üzerinden
+    # yapılır (k3/k4). Cevap satırına da yazılır ki tek satırdan da okunabilsin.
+    layer = r.get("retrieval_layer")
+    top_score = r.get("top_score")
+    db.add(ChatMessage(user_id=user.id, role="user", content=req.message,
+                       cached=False, retrieval_layer=layer, top_score=top_score))
     db.add(ChatMessage(user_id=user.id, role="assistant",
-                       content=r["cevap"], cached=r["cache_hit"]))
+                       content=r["cevap"], cached=r["cache_hit"],
+                       retrieval_layer=layer, top_score=top_score))
     db.commit()
 
-    logger.info("chat: user=%s q_len=%d a_len=%d cached=%s",
-                user.id, len(req.message), len(r["cevap"]), r["cache_hit"])
+    logger.info("chat: user=%s q_len=%d a_len=%d cached=%s katman=%s skor=%s",
+                user.id, len(req.message), len(r["cevap"]), r["cache_hit"],
+                layer, f"{top_score:.3f}" if top_score is not None else "-")
 
     sources = None
     if r["kaynaklar"]:
         sources = [ChatSource(**s) for s in r["kaynaklar"]]
-    return ChatResp(answer=r["cevap"], cached=r["cache_hit"], sources=sources)
+    return ChatResp(answer=r["cevap"], cached=r["cache_hit"], sources=sources,
+                    retrieval_layer=layer)
