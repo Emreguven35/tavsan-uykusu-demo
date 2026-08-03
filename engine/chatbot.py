@@ -128,6 +128,195 @@ def _is_descriptive_text(value: Any) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# YAŞ BANDI KÖPRÜSÜ — retrieval'daki bant boşluğunu kapatır
+# ---------------------------------------------------------------------------
+# SORUN: yaş bucket'larından korpusa YALNIZCA açıklayıcı metinler giriyor
+# (_is_descriptive_text sayısal alanları eler). 9_ay gibi bazı bantlarda yalnız
+# sayısal alan olduğundan o bant korpusta HİÇ TEMSİL EDİLMİYOR → "9 ay için
+# bilgim yok" cevabı. Ayrıca yas_bandi parametresi retrieval'ı hiç etkilemiyordu
+# (yalnız cache anahtarıydı).
+#
+# ÇÖZÜM: soru metninden (veya yas_bandi parametresinden) yaşı çöz, plan üretimiyle
+# AYNI eşlemeyi (parameter_engine.yas_bucket_sec) kullanarak bandı seç ve o bandın
+# SAYISAL parametrelerini bağlama deterministik bir blok olarak ekle. Bandın bir
+# alanı boşsa EN YAKIN banttan doldurulur ve hangi banda dayandığı belirtilir.
+# Böylece bantlar arasında boşluk kalmaz.
+
+# yas_bucket_sec'in ürettiği bantlar, KÜÇÜKTEN BÜYÜĞE (komşuluk hesabı için).
+YAS_BANT_SIRASI = [
+    "0-6_hafta", "7-12_hafta", "3_ay", "4_ay", "5_ay", "6_ay", "7_ay", "8_ay",
+    "9_ay", "10_ay", "11_ay", "12_ay", "12-13_ay", "14_ay", "15-17_ay",
+    "18_ay", "18-24_ay", "2-3_yas", "40_ay_buyuk_cocuk",
+]
+
+# Bağlama taşınacak sayısal parametreler (insan-okur etiketleriyle).
+YAS_PARAM_ETIKET = {
+    "toplam_uyku_24h": "Toplam uyku (24 saat)",
+    "gece_uyku": "Gece uykusu",
+    "gunduz_uyku_total": "Gündüz uyku toplamı",
+    "uyku_sayisi": "Gündüz uyku sayısı",
+    "uyaniklik_penceresi": "Uyanıklık penceresi",
+    "yatma_vakti": "Yatma vakti",
+    "gunduz_uyku_bitirme": "Gündüz uykusunu bitirme saati",
+}
+
+# "9 aylık", "9 ay", "9,5 aylik", "6 haftalık", "2 yaşında" → ay cinsinden yaş.
+_RE_AY = re.compile(r"(\d+(?:[.,]\d+)?)\s*ay", re.IGNORECASE)
+_RE_HAFTA = re.compile(r"(\d+(?:[.,]\d+)?)\s*haft", re.IGNORECASE)
+_RE_YAS = re.compile(r"(\d+(?:[.,]\d+)?)\s*yaş", re.IGNORECASE)
+
+
+def yas_ay_tespit(soru: str) -> float | None:
+    """Soru metninden bebeğin ay cinsinden yaşını çıkar. Bulamazsa None."""
+    if not soru:
+        return None
+    for rx, carpan in ((_RE_AY, 1.0), (_RE_HAFTA, 1 / 4.345), (_RE_YAS, 12.0)):
+        m = rx.search(soru)
+        if m:
+            try:
+                return float(m.group(1).replace(",", ".")) * carpan
+            except ValueError:
+                continue
+    return None
+
+
+def _bant_index(band: str) -> int | None:
+    try:
+        return YAS_BANT_SIRASI.index(band)
+    except ValueError:
+        return None
+
+
+def _bant_sinirinda_mi(yas_ay: float, band: str) -> str | None:
+    """Yaş, bandın üst sınırına ≤0.5 ay kaldıysa BİR SONRAKİ bandı döndür.
+
+    Geçiş dönemindeki bebekte iki bandın aralığı birlikte özetlenmelidir."""
+    from engine.parameter_engine import yas_bucket_sec
+    ust_bant = yas_bucket_sec(yas_ay + 0.5)
+    return ust_bant if ust_bant != band else None
+
+
+def bant_coz(soru: str, yas_bandi: str | None = None) -> tuple[list[str], float | None]:
+    """Etkin yaş bandını çöz. Dönen: (bantlar, tespit_edilen_ay).
+
+    Öncelik: soru metnindeki açık yaş > yas_bandi parametresi. Metindeki yaş daha
+    özeldir (kullanıcı "9 aylık bebeğim" diyorsa profildeki bant eski olabilir).
+    Geçiş dönemindeyse iki bant birden döner."""
+    from engine.parameter_engine import yas_bucket_sec
+
+    yas_ay = yas_ay_tespit(soru)
+    if yas_ay is not None and 0 <= yas_ay <= 120:
+        band = yas_bucket_sec(yas_ay)
+        bantlar = [band]
+        komsu = _bant_sinirinda_mi(yas_ay, band)
+        if komsu:
+            bantlar.append(komsu)
+        return bantlar, yas_ay
+
+    if yas_bandi and yas_bandi in YAS_BANT_SIRASI:
+        return [yas_bandi], None
+    return [], None
+
+
+def _param_deger(buckets: dict, band: str, alan: str) -> tuple[Any, str] | None:
+    """Bandın `alan` değerini getir; boşsa EN YAKIN banttan doldur.
+
+    Dönen: (değer, değerin_alındığı_bant) veya None."""
+    idx = _bant_index(band)
+    if idx is None:
+        return None
+    # Mesafe 0'dan başlayıp dışa doğru tara (önce yakın bantlar).
+    for mesafe in range(0, len(YAS_BANT_SIRASI)):
+        for yon in ((0,) if mesafe == 0 else (-mesafe, mesafe)):
+            j = idx + yon
+            if not (0 <= j < len(YAS_BANT_SIRASI)):
+                continue
+            b = YAS_BANT_SIRASI[j]
+            val = (buckets.get(b) or {}).get(alan)
+            if isinstance(val, dict):                    # {'RESMI_DEGER': '...'}
+                val = next((v for k, v in val.items() if "RESMI" in k.upper()),
+                           next(iter(val.values()), None))
+            if val not in (None, "", []):
+                return val, b
+    return None
+
+
+def yas_bandi_blok(bantlar: list[str], yas_ay: float | None = None) -> str:
+    """Yaş bandı parametrelerini LLM bağlamına girecek metin bloğu olarak kur.
+
+    Boş alanlar en yakın banttan doldurulur ve bu AÇIKÇA belirtilir — model
+    cevabında hangi banda dayandığını söyleyebilsin."""
+    if not bantlar:
+        return ""
+    kb = _load_kb_safe()
+    buckets = kb.get("yas_buckets", {}) if kb else {}
+    if not buckets:
+        return ""
+
+    satirlar: list[str] = []
+    for band in bantlar:
+        baslik = _humanize(band)
+        satirlar.append(f"[{baslik} bandı]")
+        for alan, etiket in YAS_PARAM_ETIKET.items():
+            bulunan = _param_deger(buckets, band, alan)
+            if bulunan is None:
+                continue
+            val, kaynak_band = bulunan
+            not_ = "" if kaynak_band == band else f"  (en yakın bant: {_humanize(kaynak_band)})"
+            satirlar.append(f"- {etiket}: {val}{not_}")
+    if not satirlar:
+        return ""
+
+    yas_ifade = ""
+    if yas_ay is not None:
+        yas_ifade = f" (sorudaki yaş: yaklaşık {yas_ay:.1f} ay)"
+    gecis = ""
+    if len(bantlar) > 1:
+        gecis = (" Bebek YAŞ GEÇİŞ DÖNEMİNDE; iki bandın aralığını birlikte "
+                 "özetle.")
+    return ("YAŞ BANDI PARAMETRELERİ (Tavşan Uykusu yaş tabloları)"
+            f"{yas_ifade}:{gecis}\n" + "\n".join(satirlar))
+
+
+def _bant_birimleriyle_birlestir(retrieved: list[dict], bantlar: list[str],
+                                 max_ek: int = 4) -> list[dict]:
+    """Çözülen bantların korpustaki birimlerini sonuca EKLE (skorları değiştirmeden).
+
+    Retrieval sıralamasına dokunulmaz; yalnızca eksik bant birimleri sona eklenir.
+    Böylece semantik sıralama bandı ıskalasa bile o bandın içeriği bağlama girer.
+    Zaten getirilmiş birimler tekrar eklenmez."""
+    units = (_state.get("units") or []) if isinstance(_state, dict) else []
+    if not units:
+        return retrieved
+    mevcut = {u.get("chunk_id") for u in retrieved}
+    ekler: list[dict] = []
+    for band in bantlar:
+        onek = f"yas_bucket:{band}."
+        for u in units:
+            cid = u.get("chunk_id", "")
+            if cid.startswith(onek) and cid not in mevcut:
+                ek = dict(u)
+                ek.setdefault("_score", 0.0)     # skor yok: sıralamaya karışmaz
+                ekler.append(ek)
+                mevcut.add(cid)
+            if len(ekler) >= max_ek:
+                break
+        if len(ekler) >= max_ek:
+            break
+    return retrieved + ekler
+
+
+def _load_kb_safe() -> dict | None:
+    """master_knowledge_base'i yükle; hata olursa None (chat çökmesin)."""
+    try:
+        from engine.parameter_engine import load_kb
+        return load_kb()
+    except Exception as e:                          # dosya yok/bozuk → bant bloğu yok
+        logger.warning("Yaş bandı tablosu yüklenemedi: %s", e)
+        return None
+
+
 def _flatten_texts(prefix: str, val: Any, out: list[tuple]) -> None:
     """global_rules içindeki metinsel içerikleri (str/dict/list) düz birime indir."""
     if isinstance(val, str):
@@ -449,7 +638,9 @@ Kaynak metinlerde danışmanlık yönlendirmesi geçse bile bunu cevabına taş�
 Cevap yoksa kısaca elinde yeterli bilgi olmadığını söyle ve sorunun farklı ifade edilmesini öner. \
 Tıbbi konularda (hastalık, ilaç, reflü, kolik, nöbet, ateş, alerji gibi) tanı ya da tedavi önerme; \
 bu durumlarda kısaca çocuk doktoruna başvurulmasını söyle (danışmana değil). \
-Cevabın sesli olarak da okunacak; kısa cümleler kur, madde listesi yerine akıcı paragraf tercih et, emoji kullanma."""
+Cevabın sesli olarak da okunacak; kısa cümleler kur, madde listesi yerine akıcı paragraf tercih et, emoji kullanma. \
+YAŞ KURALI: Sorulan yaş için birebir kayıt yoksa en yakın yaş bandının bilgisini, hangi banda dayandığını belirterek ver. \
+Yaş için 'bilgim yok' deme; yaş geçiş dönemindeyse iki bandın aralığını birlikte özetle."""
 
 
 # ---------------------------------------------------------------------------
@@ -616,7 +807,15 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None) -> dict:
 
     retrieved = retrieve(soru, top_k=SEM_TOP_K)
 
-    if not retrieved:
+    # Yaş bandı köprüsü: bandın sayısal parametreleri + o bandın korpustaki
+    # birimleri bağlama EKLENİR (retrieval skorları değişmez → mevcut davranış
+    # korunur, yalnız bant boşluğu kapanır).
+    bantlar, yas_ay = bant_coz(soru, yas_bandi)
+    bant_blok = yas_bandi_blok(bantlar, yas_ay)
+    if bantlar:
+        retrieved = _bant_birimleriyle_birlestir(retrieved, bantlar)
+
+    if not retrieved and not bant_blok:
         msg = (
             "Bu konuda elimde yeterli bilgi yok. "
             "Sorunuzu biraz farklı ifade ederek tekrar sorabilirsiniz."
@@ -625,11 +824,13 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None) -> dict:
                 "llm": False, "in_chars": 0, "out_chars": len(msg)}
 
     context = "\n\n".join([f"- {c['text']}" for c in retrieved])
+    if bant_blok:                       # yaş tablosu bloğu bağlamın BAŞINA
+        context = bant_blok + "\n\n" + context if context else bant_blok
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key or not HAS_ANTHROPIC:
         # Fallback: doğrudan en alakalı snippet'i kısalt ve döndür
-        snippet = retrieved[0]["text"][:800].strip()
+        snippet = (retrieved[0]["text"] if retrieved else bant_blok)[:800].strip()
         msg = (
             "*Not: API anahtarı bulunmadığı için Tavşan Uykusu içeriğinden doğrudan en "
             "alakalı kısa parça gösteriliyor. Tam cevap için ANTHROPIC_API_KEY eklendiğinde "
@@ -652,7 +853,8 @@ CEVAP KURALLARI:
 - Kullanıcıyı danışmanlığa, danışmana ya da birebir görüşmeye YÖNLENDİRME; bilgiyi kendine yeter biçimde ver.
 - Kaynak parçalarda 'danışmanlık'/'danışmana sorun' gibi yönlendirme geçse bile bunu cevaba TAŞIMA.
 - Tıbbi konularda (hastalık, ilaç, reflü, kolik, nöbet, ateş vb.) tanı/tedavi verme; kısaca çocuk doktoruna başvurulmasını öner (danışmana değil).
-- Yetersiz bilgi varsa açıkça ama kısaca söyle ve sorunun farklı ifade edilmesini öner.
+- Yetersiz bilgi varsa açıkça ama kısaca söyle ve sorunun farklı ifade edilmesini öner. ANCAK bu kural YAŞ için geçerli DEĞİLDİR: sorulan yaş için birebir kayıt yoksa YAŞ BANDI PARAMETRELERİ bölümündeki en yakın bandın değerlerini, hangi banda dayandığını belirterek ver; yaş için asla "bilgim yok" deme.
+- Yaş geçiş dönemi belirtilmişse iki bandın aralığını birlikte özetle.
 
 CEVAP:"""
 

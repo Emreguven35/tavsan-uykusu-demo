@@ -466,6 +466,79 @@ def bolum_C():
                 not BANNED["kucağa almayın"].search(ans))
 
 
+# ---------------------------------------------------------------------------
+# BÖLÜM D — ARA YAŞ BANTLARI (yaş bandı köprüsü regresyonu)
+# ---------------------------------------------------------------------------
+# SORUN (düzeltildi): 9_ay gibi bazı bantlar korpusta HİÇ temsil edilmiyordu
+# (yalnız sayısal alanları var, _is_descriptive_text onları eliyor) ve yas_bandi
+# retrieval'ı etkilemiyordu → "9 ay için bilgim yok" cevabı dönüyordu.
+# Artık bant, plan üretimiyle AYNI eşlemeyle (yas_bucket_sec) çözülüp yaş tablosu
+# parametreleri bağlama ekleniyor.
+
+# "Bilgim yok" kalıpları — ara yaş sorularında HİÇBİRİ geçmemeli.
+BILGI_YOK_KALIPLARI = [
+    "bilgim yok", "bilgi yok", "bulunmuyor", "bulunmamaktadır", "yeterli bilgi",
+    "elimde yeterli", "bilgi bulunmamakta", "veri yok", "mevcut değil",
+]
+
+# (anahtar, soru, cevapta GEÇMESİ beklenen sayısal ipuçlarından en az biri)
+YAS_SORULARI = [
+    ("9ay_kisa_uyku", "9 aylık bebeğim günde kaç saat kısa uyku yapmalı",
+     ["2-3", "2 - 3", "iki", "2 saat", "3 saat"]),
+    ("9ay_uyanik", "9 aylık bebeğim ne kadar uyanık kalabilir",
+     ["2.5", "2,5", "3.5", "3,5", "3-4", "saat"]),
+    ("10ay_kac_uyku", "10 aylık bebeğim günde kaç kez uyumalı",
+     ["2", "iki"]),
+    ("6ay_uyanik", "6 aylık bebeğim ne kadar uyanık kalabilir",
+     ["2", "3", "saat"]),
+    ("6ay_toplam", "6 aylık bebeğim günde toplam ne kadar uyumalı",
+     ["12", "15", "saat"]),
+]
+
+
+def bolum_D():
+    print("\n" + "=" * 70 + "\nBÖLÜM D — Ara yaş bantları\n" + "=" * 70)
+    chatbot.init_index()
+
+    # D-0: bant çözümü — her ay için bir bant bulunmalı (boşluk YOK)
+    bosluk = []
+    for ay in range(0, 37):
+        bantlar, _ = chatbot.bant_coz(f"{ay} aylık bebeğim ne yapmalı")
+        blok = chatbot.yas_bandi_blok(bantlar, float(ay))
+        if not bantlar or not blok.strip():
+            bosluk.append(ay)
+    rec("D-bant", "0-36 ay arasında bant boşluğu YOK", not bosluk,
+        f"boşluk={bosluk}" if bosluk else "36/36 ay bant buldu")
+
+    # D-0b: yaş geçiş dönemi iki bant döndürür
+    bantlar, _ = chatbot.bant_coz("bebeğim 6 haftalık")
+    rec("D-gecis", "Geçiş dönemi iki bandı birlikte döndürür", len(bantlar) == 2,
+        f"bantlar={bantlar}")
+
+    if not HAS_KEY:
+        rec("D-canli", "CANLI ara yaş cevapları", None, "ANTHROPIC_API_KEY yok — atlandı")
+        return
+
+    for key, soru, ipuclari in YAS_SORULARI:
+        # Bu bölüm HER ZAMAN taze cevap ister (cache'lenmiş eski "bilgim yok"
+        # cevabı regresyonu maskelemesin).
+        ans = _chat_answer(soru) if USE_CHAT_ENDPOINT else chatbot.cevapla(soru)
+        (OUT_DIR / f"yas_{key}.txt").write_text(ans, encoding="utf-8")
+        low = _low(ans)
+
+        gecen = [k for k in BILGI_YOK_KALIPLARI if k in low]
+        rec("D-" + key, "'Bilgim yok' kalıbı GEÇMEDİ", not gecen,
+            f"geçen={gecen}" if gecen else f"cevap={ans[:70]!r}")
+
+        rec("D-" + key, "Yaş bandı bilgisi verildi (sayısal ipucu var)",
+            any(ip in low for ip in ipuclari),
+            f"aranan={ipuclari[:3]} cevap={ans[:70]!r}")
+
+        # Tıbbi sınır ve yasak dil korunuyor mu (mevcut davranış bozulmadı)
+        rec("D-" + key, "Danışmanlık yönlendirmesi YOK",
+            "danışman" not in low, f"cevap={ans[:60]!r}")
+
+
 def ozet():
     print("\n" + "=" * 70 + "\nÖZET\n" + "=" * 70)
     gecti = sum(1 for r in results if r[2] == "GEÇTİ")
@@ -485,5 +558,6 @@ if __name__ == "__main__":
     bolum_A()
     bolum_B()
     bolum_C()
+    bolum_D()
     n_kaldi = ozet()
     sys.exit(0)
