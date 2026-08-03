@@ -68,6 +68,18 @@ class _FakeAnthropic:
 
 chatbot.Anthropic = _FakeAnthropic
 chatbot.HAS_ANTHROPIC = True
+
+# CACHE İZOLASYONU: cevap cache'i PAYLAŞILAN bir dosyadır (data/answer_cache.json).
+# İzole edilmezse (a) bu testin soruları oraya yazılır ve MOCK cevaplar gerçek
+# sorulara karşılık gelir, (b) test sonucu önceki koşuların cache durumuna bağlı
+# hale gelir (flaky). Bu yüzden geçici bir dosyaya yönlendirip belleği sıfırlıyoruz.
+_CACHE = Path(tempfile.gettempdir()) / "faz65_answer_cache_test.json"
+if _CACHE.exists():
+    _CACHE.unlink()
+chatbot.CACHE_PATH = _CACHE
+chatbot._cache_state.update({"loaded": False, "entries": [],
+                             "emb_matrix": None, "emb_idx": []})
+
 chatbot.init_index()
 
 TZ = plan_adapter.TZ_OFFSET_MIN

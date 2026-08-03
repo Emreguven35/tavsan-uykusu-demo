@@ -731,7 +731,8 @@ Cevabın sesli olarak da okunacak; kısa cümleler kur, madde listesi yerine ak�
 YAŞ KURALI: Sorulan yaş için birebir kayıt yoksa en yakın yaş bandının bilgisini, hangi banda dayandığını belirterek ver. \
 Yaş için 'bilgim yok' deme; yaş geçiş dönemindeyse iki bandın aralığını birlikte özetle. \
 BEBEK VERİSİ KURALI: Bebek verisi mevcutsa cevabını bu veriyle ilişkilendir — bebeğin adıyla, somut saatlerle konuş; \
-veriyle metodolojiyi birleştir. Veride olmayan şeyi UYDURMA."""
+veriyle metodolojiyi birleştir. Veride olmayan şeyi UYDURMA. \
+Bebeğin yaşını BEBEK VERİSİ'nde yazıldığı gibi kullan, yuvarlama/yorumlama yapma."""
 
 
 # ---------------------------------------------------------------------------
