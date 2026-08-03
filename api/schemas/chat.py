@@ -1,4 +1,6 @@
 """Chat (RAG) şemaları — mobil sözleşmesi."""
+import uuid
+
 from pydantic import BaseModel, Field
 
 
@@ -14,6 +16,11 @@ class ChatReq(BaseModel):
     history: list[ChatMessageItem] = Field(default_factory=list)
     # Opsiyonel yaş bandı → semantik cache katmanını etkinleştirir (yoksa yalnız exact).
     yas_bandi: str | None = None
+    # Opsiyonel (Faz 6.5): verilirse bebeğin profili + son 3 günün logları + bugünün
+    # planı bağlama eklenir ve cevap kişiselleştirilir (somut saatler, bebeğin adı).
+    # DİKKAT: baby_id'li istekler cevap cache'ini BYPASS eder (kişisel veri
+    # başka kullanıcıya sızmasın). Bebek çağırana ait değilse 404.
+    baby_id: uuid.UUID | None = None
 
 
 class ChatSource(BaseModel):

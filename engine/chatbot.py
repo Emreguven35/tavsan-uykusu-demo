@@ -729,7 +729,9 @@ Tıbbi konularda (hastalık, ilaç, reflü, kolik, nöbet, ateş, alerji gibi) t
 bu durumlarda kısaca çocuk doktoruna başvurulmasını söyle (danışmana değil). \
 Cevabın sesli olarak da okunacak; kısa cümleler kur, madde listesi yerine akıcı paragraf tercih et, emoji kullanma. \
 YAŞ KURALI: Sorulan yaş için birebir kayıt yoksa en yakın yaş bandının bilgisini, hangi banda dayandığını belirterek ver. \
-Yaş için 'bilgim yok' deme; yaş geçiş dönemindeyse iki bandın aralığını birlikte özetle."""
+Yaş için 'bilgim yok' deme; yaş geçiş dönemindeyse iki bandın aralığını birlikte özetle. \
+BEBEK VERİSİ KURALI: Bebek verisi mevcutsa cevabını bu veriyle ilişkilendir — bebeğin adıyla, somut saatlerle konuş; \
+veriyle metodolojiyi birleştir. Veride olmayan şeyi UYDURMA."""
 
 
 # ---------------------------------------------------------------------------
@@ -877,7 +879,8 @@ def _kaynak_ozet(units: list[dict]) -> list[dict]:
             for u in units]
 
 
-def _cevap_uret(soru: str, yas_bandi: str | None = None) -> dict:
+def _cevap_uret(soru: str, yas_bandi: str | None = None,
+                baby_context: str | None = None) -> dict:
     """RAG cevabını YAPISAL üret — cevapla() ve API katmanı bunu ortak kullanır.
     Döner: {cevap, cache_hit, kaynaklar, anahtar(hash), llm, in_chars, out_chars}.
 
@@ -886,7 +889,12 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None) -> dict:
     'anahtar', cevabın kanonik hash'idir (ses cache dosya adıyla hizalı)."""
     h = _cache_hash(_cache_norm(soru), yas_bandi)
 
-    entry = _cache_lookup_entry(soru, yas_bandi)
+    # CACHE BYPASS (Faz 6.5): kişiselleştirilmiş cevaplar PAYLAŞILAN cache'e
+    # girmemeli — yoksa bir bebeğin saatleri başka kullanıcıya cevap olarak döner.
+    # baby_context varsa cache ne OKUNUR ne YAZILIR. Genel sorularda cache aynen çalışır.
+    kisisel = bool(baby_context)
+
+    entry = None if kisisel else _cache_lookup_entry(soru, yas_bandi)
     if entry is not None:
         # cache hit: retrieval YAPILMAZ (davranış korunur). Ses, eşleşen kaydın
         # hash'iyle (entry['h']) hizalanır ki hazır MP3 yeniden kullanılabilsin.
@@ -975,8 +983,14 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None) -> dict:
                "sohbet devam edebilsin. Asla 'bilgim yok' deyip bırakma."),
     }.get(katman, "")
 
-    user_prompt = f"""ANNE SORUSU: {soru}
+    # BEBEK VERİSİ bloğu: RAG chunk'larından AYRI tutulur ve messages içinde
+    # (yani system cache breakpoint'inden SONRA) gider → prompt cache prefix'i
+    # bozulmaz. Blok kişiye özeldir, asla cache'lenmez (yukarıdaki bypass).
+    bebek_blok = f"\n\nBEBEK VERİSİ (bu kullanıcının kendi kaydı):\n{baby_context}\n" \
+        if baby_context else ""
 
+    user_prompt = f"""ANNE SORUSU: {soru}
+{bebek_blok}
 İLGİLİ BİLGİ PARÇALARI (Tavşan Uykusu içeriği):
 {context}
 
@@ -1008,14 +1022,16 @@ CEVAP:"""
     )
 
     answer = response.content[0].text
-    _cache_store(soru, yas_bandi, answer)   # sonraki aynı/benzer soru için sakla
+    if not kisisel:                         # kişisel cevap PAYLAŞILAN cache'e YAZILMAZ
+        _cache_store(soru, yas_bandi, answer)
     return {"cevap": answer, "cache_hit": False, "kaynaklar": _kaynak_ozet(retrieved),
             "anahtar": h, "llm": True,
             "in_chars": len(SYSTEM_PROMPT) + len(user_prompt), "out_chars": len(answer),
             "retrieval_layer": katman, "top_score": top_score}
 
 
-def cevapla(soru: str, yas_bandi: str | None = None) -> str:
+def cevapla(soru: str, yas_bandi: str | None = None,
+            baby_context: str | None = None) -> str:
     """RAG ile cevap üret (str). Anthropic key yoksa fallback verir.
 
     yas_bandi: 19 yaş bucket'ından biri (örn. '8_ay'). Cache anahtarına girer;
@@ -1023,4 +1039,4 @@ def cevapla(soru: str, yas_bandi: str | None = None) -> str:
     LLM çağrısından ÖNCE cevap cache'i kontrol edilir (exact + semantik).
     NOT: Yapısal sürüm için _cevap_uret(); bu ince sarmalayıcı yalnız metni döner
     (Streamlit arayüzü ve 151-item suite ile davranış BİREBİR aynı)."""
-    return _cevap_uret(soru, yas_bandi)["cevap"]
+    return _cevap_uret(soru, yas_bandi, baby_context)["cevap"]

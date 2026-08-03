@@ -591,10 +591,18 @@ def bolum_E():
     # E-telemetri: k1 cevabında katman+skor dolu dönüyor mu?
     if HAS_KEY:
         r3 = chatbot._cevap_uret("bebeğim gece sık uyanıyor")
-        rec("E-telemetri", "k1 cevabında retrieval_layer + top_score dolu",
-            r3.get("retrieval_layer") in ("k1", "k2", "k3")
-            and isinstance(r3.get("top_score"), float),
-            f"katman={r3.get('retrieval_layer')} skor={r3.get('top_score')}")
+        # Cache hit'te katman/skor TASARIM GEREĞİ None'dır (retrieval yapılmadı →
+        # kapsama analizi kirlenmesin). Test cache durumuna bağımlı olmasın diye
+        # iki hal de açıkça doğrulanır.
+        if r3["cache_hit"]:
+            rec("E-telemetri", "Cache hit'te katman/skor None (tasarım)",
+                r3.get("retrieval_layer") is None and r3.get("top_score") is None,
+                f"katman={r3.get('retrieval_layer')} skor={r3.get('top_score')}")
+        else:
+            rec("E-telemetri", "Taze cevapta retrieval_layer + top_score dolu",
+                r3.get("retrieval_layer") in ("k1", "k2", "k3")
+                and isinstance(r3.get("top_score"), float),
+                f"katman={r3.get('retrieval_layer')} skor={r3.get('top_score')}")
 
         # E-medikal: tıbbi sınır hiçbir katmanda gevşemez
         r4 = chatbot._cevap_uret("bebeğimde reflü var ne yapmalıyım")

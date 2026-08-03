@@ -245,3 +245,37 @@ SELECT content, top_score, created_at
 üretilir (`feed`/`routine` şemada ayrıldı; KB'de bu blokları türetecek veri yok).
 `key`/`start_minute`/`end_minute` dahilidir (kaydırma + bildirim penceresi); mobil
 `time`/`end`/`type`/`title`/`note` alanlarını kullanır.
+
+## 6.5 `/chat` bebek log bağlamı (kişiselleştirme)
+
+`ChatReq`'e opsiyonel `baby_id` eklendi. Verildiğinde bebeğin profili + son 3 günün
+logları + bugünün plan çizelgesi kompakt bir özet olarak Claude'a **RAG
+chunk'larından ayrı** bir blokla geçilir:
+
+```
+BEBEK VERİSİ (bu kullanıcının kendi kaydı):
+Elif, 16 aylık (kayıtlı başlangıç gece uyanma: 3; eğitim başlangıcı 2026-07-01;
+eğitim tamamlanma 2026-07-15). Son 3 gün: bugün şekerleme 1 (12:30-13:15);
+dün gece yatış 19:05 (planlanan 20:00'den 55dk erken), gece uyanma 1 kez
+(03:10, 25dk); önceki gün gece yatış 20:30 (planlanan 20:00'den 30dk geç).
+Bugünün planı: 07:00 uyanış, 12:30-15:00 uyku, 20:00 yatış.
+```
+
+Sistem promptuna kural eklendi: *"Bebek verisi mevcutsa cevabını bu veriyle
+ilişkilendir — bebeğin adıyla, somut saatlerle konuş; veriyle metodolojiyi
+birleştir. Veride olmayan şeyi UYDURMA."* Kural **system** bloğundadır (statik,
+cache prefix'i bozmaz); **veri** ise `messages` içinde, yani cache
+breakpoint'inden **sonra** gider.
+
+### ⚠️ Cache davranışı (güvenlik kritiği)
+
+`baby_id` verilen istekler cevap cache'ini **tamamen bypass eder** — ne okur ne
+yazar. Aksi halde bir bebeğin saatleri başka kullanıcıya cevap olarak dönerdi.
+`baby_id`'siz genel sorularda exact + semantik cache aynen çalışmaya devam eder.
+
+Diğer davranışlar:
+- Bebek çağırana ait değilse **404** (varlık sızdırmaz — `get_owned_baby`).
+- Log **ve** bugünün planı yoksa bağlam bloğu eklenmez → mevcut genel metodoloji
+  cevabı korunur.
+- Gece uyanmaları 12:00'den önceyse **bir önceki günün gecesine** yazılır.
+- KVKK: bebek verisi içeriği uygulama loguna yazılmaz (yalnız `bebek=var|yok`).
