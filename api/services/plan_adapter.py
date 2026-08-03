@@ -272,6 +272,42 @@ def headline(baby_name: str, bucket: str | None, schedule: list[dict]) -> str:
     return f"{baby_name} için {bant} programı — " + ", ".join(parcalar)
 
 
+# Faz 6.5R: şema değişikliğinden ÖNCE üretilmiş planlar DB'de duruyor. Onlarda
+# bloklar {start, label, type:"night"} biçimindeydi; yeni kod {time, title,
+# type:"sleep"} okuyor. Normalize edilmezse:
+#   - bağlam özeti "None uyanış" üretir ve gece bloğu düşer,
+#   - bildirim penceresi gece bloğunu HİÇ yakalamaz (sessiz kayıp).
+# Bu yüzden saklanmış her çizelge OKUNURKEN yükseltilir.
+_ESKI_TIP = {"night": "sleep"}
+_VARSAYILAN_BASLIK = {"wake": "Sabah uyanışı", "bedtime": "Gece uykusu"}
+
+
+def normalize_schedule(schedule: list[dict] | None) -> list[dict]:
+    """Saklanmış çizelgeyi güncel sözleşmeye yükselt (eski alan adları → yeni).
+
+    Geriye uyumluluk katmanı: zaten güncel biçimdeki bloklar değişmeden geçer."""
+    out: list[dict] = []
+    for b in schedule or []:
+        if not isinstance(b, dict):
+            continue
+        nb = dict(b)
+        sm, em = nb.get("start_minute"), nb.get("end_minute")
+        # start → time, label → title, night → sleep
+        nb["time"] = nb.get("time") or nb.get("start") or (
+            _fmt(sm) if sm is not None else None)
+        nb["end"] = nb.get("end") or (_fmt(em) if em is not None else None)
+        key = nb.get("key") or ""
+        nb["title"] = (nb.get("title") or nb.get("label")
+                       or _VARSAYILAN_BASLIK.get(key)
+                       or (f"{key.split('_')[-1]}. gündüz uykusu"
+                           if key.startswith("nap_") else key or "Uyku"))
+        nb["type"] = _ESKI_TIP.get(nb.get("type"), nb.get("type"))
+        nb.pop("start", None)          # eski alanlar taşınmaz (karışıklık olmasın)
+        nb.pop("label", None)
+        out.append(nb)
+    return out
+
+
 def shift_schedule(schedule: list[dict], minutes: int) -> list[dict]:
     """Çizelgenin TAMAMINI verilen dakika kadar kaydır (blok süreleri korunur)."""
     out = []
@@ -466,6 +502,7 @@ def adapt(plan_content: dict, bucket_params: dict, log_summary: dict,
     # Temel çizelge: plan içinde varsa onu kullan, yoksa yaş bandından türet
     # (Faz 5R öncesi planlarda 'schedule' yoktur — geriye uyumluluk).
     schedule = plan_content.get("schedule") if isinstance(plan_content, dict) else None
+    schedule = normalize_schedule(schedule)          # eski şema → güncel sözleşme
     if not schedule:
         schedule = build_schedule(bucket_params, DEFAULT_WAKE_MIN)
         reasons.append("Planda yapısal çizelge yoktu; yaş bandından türetildi")

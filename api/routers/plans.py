@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from api.db import get_db
 from api.deps import get_current_user, get_owned_baby
-from api.models import SleepLog, SleepPlan, User
+from api.models import Baby, SleepLog, SleepPlan, User
 from api.schemas.plan import PlanAdaptResp, PlanGenerateReq, PlanResp
 from api.services import plan_adapter
 from engine import plan_generator
@@ -165,6 +165,39 @@ def _latest_plan(db: Session, user: User, baby) -> SleepPlan | None:
             .first())
 
 
+def _ensure_current_schema(db: Session, plan: SleepPlan | None) -> SleepPlan | None:
+    """Saklanmış planı GÜNCEL sözleşmeye yükselt (okuma yolunda, kalıcı).
+
+    Şema değişikliğinden önce üretilmiş planlarda bloklar {start, label,
+    type:"night"} biçimindeydi ve headline/night_wake_protocol yoktu. Mobil
+    time/title okuduğu için bunlar null görünüyordu. Burada bir kez yükseltilip
+    DB'ye yazılır; sonraki okumalar zaten günceldir (değişiklik yoksa yazılmaz)."""
+    if plan is None:
+        return None
+    content = dict(plan.content or {})
+    eski = content.get("schedule") or []
+    yeni = plan_adapter.normalize_schedule(eski)
+    degisti = yeni != eski
+
+    if yeni and not content.get("headline"):
+        baby = db.get(Baby, plan.baby_id)
+        content["headline"] = plan_adapter.headline(
+            baby.name if baby is not None else "Bebeğiniz",
+            content.get("bucket"), yeni)
+        degisti = True
+    if not content.get("night_wake_protocol"):
+        content["night_wake_protocol"] = dict(plan_adapter.NIGHT_WAKE_PROTOCOL)
+        degisti = True
+
+    if degisti:
+        content["schedule"] = yeni
+        plan.content = content
+        db.commit()
+        db.refresh(plan)
+        logger.info("Plan güncel şemaya yükseltildi: plan_id=%s", plan.id)
+    return plan
+
+
 def _adaptation_meta(result: dict, summary: dict, adjusted: bool, shift: int,
                      required: bool) -> dict:
     """Plan içeriğine gömülen adaptasyon izi (mobil/denetim için)."""
@@ -285,7 +318,7 @@ def get_today_plan(baby_id: uuid.UUID = Query(...), db: Session = Depends(get_db
             .order_by(SleepPlan.created_at.desc())
             .first())
     if plan is not None:
-        return plan
+        return _ensure_current_schema(db, plan)
 
     base_plan = _latest_plan(db, user, baby)
     if base_plan is None:
@@ -295,8 +328,18 @@ def get_today_plan(baby_id: uuid.UUID = Query(...), db: Session = Depends(get_db
     logs = _recent_logs(db, user, baby, today)
     if not logs:
         # Kayıt yok → adaptasyon yok; en güncel planı bugüne taşı (bozmadan).
+        # Eski şemayla üretilmiş planlar bu vesileyle güncel sözleşmeye yükseltilir.
         content = dict(base_plan.content or {})
-        content.update({"adapted": False, "base_plan_id": str(base_plan.id)})
+        sched = plan_adapter.normalize_schedule(content.get("schedule"))
+        content.update({
+            "adapted": False,
+            "base_plan_id": str(base_plan.id),
+            "schedule": sched,
+            "headline": content.get("headline") or plan_adapter.headline(
+                baby.name, content.get("bucket"), sched),
+            "night_wake_protocol": content.get("night_wake_protocol")
+            or dict(plan_adapter.NIGHT_WAKE_PROTOCOL),
+        })
         return _upsert_plan(db, user, baby, today, content)
 
     plan, _ = _run_adaptation(db, user, baby, base_plan, logs, today)
@@ -309,7 +352,8 @@ def list_plans(db: Session = Depends(get_db), user: User = Depends(get_current_u
     q = db.query(SleepPlan).filter(SleepPlan.user_id == user.id)
     if baby_id is not None:
         q = q.filter(SleepPlan.baby_id == baby_id)
-    return q.order_by(SleepPlan.created_at.desc()).all()
+    return [_ensure_current_schema(db, p)
+            for p in q.order_by(SleepPlan.created_at.desc()).all()]
 
 
 @router.get("/{plan_date}", response_model=PlanResp)
@@ -324,4 +368,4 @@ def get_plan_by_date(plan_date: date, db: Session = Depends(get_db),
     if plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Bu tarihte plan bulunamadı")
-    return plan
+    return _ensure_current_schema(db, plan)

@@ -147,6 +147,26 @@ check("4b) Gece uykusu bloğu da bildirilir",
       len(_night) == 1 and _night[0]["key"] == "bedtime", str(_night))
 
 # =============================================================================
+# 4c) GERİYE UYUMLULUK: eski şemalı plan da bildirilir (Faz 6.5R)
+# =============================================================================
+ESKI_SCHEDULE = [
+    {"end": "07:00", "key": "wake", "type": "wake", "label": "Sabah uyanış",
+     "start": "07:00", "end_minute": 420, "start_minute": 420},
+    {"end": "10:45", "key": "nap_1", "type": "nap", "label": "1. gündüz uykusu",
+     "start": "09:30", "end_minute": 645, "start_minute": 570},
+    {"end": "07:00", "key": "bedtime", "type": "night", "label": "Gece uykusu",
+     "start": "19:00", "end_minute": 1860, "start_minute": 1140},
+]
+_eski_gece = notifier.upcoming_blocks(ESKI_SCHEDULE, 18 * 60 + 40)
+check("4c) Eski şemalı (type='night') gece bloğu da bildirilir",
+      len(_eski_gece) == 1 and _eski_gece[0]["key"] == "bedtime",
+      f"bulunan={[b.get('key') for b in _eski_gece]}")
+_eski_nap = notifier.upcoming_blocks(ESKI_SCHEDULE, 9 * 60 + 10)
+check("4d) Eski şemalı nap bloğu mesajında saat DOLU (None değil)",
+      len(_eski_nap) == 1 and _eski_nap[0].get("time") == "09:30",
+      f"time={_eski_nap[0].get('time') if _eski_nap else None}")
+
+# =============================================================================
 # 5) Uçtan uca: bildirim gönderilir
 # =============================================================================
 u1 = new_user("n1@tavsansmoke.com")

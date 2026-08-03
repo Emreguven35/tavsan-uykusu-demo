@@ -110,7 +110,9 @@ def _plan_ozeti(plan: SleepPlan | None) -> str | None:
     """Bugünün plan çizelgesini kısa metne indir."""
     if plan is None:
         return None
-    sched = (plan.content or {}).get("schedule") or []
+    # Eski şemayla üretilmiş planlar (start/label/type=night) yükseltilir —
+    # aksi halde "None uyanış" üretilir ve gece bloğu düşer.
+    sched = plan_adapter.normalize_schedule((plan.content or {}).get("schedule"))
     if not sched:
         return None
     parcalar = []

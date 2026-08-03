@@ -141,7 +141,8 @@ def upcoming_blocks(schedule: list[dict], now_local_minute: int,
     bloklarını döndür. Yalnız uyku blokları ('nap'/'sleep') — 'wake' bildirilmez."""
     lo, hi = now_local_minute + min_ahead, now_local_minute + max_ahead
     out = []
-    for b in schedule or []:
+    # Eski şema (type="night") normalize edilmezse gece bloğu HİÇ bildirilmez.
+    for b in plan_adapter.normalize_schedule(schedule):
         if b.get("type") not in ("nap", "sleep"):
             continue
         start = b.get("start_minute")

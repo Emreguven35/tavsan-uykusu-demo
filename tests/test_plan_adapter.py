@@ -355,6 +355,60 @@ _moved = pa.shift_schedule(_sch, 30)
 _hl2 = pa.headline("Elif", "9_ay", _moved)
 check("14f) Kaydırma headline'a yansır", _hl2 != _hl and "19:30" in _hl2, _hl2)
 
+# =============================================================================
+# 15) GERİYE UYUMLULUK: şema değişikliğinden ÖNCE üretilmiş planlar (Faz 6.5R)
+# =============================================================================
+# Gerçek production kaydından alınmış blok biçimi: start/label/type="night",
+# time/title YOK. Normalize edilmezse bağlam "None uyanış" üretir ve gece bloğu
+# bildirimlerde HİÇ yakalanmaz.
+ESKI_SCHEDULE = [
+    {"end": "07:00", "key": "wake", "type": "wake", "label": "Sabah uyanış",
+     "start": "07:00", "end_minute": 420, "start_minute": 420},
+    {"end": "10:45", "key": "nap_1", "type": "nap", "label": "1. gündüz uykusu",
+     "start": "09:30", "end_minute": 645, "start_minute": 570},
+    {"end": "07:00", "key": "bedtime", "type": "night", "label": "Gece uykusu",
+     "start": "19:00", "end_minute": 1860, "start_minute": 1140},
+]
+
+_norm = pa.normalize_schedule(ESKI_SCHEDULE)
+check("15) Eski 'start' → 'time' taşındı",
+      [b["time"] for b in _norm] == ["07:00", "09:30", "19:00"],
+      str([b.get("time") for b in _norm]))
+check("15b) Eski 'label' → 'title' taşındı",
+      [b["title"] for b in _norm] == ["Sabah uyanış", "1. gündüz uykusu", "Gece uykusu"],
+      str([b.get("title") for b in _norm]))
+check("15c) type 'night' → 'sleep'",
+      _norm[-1]["type"] == "sleep", str(_norm[-1]["type"]))
+check("15d) Eski alanlar (start/label) taşınmaz",
+      all("start" not in b and "label" not in b for b in _norm), str(_norm[0]))
+check("15e) Güncel biçim normalize'dan DEĞİŞMEDEN geçer",
+      pa.normalize_schedule(_sch) == _sch, "")
+check("15f) Boş/None güvenli", pa.normalize_schedule(None) == [], "")
+
+# Eski planla adapt çalışıyor mu? Fixture, GEÇERLİ bir çizelgenin eski biçime
+# "düşürülmüş" hâlidir — böylece kaydırma dalı gerçekten koşar (yukarıdaki kısa
+# ESKI_SCHEDULE tek nap içerdiği için uyanıklık penceresi ihlaline düşerdi).
+def _eski_bicime_dusur(sch):
+    out = []
+    for b in sch:
+        nb = {k: v for k, v in b.items() if k not in ("time", "title")}
+        nb["start"] = b["time"]
+        nb["label"] = b["title"]
+        nb["type"] = "night" if b["type"] == "sleep" else b["type"]
+        out.append(nb)
+    return out
+
+
+_eski_plan = {"schedule": _eski_bicime_dusur(pa.build_schedule(BUCKET_8AY, 7 * 60))}
+_r15 = pa.adapt(_eski_plan, BUCKET_8AY,
+                pa.summarize_logs(wake_logs(7, 40), today=TODAY), today=TODAY)
+check("15g) Eski planla adapt: çizelge yükseltilir ve kaydırılır",
+      _r15["adjusted"] is True and _r15["shift_minutes"] == 40
+      and all(b.get("time") and b.get("title") for b in _r15["schedule"])
+      and all(b["type"] != "night" for b in _r15["schedule"]),
+      f"adjusted={_r15['adjusted']} shift={_r15['shift_minutes']} "
+      f"blok={_r15['schedule'][0] if _r15['schedule'] else None}")
+
 # --- Özet --------------------------------------------------------------------
 print("\n" + "=" * 74)
 print("PLAN ADAPTER TEST SONUÇLARI (Faz 6.1)")
