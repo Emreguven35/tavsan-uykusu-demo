@@ -57,16 +57,18 @@ NEXT_TICKETS: list[dict] = []          # bir sonraki çağrının döneceği tic
 RAISE_NEXT = {"on": False}
 
 
+# Token bazlı ticket eşlemesi: zamanlayıcı artık birden çok bebeği tarayıp
+# birden çok batch gönderdiği için "sıradaki ticket" kuyruğu yanlış batch'e
+# denk gelebiliyordu. Hangi token'ın ne döneceği açıkça tanımlanır.
+TICKET_BY_TOKEN: dict[str, dict] = {}
+
+
 def fake_send(messages):
     if RAISE_NEXT["on"]:
         RAISE_NEXT["on"] = False
         return []                       # ağ hatası → boş liste (gerçek davranış)
     SENT.append(messages)
-    if NEXT_TICKETS:
-        out = NEXT_TICKETS[: len(messages)]
-        del NEXT_TICKETS[: len(messages)]
-        return out
-    return [{"status": "ok"} for _ in messages]
+    return [TICKET_BY_TOKEN.get(m.get("to"), {"status": "ok"}) for m in messages]
 
 
 notifier.send_expo_push = fake_send     # ağ ÇAĞRILMAZ
@@ -121,28 +123,39 @@ def utc_at(local_h: int, local_m: int, day: int = 3) -> datetime:
             + timedelta(hours=local_h, minutes=local_m) - timedelta(minutes=TZ))
 
 
+
+def sent_to(token: str) -> int:
+    """Belirli cihaz token'ına kaç mesaj gitti (SENT içindeki tüm turlarda).
+
+    NOT: Faz 6.6'dan sonra zamanlayıcı PLANI OLAN TÜM bebekleri tarar (yalnız
+    bugünün planı olanları değil). Paylaşılan test DB'sinde bu, önceki testlerin
+    bebeklerinin de bildirim almasına yol açar — bu YENİ ve DOĞRU davranıştır.
+    Bu yüzden iddialar global sayaç yerine TOKEN bazında yapılır."""
+    return sum(1 for tur in SENT for m in tur if m.get("to") == token)
+
+
 # =============================================================================
 # 1-4) Pencere hesaplama
 # =============================================================================
-# nap_1 10:00 → 09:40'ta "20 dk sonra" = pencere içi (15-30)
-blocks = notifier.upcoming_blocks(SCHEDULE, 9 * 60 + 40)
-check("1) 20dk sonrası blok pencereye girer",
+# nap_1 10:00 → 09:30'da "30 dk sonra" = pencere içi (25-40)
+blocks = notifier.upcoming_blocks(SCHEDULE, 9 * 60 + 30)
+check("1) 30dk sonrası blok pencereye girer (pencere 25-40)",
       len(blocks) == 1 and blocks[0]["key"] == "nap_1", str([b['key'] for b in blocks]))
 
-# 09:50 → 10 dk sonra = ÇOK YAKIN (pencere 15-30) → yok
-check("2) 10dk sonrası blok pencereye GİRMEZ (çok yakın)",
-      notifier.upcoming_blocks(SCHEDULE, 9 * 60 + 50) == [], "")
+# 09:45 → 15 dk sonra = ÇOK YAKIN (artık pencere 25-40) → yok
+check("2) 15dk sonrası blok pencereye GİRMEZ (rutin payı korunur)",
+      notifier.upcoming_blocks(SCHEDULE, 9 * 60 + 45) == [], "")
 
-# 09:20 → 40 dk sonra = ÇOK UZAK → yok
-check("3) 40dk sonrası blok pencereye GİRMEZ (çok uzak)",
-      notifier.upcoming_blocks(SCHEDULE, 9 * 60 + 20) == [], "")
+# 09:15 → 45 dk sonra = ÇOK UZAK → yok
+check("3) 45dk sonrası blok pencereye GİRMEZ (çok uzak)",
+      notifier.upcoming_blocks(SCHEDULE, 9 * 60 + 15) == [], "")
 
 # 'wake' bloğu asla bildirilmez: 06:40'ta 07:00 uyanışı 20 dk sonra ama tip 'wake'
 check("4) 'wake' bloğu bildirilmez",
-      notifier.upcoming_blocks(SCHEDULE, 6 * 60 + 40) == [], "")
+      notifier.upcoming_blocks(SCHEDULE, 6 * 60 + 30) == [], "")
 
 # gece bloğu (19:00) → 18:40'ta pencere içi
-_night = notifier.upcoming_blocks(SCHEDULE, 18 * 60 + 40)
+_night = notifier.upcoming_blocks(SCHEDULE, 18 * 60 + 30)
 check("4b) Gece uykusu bloğu da bildirilir",
       len(_night) == 1 and _night[0]["key"] == "bedtime", str(_night))
 
@@ -157,11 +170,11 @@ ESKI_SCHEDULE = [
     {"end": "07:00", "key": "bedtime", "type": "night", "label": "Gece uykusu",
      "start": "19:00", "end_minute": 1860, "start_minute": 1140},
 ]
-_eski_gece = notifier.upcoming_blocks(ESKI_SCHEDULE, 18 * 60 + 40)
+_eski_gece = notifier.upcoming_blocks(ESKI_SCHEDULE, 18 * 60 + 30)
 check("4c) Eski şemalı (type='night') gece bloğu da bildirilir",
       len(_eski_gece) == 1 and _eski_gece[0]["key"] == "bedtime",
       f"bulunan={[b.get('key') for b in _eski_gece]}")
-_eski_nap = notifier.upcoming_blocks(ESKI_SCHEDULE, 9 * 60 + 10)
+_eski_nap = notifier.upcoming_blocks(ESKI_SCHEDULE, 9 * 60)
 check("4d) Eski şemalı nap bloğu mesajında saat DOLU (None değil)",
       len(_eski_nap) == 1 and _eski_nap[0].get("time") == "09:30",
       f"time={_eski_nap[0].get('time') if _eski_nap else None}")
@@ -174,33 +187,34 @@ b1, p1 = new_plan(u1, "Emir", datetime(2026, 8, 3).date())
 add_token(u1, "ExponentPushToken[AAA]")
 
 SENT.clear()
-stats = notifier.run_reminder_cycle(db, now=utc_at(9, 40))
+stats = notifier.run_reminder_cycle(db, now=utc_at(9, 30))
 check("5) Uçtan uca: bildirim gönderildi",
-      stats["sent"] == 1 and len(SENT) == 1 and len(SENT[0]) == 1,
-      f"stats={stats} sent={SENT}")
-_msg = SENT[0][0] if SENT and SENT[0] else {}
-check("5b) Mesaj içeriği: bebek adı + saat",
-      "Emir" in _msg.get("body", "") and "10:00" in _msg.get("body", ""),
+      sent_to("ExponentPushToken[AAA]") == 1, f"stats={stats} sent={SENT}")
+_msg = next((m for tur in SENT for m in tur
+             if m.get("to") == "ExponentPushToken[AAA]"), {})
+check("5b) Mesaj içeriği: emoji + bebek adı + saat",
+      _msg.get("body", "").startswith("🌙")
+      and "Emir" in _msg.get("body", "") and "10:00" in _msg.get("body", ""),
       f"body={_msg.get('body')}")
 
 # =============================================================================
 # 6) İdempotency — aynı blok ikinci turda gönderilmez
 # =============================================================================
 SENT.clear()
-stats2 = notifier.run_reminder_cycle(db, now=utc_at(9, 41))
+stats2 = notifier.run_reminder_cycle(db, now=utc_at(9, 31))
 check("6) İdempotency: aynı blok 2. turda gönderilmez",
-      stats2["sent"] == 0 and stats2["skipped_duplicate"] == 1 and not SENT,
+      sent_to("ExponentPushToken[AAA]") == 0 and stats2["skipped_duplicate"] >= 1,
       f"stats={stats2} sent={SENT}")
 
 _n_rows = db.query(SentNotification).count()
-check("6b) Defterde tek kayıt var", _n_rows == 1, f"rows={_n_rows}")
+check("6b) Defterde kayıt oluştu", _n_rows >= 1, f"rows={_n_rows}")
 
 # Ertesi gün AYNI blok yeniden bildirilebilir (block_key'de tarih var)
 _, p1b = new_plan(u1, "Emir2", datetime(2026, 8, 4).date())
 SENT.clear()
-stats2c = notifier.run_reminder_cycle(db, now=utc_at(9, 40, day=4))
+stats2c = notifier.run_reminder_cycle(db, now=utc_at(9, 30, day=4))
 check("6c) Ertesi gün aynı blok YENİDEN bildirilir",
-      stats2c["sent"] == 1, f"stats={stats2c}")
+      sent_to("ExponentPushToken[AAA]") >= 1, f"stats={stats2c}")
 
 # =============================================================================
 # 7) Tercih kapalı → gönderilmez
@@ -210,9 +224,9 @@ u2 = new_user("n2@tavsansmoke.com", prefs={"plan_reminders": False,
 b2, p2 = new_plan(u2, "Defne", datetime(2026, 8, 5).date())
 add_token(u2, "ExponentPushToken[BBB]")
 SENT.clear()
-stats3 = notifier.run_reminder_cycle(db, now=utc_at(9, 40, day=5))
-check("7) plan_reminders=false → bildirim YOK",
-      stats3["sent"] == 0 and not SENT, f"stats={stats3}")
+stats3 = notifier.run_reminder_cycle(db, now=utc_at(9, 30, day=5))
+check("7) plan_reminders=false → o kullanıcıya bildirim YOK",
+      sent_to("ExponentPushToken[BBB]") == 0, f"stats={stats3} sent={SENT}")
 
 # =============================================================================
 # 8) DeviceNotRegistered → token silinir
@@ -220,10 +234,11 @@ check("7) plan_reminders=false → bildirim YOK",
 u3 = new_user("n3@tavsansmoke.com")
 b3, p3 = new_plan(u3, "Ada", datetime(2026, 8, 6).date())
 add_token(u3, "ExponentPushToken[DEAD]")
-NEXT_TICKETS.append({"status": "error", "message": "not registered",
-                     "details": {"error": "DeviceNotRegistered"}})
+TICKET_BY_TOKEN["ExponentPushToken[DEAD]"] = {
+    "status": "error", "message": "not registered",
+    "details": {"error": "DeviceNotRegistered"}}
 SENT.clear()
-notifier.run_reminder_cycle(db, now=utc_at(9, 40, day=6))
+notifier.run_reminder_cycle(db, now=utc_at(9, 30, day=6))
 _left = db.query(PushToken).filter(PushToken.expo_token == "ExponentPushToken[DEAD]").count()
 check("8) DeviceNotRegistered → token SİLİNDİ", _left == 0, f"kalan={_left}")
 
@@ -233,9 +248,10 @@ check("8) DeviceNotRegistered → token SİLİNDİ", _left == 0, f"kalan={_left}
 u4 = new_user("n4@tavsansmoke.com")
 b4, p4 = new_plan(u4, "Can", datetime(2026, 8, 7).date())
 add_token(u4, "ExponentPushToken[KEEP]")
-NEXT_TICKETS.append({"status": "error", "message": "MessageRateExceeded",
-                     "details": {"error": "MessageRateExceeded"}})
-notifier.run_reminder_cycle(db, now=utc_at(9, 40, day=7))
+TICKET_BY_TOKEN["ExponentPushToken[KEEP]"] = {
+    "status": "error", "message": "MessageRateExceeded",
+    "details": {"error": "MessageRateExceeded"}}
+notifier.run_reminder_cycle(db, now=utc_at(9, 30, day=7))
 _kept = db.query(PushToken).filter(PushToken.expo_token == "ExponentPushToken[KEEP]").count()
 check("9) Diğer hata → token KORUNDU", _kept == 1, f"kalan={_kept}")
 
@@ -247,9 +263,10 @@ b5, p5 = new_plan(u5, "Zeynep", datetime(2026, 8, 8).date())
 add_token(u5, "ExponentPushToken[D1]")
 add_token(u5, "ExponentPushToken[D2]")
 SENT.clear()
-stats5 = notifier.run_reminder_cycle(db, now=utc_at(9, 40, day=8))
+stats5 = notifier.run_reminder_cycle(db, now=utc_at(9, 30, day=8))
 check("10) Çok cihaz → hepsine gönderilir",
-      stats5["sent"] == 2 and len(SENT[0]) == 2, f"stats={stats5}")
+      sent_to("ExponentPushToken[D1]") == 1 and sent_to("ExponentPushToken[D2]") == 1,
+      f"stats={stats5} sent={SENT}")
 
 # =============================================================================
 # 11) Expo ağ hatası → çökme yok
@@ -259,7 +276,7 @@ b6, p6 = new_plan(u6, "Mert", datetime(2026, 8, 9).date())
 add_token(u6, "ExponentPushToken[NET]")
 RAISE_NEXT["on"] = True
 try:
-    stats6 = notifier.run_reminder_cycle(db, now=utc_at(9, 40, day=9))
+    stats6 = notifier.run_reminder_cycle(db, now=utc_at(9, 30, day=9))
     _crashed = False
 except Exception as e:
     _crashed = True
@@ -330,6 +347,73 @@ r = c.get("/api/v1/notifications/preferences")
 check("13g) preferences auth'suz -> 401/403", r.status_code in (401, 403), str(r.status_code))
 
 db.close()
+
+# =============================================================================
+# 14) ADAPTASYON SENKRONU (Faz 6.6) — kullanıcı uygulamayı hiç açmasa bile
+#     bildirim KAYDIRILMIŞ saate göre gider
+# =============================================================================
+from api.models import SleepLog                      # noqa: E402
+from api.services import plan_service                # noqa: E402
+
+# Bebek 8 aylık; plan 07:00 uyanışa göre kurulu (nap_1 10:00, bedtime 19:00).
+u14 = new_user("n14@tavsansmoke.com")
+b14 = Baby(user_id=u14.id, name="Zeynep14",
+           birth_date=(datetime(2026, 8, 14) - timedelta(days=8 * 30)).date())
+db.add(b14); db.commit(); db.refresh(b14)
+p14 = SleepPlan(user_id=u14.id, baby_id=b14.id, plan_date=datetime(2026, 8, 14).date(),
+                content={"schedule": SCHEDULE, "bucket": "8_ay",
+                         "dogum_haftasi": 40, "adapted": False})
+db.add(p14); db.commit()
+add_token(u14, "ExponentPushToken[SYNC]")
+
+# Son 3 gün: gerçek uyanış 07:45 → plandaki 07:00'den +45dk sapma
+for d in range(3):
+    st = (datetime(2026, 8, 14, tzinfo=timezone.utc) - timedelta(days=d)
+          + timedelta(hours=7, minutes=45) - timedelta(minutes=TZ))
+    db.add(SleepLog(user_id=u14.id, baby_id=b14.id, type="wake", started_at=st))
+db.commit()
+
+# nap_1 kaydırılınca 10:00 → 10:45 olur. 10:15'te tarama yaparsak (30dk sonra)
+# ANCAK kaydırılmış saat pencereye girer; kaydırılmamış 10:00 ÇOKTAN GEÇMİŞTİR.
+SENT.clear()
+stats14 = notifier.run_reminder_cycle(db, now=utc_at(10, 15, day=14))
+_m14 = next((m for tur in SENT for m in tur
+             if m.get("to") == "ExponentPushToken[SYNC]"), None)
+check("14) Uygulama açılmadan adaptasyon koştu ve bildirim gitti",
+      _m14 is not None, f"stats={stats14} sent={SENT}")
+check("14b) Bildirim KAYDIRILMIŞ saatle gitti (10:45, 10:00 değil)",
+      _m14 is not None and "10:45" in _m14.get("body", "")
+      and "10:00" not in _m14.get("body", ""),
+      f"body={_m14.get('body') if _m14 else None}")
+check("14c) Mesaj biçimi: 🌙 {ad} için uyku vakti yaklaşıyor (saat)",
+      _m14 is not None and _m14["body"].startswith("🌙 Zeynep14 için uyku vakti"),
+      f"body={_m14.get('body') if _m14 else None}")
+
+_plan14 = plan_service.plan_for_date(db, u14, b14, datetime(2026, 8, 14).date())
+check("14d) Plan bugüne adapte edilmiş olarak kaydedildi",
+      (_plan14.content or {}).get("adapted") is True
+      and (_plan14.content or {}).get("adaptation", {}).get("shift_minutes") == 45,
+      str((_plan14.content or {}).get("adaptation", {}).get("shift_minutes")))
+
+# --- İKİNCİ TUR: aynı gün tekrar adapt YAPILMAMALI (gereksiz DB yazımı yok) ---
+_once = _plan14.content
+_updated_before = str(_plan14.content.get("adaptation", {}).get("log_summary"))
+stats14b = notifier.run_reminder_cycle(db, now=utc_at(10, 20, day=14))
+check("14e) Aynı gün İKİNCİ adapt YAPILMADI",
+      stats14b.get("adapted", 0) == 0, f"stats={stats14b}")
+
+db.expire_all()
+_plan14b = plan_service.plan_for_date(db, u14, b14, datetime(2026, 8, 14).date())
+check("14f) Plan içeriği değişmedi (yazma olmadı)",
+      _plan14b.content.get("adaptation", {}).get("shift_minutes") == 45
+      and str(_plan14b.content.get("adaptation", {}).get("log_summary")) == _updated_before,
+      "içerik değişti")
+
+# 14g) plan_service tekilliği: aynı gün için tek satır
+_cnt14 = (db.query(SleepPlan)
+          .filter(SleepPlan.baby_id == b14.id,
+                  SleepPlan.plan_date == datetime(2026, 8, 14).date()).count())
+check("14g) Aynı güne tek plan satırı (UPSERT)", _cnt14 == 1, f"adet={_cnt14}")
 
 # --- Özet --------------------------------------------------------------------
 print("\n" + "=" * 74)

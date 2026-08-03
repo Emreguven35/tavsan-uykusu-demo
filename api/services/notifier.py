@@ -7,9 +7,15 @@ bir servise taşınmalı — aksi halde her instance aynı bildirimi göndermeye
 Şimdilik mükerrerliği sent_notifications tablosundaki UNIQUE kısıt engeller.
 
 Akış (her 15 dakikada bir):
-    bugünün planı olan her bebek için → çizelgedeki uyku bloklarından, önümüzdeki
-    15-30 dk penceresinde BAŞLAYANLARI bul → sahibinin tüm cihaz token'larına
-    "🌙 {ad} için uyku vakti yaklaşıyor (19:30)" gönder → deftere yaz.
+    planı olan her bebek için →
+      1. plan_service.ensure_today_plan() ile BUGÜNÜN planını hazırla/adapte et
+         (GET /plans/today ile AYNI kod yolu; bugün zaten adapte edildiyse yazmaz),
+      2. çizelgedeki uyku bloklarından önümüzdeki 25-40 dk penceresinde
+         BAŞLAYANLARI bul,
+      3. sahibinin tüm cihaz token'larına "🌙 {ad} için uyku vakti yaklaşıyor
+         (19:47)" gönder → deftere yaz.
+    Böylece kullanıcı uygulamayı hiç açmasa da bildirim güncel kaydırılmış saate
+    göre gider.
 
 Hata politikası:
     DeviceNotRegistered → token SİLİNİR (cihaz uygulamayı kaldırmış).
@@ -30,18 +36,19 @@ from api.models import (
     Baby, PushToken, SentNotification, SleepPlan, User,
 )
 from api.models.user import DEFAULT_NOTIFICATION_PREFS
-from api.services import plan_adapter
+from api.services import plan_adapter, plan_service
 
 logger = logging.getLogger("tavsan.notifier")
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 EXPO_TIMEOUT = 15
 
-# Bildirim penceresi: blok başlangıcı "şimdi + 15dk" ile "şimdi + 30dk" arasındaysa.
-# Zamanlayıcı 15 dakikada bir koştuğu için her blok bu pencereye TAM BİR KEZ girer;
-# yine de defter (sent_notifications) mükerrerliği garantiye alır.
-WINDOW_MIN_AHEAD = 15
-WINDOW_MAX_AHEAD = 30
+# Bildirim penceresi: blok başlangıcı "şimdi + 25dk" ile "şimdi + 40dk" arasındaysa.
+# 25-40dk, ebeveyne uyku rutinini başlatma payı bırakır (Faz 6.6; önceden 15-30dk).
+# Pencere genişliği (15dk) tarama aralığına EŞİT olmalı — böylece her blok pencereye
+# tam bir kez girer, ne kaçar ne mükerrer olur. Defter yine de garantiye alır.
+WINDOW_MIN_AHEAD = 25
+WINDOW_MAX_AHEAD = 40
 SCHEDULER_INTERVAL_MIN = 15
 
 
@@ -192,20 +199,42 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
     today_local = local_now.date()
     now_minute = local_now.hour * 60 + local_now.minute
 
-    plans = (db.query(SleepPlan).filter(SleepPlan.plan_date == today_local).all())
-    stats = {"checked_plans": len(plans), "sent": 0, "skipped_duplicate": 0}
+    # Planı OLAN her bebek taranır (yalnız bugünün planı olanlar DEĞİL): kullanıcı
+    # uygulamayı hiç açmamışsa bugünün planı henüz oluşmamış olabilir.
+    baby_ids = [row[0] for row in
+                db.query(SleepPlan.baby_id).distinct().all()]
+    stats = {"checked_plans": 0, "sent": 0, "skipped_duplicate": 0, "adapted": 0}
 
-    for plan in plans:
+    for baby_id in baby_ids:
+        baby = db.get(Baby, baby_id)
+        if baby is None:
+            continue
+        user = db.get(User, baby.user_id)
+        if user is None or not _prefs(user).get("plan_reminders", True):
+            continue
+
+        # KRİTİK (Faz 6.6): bildirimden ÖNCE lazy adaptasyon — GET /plans/today ile
+        # AYNI kod yolu (plan_service). Kullanıcı uygulamayı hiç açmasa da bildirim
+        # güncel KAYDIRILMIŞ saate göre gider. Bugün zaten adapte edildiyse
+        # ensure_today_plan hiçbir şey yazmaz (gereksiz DB yazımı yok).
+        zaten = plan_service.already_adapted_today(
+            plan_service.plan_for_date(db, user, baby, today_local))
+        try:
+            plan = plan_service.ensure_today_plan(db, user, baby, today=today_local)
+        except Exception:
+            logger.exception("Bildirim öncesi plan hazırlanamadı (baby=%s)", baby.id)
+            continue
+        if plan is None:
+            continue
+        stats["checked_plans"] += 1
+        if not zaten and (plan.content or {}).get("adapted"):
+            stats["adapted"] += 1
+
         content = plan.content or {}
         blocks = upcoming_blocks(content.get("schedule") or [], now_minute)
         if not blocks:
             continue
-
-        user = db.get(User, plan.user_id)
-        if user is None or not _prefs(user).get("plan_reminders", True):
-            continue
-        baby = db.get(Baby, plan.baby_id)
-        baby_name = baby.name if baby is not None else "Bebeğiniz"
+        baby_name = baby.name
 
         for block in blocks:
             key = _block_key(plan.plan_date, block)
@@ -218,8 +247,9 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
                 stats["skipped_duplicate"] += 1
                 continue
 
+            # Saat, ADAPTE EDİLMİŞ plandan gelir (yukarıda ensure_today_plan koştu).
             title = "🌙 Uyku vakti yaklaşıyor"
-            body = f"{baby_name} için uyku vakti yaklaşıyor ({block.get('time')})"
+            body = f"🌙 {baby_name} için uyku vakti yaklaşıyor ({block.get('time')})"
             sent = push_to_user(db, user.id, title, body,
                                 data={"type": "plan_reminder",
                                       "plan_id": str(plan.id),
