@@ -51,11 +51,11 @@ class MessageResp(BaseModel):
     detail: str
 
 
-class ResetTokenDevResp(BaseModel):
-    """reset-password-request yanıtı. E-posta gönderimi TODO olduğundan, geliştirme
-    kolaylığı için token DÖNDÜRÜLÜR (production'da e-posta ile gönderilecek, yanıttan
-    kaldırılacak — aşağıdaki TODO'ya bakınız)."""
+class ResetPasswordRequestResp(BaseModel):
+    """reset-password-request yanıtı. Faz 5R: reset_token alanı KALDIRILDI — token
+    HTTP yanıtında dönmez (e-postasını bilen herkes hesabı ele geçirebiliyordu).
+
+    E-posta gönderimi Faz 6'da (Resend) bağlanana kadar token yalnızca DB'de
+    (hash'li) durur; kullanıcıya ulaşacak bir kanal yoktur → mobilde "şifremi
+    unuttum" akışı "yakında" olarak işaretlenir."""
     detail: str
-    # TODO(SMTP/Resend): e-posta entegrasyonu gelince bu alanı KALDIR — token yalnız
-    # e-posta ile gitmeli, HTTP yanıtında dönmemeli.
-    reset_token: str | None = None

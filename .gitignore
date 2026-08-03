@@ -49,3 +49,7 @@ data/answer_cache.json
 
 # Runtime ses cache'i (ElevenLabs MP3'leri — repoya girmez)
 data/audio_cache/
+
+# Lokal SQLite fallback DB'leri (DATABASE_URL yokken oluşur; production Postgres)
+tavsan_local.db
+_regresyon_chat.db

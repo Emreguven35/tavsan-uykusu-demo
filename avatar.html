@@ -99,6 +99,12 @@ import { pcmToSpeakString, PCM_SAMPLE_RATE } from "./avatar_audio.js";
 
 // --- Yapılandırma (gerekirse değiştirin) ------------------------------------
 const API_URL = "http://localhost:8000";     // mevcut FastAPI backend tabanı
+// Faz 5R: /ask ve /avatar-session artık X-API-Key ister (backend DEMO_API_KEY).
+// Sayfayı ?key=<DEMO_API_KEY> ile açın; değer localStorage'da saklanır.
+const DEMO_API_KEY = (new URLSearchParams(location.search).get("key")
+  || localStorage.getItem("tavsan_demo_key") || "");
+if (DEMO_API_KEY) localStorage.setItem("tavsan_demo_key", DEMO_API_KEY);
+const DEMO_HEADERS = DEMO_API_KEY ? { "X-API-Key": DEMO_API_KEY } : {};
 const HARD_CAP_MS = 90_000;                    // free plan max 2 dk → 90 sn'de kapat
 const SPEAK_TIMEOUT_MS = 4_000;                // avatar bu sürede konuşmazsa → fallback + neden logu
 // Avatar, beslenen sesi KENDİ audio track'inde geri çalar (attach ile duyulur).
@@ -149,7 +155,7 @@ function updateTimer() {
 
 // --- Backend çağrıları -------------------------------------------------------
 async function fetchAvatarToken() {
-  const r = await fetch(`${API_URL}/avatar-session`, { method: "POST" });
+  const r = await fetch(`${API_URL}/avatar-session`, { method: "POST", headers: DEMO_HEADERS });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.detail || `avatar-session HTTP ${r.status}`);
   return j; // {session_token, session_id, avatar_id, is_sandbox, mode}
@@ -157,7 +163,7 @@ async function fetchAvatarToken() {
 async function askBackend(soru) {
   const r = await fetch(`${API_URL}/ask`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...DEMO_HEADERS },
     body: JSON.stringify({ soru }),
   });
   const j = await r.json().catch(() => ({}));
@@ -356,7 +362,7 @@ window.addEventListener("beforeunload", () => { if (sessionOpen && session) sess
 
 setStatus("off");
 if (!SR) showWarn("Web Speech API yok — mikrofon için Chrome/Edge önerilir.");
-log("hazır. API_URL=" + API_URL);
+log("hazır. API_URL=" + API_URL + (DEMO_API_KEY ? " (X-API-Key var)" : " — UYARI: ?key= yok, /ask ve /avatar-session 401 döner"));
 </script>
 </body>
 </html>

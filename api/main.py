@@ -16,7 +16,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -28,6 +28,7 @@ from api import tts          # noqa: E402 — ElevenLabs + ses cache
 from api import avatar       # noqa: E402 — LiveAvatar LITE session token (görüntü katmanı)
 from api.config import get_settings   # noqa: E402 — merkezi env config
 from api.db import db_healthy         # noqa: E402 — DB sağlık kontrolü
+from api.deps import require_demo_key # noqa: E402 — /ask + /avatar-session koruması
 from api.routers import auth          # noqa: E402 — /api/v1/auth/* (Faz 2)
 from api.routers import babies, logs, plans, subscriptions  # noqa: E402 — Faz 3
 from api.routers import chat, voice   # noqa: E402 — Faz 4 (RAG chat + ses)
@@ -72,8 +73,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("DB'ye ulaşılamadı — DATABASE_URL'i kontrol edin.")
 
-    if settings.jwt_secret_is_default:
-        logger.warning("JWT_SECRET varsayılan/güvensiz — production'da SABİTLEYİN.")
+    # JWT_SECRET artık ZORUNLU (config.py) — eksikse buraya hiç gelinmez.
+    if settings.cors_wildcard_in_production:
+        logger.warning(
+            "ALLOWED_ORIGINS='*' ve ENVIRONMENT=production → tarayıcı origin'leri "
+            "REDDEDİLİYOR (deny-all). Web istemcisi varsa origin'leri açıkça yazın. "
+            "Mobil native istekler Origin göndermediği için etkilenmez.")
+    if not settings.demo_api_key:
+        logger.info("DEMO_API_KEY yok → /ask ve /avatar-session KAPALI (503).")
     yield
 
 
@@ -151,8 +158,10 @@ def health():
     }
 
 
-@app.post("/ask")
+@app.post("/ask", dependencies=[Depends(require_demo_key)])
 def ask(req: AskReq):
+    """Demo soru-cevap. Faz 5R: X-API-Key (DEMO_API_KEY) ZORUNLU — public'te
+    korumasız LLM tetikleyici bırakılmaz. Mobil v1 bunun yerine /api/v1/chat kullanır."""
     if not req.soru or not req.soru.strip():
         raise HTTPException(status_code=400, detail="soru boş olamaz")
 
@@ -177,10 +186,12 @@ def ask(req: AskReq):
     }
 
 
-@app.post("/avatar-session")
-@app.post(f"{API_V1_PREFIX}/avatar-session")   # Faz 4: mobil sözleşme için /api/v1 altında da
+@app.post("/avatar-session", dependencies=[Depends(require_demo_key)])
+@app.post(f"{API_V1_PREFIX}/avatar-session", dependencies=[Depends(require_demo_key)])
 def avatar_session():
     """LiveAvatar LITE mode oturum token'ı üret (frontend Web SDK bununla başlar).
+
+    Faz 5R: X-API-Key (DEMO_API_KEY) ZORUNLU — her çağrı HeyGen kredisi harcatabilir.
 
     API key ASLA dönmez; yalnız kısa ömürlü session_token + avatar meta döner.
     Hata (key yok / kota / ağ) → anlamlı JSON hata + uygun HTTP kodu (ham 500 çökme yok).

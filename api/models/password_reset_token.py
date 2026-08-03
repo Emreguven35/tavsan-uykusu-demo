@@ -1,9 +1,13 @@
 """
 password_reset_tokens — parola sıfırlama akışı (Faz 2 basit sürüm).
 
-E-posta gönderimi henüz YOK (SMTP/Resend TODO). Şimdilik /auth/reset-password-request
-bir sıfırlama token'ı üretip HASH'ini bu tabloya yazar; /auth/reset-password ham token
-+ yeni parolayı alır, hash'i doğrular, parolayı değiştirir ve token'ı 'used' işaretler.
+E-posta gönderimi henüz YOK (Resend — Faz 6). /auth/reset-password-request bir sıfırlama
+token'ı üretip HASH'ini bu tabloya yazar; /auth/reset-password ham token + yeni parolayı
+alır, hash'i doğrular, parolayı değiştirir ve token'ı 'used' işaretler.
+
+Faz 5R NOTU: ham token artık HTTP yanıtında DÖNMEZ (güvenlik). E-posta kanalı
+bağlanana kadar akış uçtan uca tamamlanamaz — /auth/reset-password kodu hazır ve
+test edilebilir, ama gerçek kullanıcıya token ulaştıran kanal Faz 6'da gelecek.
 
 GÜVENLİK: refresh_tokens gibi, ham token saklanmaz — yalnız SHA-256 hash'i.
 """

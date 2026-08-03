@@ -22,6 +22,11 @@ sys.path.insert(0, str(ROOT))
 os.environ["ANTHROPIC_API_KEY"] = "test-dummy"      # mock LLM için
 os.environ["ELEVENLABS_API_KEY"] = "test-eleven"    # mock TTS için
 os.environ["ELEVENLABS_VOICE_ID"] = "test-voice"
+# Faz 5R: JWT_SECRET zorunlu (varsayılana düşmez) + /ask X-API-Key ister.
+os.environ.setdefault("JWT_SECRET", "test-secret-en-az-otuz-iki-karakter-uzunlugunda")
+DEMO_KEY = "test-demo-key"
+os.environ.setdefault("DEMO_API_KEY", DEMO_KEY)
+DEMO_HDR = {"X-API-Key": DEMO_KEY}
 
 from fastapi.testclient import TestClient  # noqa: E402
 from engine import chatbot                 # noqa: E402
@@ -87,7 +92,7 @@ def main():
           str(h.json()))
 
     # 2) /ask geçerli
-    r1 = client.post("/ask", json={"soru": "Beyaz gürültü zararlı mı?", "yas_bandi": "8_ay"})
+    r1 = client.post("/ask", headers=DEMO_HDR, json={"soru": "Beyaz gürültü zararlı mı?", "yas_bandi": "8_ay"})
     j1 = r1.json()
     check("2) /ask cevap + kaynaklar",
           r1.status_code == 200 and j1["cevap"] and isinstance(j1["kaynaklar"], list)
@@ -96,7 +101,7 @@ def main():
     tts_after_first = _TTS["n"]
 
     # 3) Aynı soru 2. kez → cache_hit=true, TTS çağrısı ARTMAZ (dosyadan)
-    r2 = client.post("/ask", json={"soru": "Beyaz gürültü zararlı mı?", "yas_bandi": "8_ay"})
+    r2 = client.post("/ask", headers=DEMO_HDR, json={"soru": "Beyaz gürültü zararlı mı?", "yas_bandi": "8_ay"})
     j2 = r2.json()
     check("3) 2. kez cache_hit=true + ses TTS'siz",
           j2["cache_hit"] is True and j2["ses_url"] == j1["ses_url"]
@@ -106,7 +111,7 @@ def main():
           f"maliyet={j2['maliyet']}")
 
     # 4) Farklı yas_bandi → cache_hit=false
-    r3 = client.post("/ask", json={"soru": "Beyaz gürültü zararlı mı?", "yas_bandi": "11_ay"})
+    r3 = client.post("/ask", headers=DEMO_HDR, json={"soru": "Beyaz gürültü zararlı mı?", "yas_bandi": "11_ay"})
     j3 = r3.json()
     check("4) Farklı yas_bandi → cache_hit=false",
           j3["cache_hit"] is False, f"cache_hit={j3['cache_hit']}")
@@ -126,13 +131,24 @@ def main():
 
     # 5) ELEVENLABS anahtarı yok → cevap gelir, ses_url=null (graceful)
     old_key = os.environ.pop("ELEVENLABS_API_KEY", None)
-    r5 = client.post("/ask", json={"soru": "Emzik kullanmalı mıyım?", "yas_bandi": "8_ay"})
+    r5 = client.post("/ask", headers=DEMO_HDR, json={"soru": "Emzik kullanmalı mıyım?", "yas_bandi": "8_ay"})
     j5 = r5.json()
     check("5) TTS anahtarı yok → cevap var, ses_url=null",
           r5.status_code == 200 and j5["cevap"] and j5["ses_url"] is None,
           f"ses_url={j5['ses_url']} cevap_var={bool(j5['cevap'])}")
     if old_key is not None:
         os.environ["ELEVENLABS_API_KEY"] = old_key
+
+    # 8) Faz 5R: /ask anahtarsız → 401 (public'te korumasız LLM tetikleyici yok)
+    na = client.post("/ask", json={"soru": "Beyaz gürültü zararlı mı?"})
+    check("8) /ask X-API-Key yok → 401",
+          na.status_code == 401, f"status={na.status_code} body={na.json()}")
+
+    # 9) Faz 5R: /ask yanlış anahtar → 401
+    wa = client.post("/ask", headers={"X-API-Key": "yanlis-anahtar"},
+                     json={"soru": "Beyaz gürültü zararlı mı?"})
+    check("9) /ask yanlış X-API-Key → 401",
+          wa.status_code == 401, f"status={wa.status_code}")
 
     # --- özet ---
     print("\n" + "=" * 74)

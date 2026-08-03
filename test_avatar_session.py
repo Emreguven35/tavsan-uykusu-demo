@@ -20,6 +20,11 @@ sys.path.insert(0, str(ROOT))
 
 # LLM/embedding'i mock modda tut (import sırasında ağ/anahtar gerekmesin).
 os.environ["ANTHROPIC_API_KEY"] = "test-dummy"
+# Faz 5R: JWT_SECRET zorunlu + /avatar-session X-API-Key (DEMO_API_KEY) ister.
+os.environ.setdefault("JWT_SECRET", "test-secret-en-az-otuz-iki-karakter-uzunlugunda")
+DEMO_KEY = "test-demo-key"
+os.environ.setdefault("DEMO_API_KEY", DEMO_KEY)
+DEMO_HDR = {"X-API-Key": DEMO_KEY}
 
 from fastapi.testclient import TestClient  # noqa: E402
 from api import avatar                      # noqa: E402
@@ -74,7 +79,7 @@ def main():
     # 1) Sandbox default (SANDBOX tanımsız) -> is_sandbox true, Wayne avatarı
     _reset_env(sandbox=None, avatar_id="ilayda-real-id")
     avatar.requests.post = make_fake_post(200, OK_BODY)
-    r1 = client.post("/avatar-session")
+    r1 = client.post("/avatar-session", headers=DEMO_HDR)
     j1 = r1.json()
     check("1) Sandbox default -> is_sandbox=true + Wayne avatar",
           r1.status_code == 200 and j1["is_sandbox"] is True
@@ -91,7 +96,7 @@ def main():
     # 3) API key yok -> 500 anlamlı hata (çökme yok)
     _reset_env(sandbox="true", key=None)
     avatar.requests.post = make_fake_post(200, OK_BODY)
-    r3 = client.post("/avatar-session")
+    r3 = client.post("/avatar-session", headers=DEMO_HDR)
     check("3) API key yok -> 500 + anlamlı JSON hata",
           r3.status_code == 500 and "LIVEAVATAR_API_KEY" in r3.json().get("detail", ""),
           f"status={r3.status_code} detail={r3.json().get('detail')}")
@@ -99,7 +104,7 @@ def main():
     # 4) Upstream kota/hata (402) -> 502 + anlamlı mesaj + API KEY SIZMAZ
     _reset_env(sandbox="true")
     avatar.requests.post = make_fake_post(402, {"message": "Insufficient credits"})
-    r4 = client.post("/avatar-session")
+    r4 = client.post("/avatar-session", headers=DEMO_HDR)
     detail4 = r4.json().get("detail", "")
     check("4) Upstream kota -> 502 + mesaj + key sızmaz",
           r4.status_code == 502 and "credit" in detail4.lower()
@@ -109,7 +114,7 @@ def main():
     # 5) Sandbox kapalı + avatar id yok -> 500 yapılandırma
     _reset_env(sandbox="false", avatar_id=None)
     avatar.requests.post = make_fake_post(200, OK_BODY)
-    r5 = client.post("/avatar-session")
+    r5 = client.post("/avatar-session", headers=DEMO_HDR)
     check("5) Sandbox=false + avatar id yok -> 500",
           r5.status_code == 500 and "LIVEAVATAR_AVATAR_ID" in r5.json().get("detail", ""),
           f"status={r5.status_code} detail={r5.json().get('detail')}")
@@ -117,7 +122,7 @@ def main():
     # 6) Sandbox kapalı + avatar id var -> gerçek avatar, is_sandbox=false
     _reset_env(sandbox="false", avatar_id="ilayda-real-id")
     avatar.requests.post = make_fake_post(200, OK_BODY)
-    r6 = client.post("/avatar-session")
+    r6 = client.post("/avatar-session", headers=DEMO_HDR)
     j6 = r6.json()
     check("6) Sandbox=false + avatar id -> gerçek avatar, is_sandbox=false",
           r6.status_code == 200 and j6["is_sandbox"] is False

@@ -20,7 +20,7 @@ from api.deps import get_current_user
 from api.models import PasswordResetToken, RefreshToken, User
 from api.schemas.auth import (
     LoginReq, MessageResp, RefreshReq, RegisterReq, ResetPasswordReq,
-    ResetPasswordRequestReq, ResetTokenDevResp, TokenPair,
+    ResetPasswordRequestReq, ResetPasswordRequestResp, TokenPair,
 )
 from api.services import security
 
@@ -117,16 +117,21 @@ def logout(req: RefreshReq, db: Session = Depends(get_db),
     return MessageResp(detail="Çıkış yapıldı")
 
 
-@router.post("/reset-password-request", response_model=ResetTokenDevResp)
+@router.post("/reset-password-request", response_model=ResetPasswordRequestResp)
 def reset_password_request(req: ResetPasswordRequestReq, db: Session = Depends(get_db)):
     """Sıfırlama token'ı üret + hash'ini DB'ye yaz.
-    E-posta gönderimi TODO (SMTP/Resend). Kullanıcı sayımını sızdırmamak için, e-posta
-    kayıtlı olmasa bile aynı yanıt döner (token yalnız gerçek kullanıcıda üretilir)."""
+
+    Faz 5R: ham token artık YANITTA DÖNMEZ ve LOGLANMAZ. E-posta kanalı (Resend)
+    Faz 6'da bağlanana kadar token kullanıcıya ulaşamaz — akış kasıtlı olarak
+    tamamlanamaz durumdadır (mobilde "yakında"). Bu, e-postasını bilen birinin
+    hesabı ele geçirmesini engeller.
+
+    Kullanıcı sayımını sızdırmamak için e-posta kayıtlı olmasa bile aynı yanıt döner."""
     email = req.email.strip().lower()
     user = db.query(User).filter(User.email == email).one_or_none()
     generic = "Eğer bu e-posta kayıtlıysa, sıfırlama talimatı gönderildi"
     if user is None:
-        return ResetTokenDevResp(detail=generic, reset_token=None)
+        return ResetPasswordRequestResp(detail=generic)
 
     raw = security.generate_opaque_token()
     db.add(PasswordResetToken(
@@ -136,9 +141,11 @@ def reset_password_request(req: ResetPasswordRequestReq, db: Session = Depends(g
         used=False,
     ))
     db.commit()
+    # KVKK + güvenlik: ham token hiçbir yere (yanıt/log) yazılmaz; yalnız hash'i DB'de.
     logger.info("Parola sıfırlama talebi: user_id=%s", user.id)
-    # TODO(SMTP/Resend): raw token'ı e-posta ile gönder ve yanıttan çıkar.
-    return ResetTokenDevResp(detail=generic, reset_token=raw)
+    del raw
+    # TODO(Faz 6 / Resend): raw token'ı e-posta ile gönder (yanıta EKLEME).
+    return ResetPasswordRequestResp(detail=generic)
 
 
 @router.post("/reset-password", response_model=MessageResp)
