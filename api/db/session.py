@@ -7,7 +7,7 @@ ve her durumda kapatır.
 """
 import logging
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.config import get_settings
@@ -24,6 +24,16 @@ engine = create_engine(
     future=True,
     connect_args=_connect_args,
 )
+
+# SQLite'ta FK kısıtları VARSAYILAN OLARAK KAPALI — açmazsak ondelete=CASCADE/SET NULL
+# çalışmaz (production Postgres'te çalışır ama lokal/test sqlite'ta sessizce atlanır).
+# Faz T: hesap silme → thread/reply user_id SET NULL davranışı testlerde de gerçek olsun.
+if settings.is_sqlite:
+    @event.listens_for(engine, "connect")
+    def _sqlite_fk_on(dbapi_conn, _rec):     # noqa: ANN001
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
 

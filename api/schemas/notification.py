@@ -24,12 +24,14 @@ class PushTokenResp(BaseModel):
 
 
 class NotificationPrefs(BaseModel):
-    """Bildirim tercihleri. İkisi de varsayılan olarak AÇIK."""
+    """Bildirim tercihleri. Üçü de varsayılan olarak AÇIK."""
     plan_reminders: bool = True      # "uyku vakti yaklaşıyor" hatırlatmaları
     daily_summary: bool = True       # günlük özet
+    community_replies: bool = True   # Faz T: kendi konuna cevap gelince
 
 
 class NotificationPrefsUpdate(BaseModel):
     """Kısmi güncelleme — verilmeyen alan değişmez."""
     plan_reminders: bool | None = None
     daily_summary: bool | None = None
+    community_replies: bool | None = None

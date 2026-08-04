@@ -326,15 +326,17 @@ check("13c) Cihaz başka hesaba geçerse token devredilir",
 
 # preferences GET (varsayılan ikisi de true)
 r = c.get("/api/v1/notifications/preferences", headers=H)
-check("13d) preferences varsayılanı: ikisi de açık",
-      r.status_code == 200 and r.json() == {"plan_reminders": True, "daily_summary": True},
+check("13d) preferences varsayılanı: üçü de açık",
+      r.status_code == 200 and r.json() == {
+          "plan_reminders": True, "daily_summary": True, "community_replies": True},
       r.text[:200])
 
 # preferences PATCH (kısmi)
 r = c.patch("/api/v1/notifications/preferences", headers=H,
             json={"plan_reminders": False})
 check("13e) preferences PATCH kısmi güncelleme",
-      r.status_code == 200 and r.json() == {"plan_reminders": False, "daily_summary": True},
+      r.status_code == 200 and r.json() == {
+          "plan_reminders": False, "daily_summary": True, "community_replies": True},
       r.text[:200])
 
 # delete token

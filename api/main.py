@@ -33,6 +33,7 @@ from api.routers import auth          # noqa: E402 — /api/v1/auth/* (Faz 2)
 from api.routers import babies, logs, plans, subscriptions  # noqa: E402 — Faz 3
 from api.routers import chat, voice   # noqa: E402 — Faz 4 (RAG chat + ses)
 from api.routers import notifications # noqa: E402 — Faz 6.2 (push token + tercihler)
+from api.routers import community      # noqa: E402 — Faz T (anne topluluğu)
 from api.services import notifier     # noqa: E402 — Faz 6.2 (bildirim zamanlayıcısı)
 
 # Yapılandırılmış logging: süre/durum/hata bilgisini tek biçimde ver.
@@ -146,6 +147,7 @@ app.include_router(subscriptions.router, prefix=API_V1_PREFIX)
 app.include_router(chat.router, prefix=API_V1_PREFIX)
 app.include_router(voice.router, prefix=API_V1_PREFIX)
 app.include_router(notifications.router, prefix=API_V1_PREFIX)
+app.include_router(community.router, prefix=API_V1_PREFIX)
 
 
 class AskReq(BaseModel):

@@ -12,6 +12,7 @@ from api.models._mixins import TimestampMixin, uuid_pk
 DEFAULT_NOTIFICATION_PREFS: dict[str, bool] = {
     "plan_reminders": True,
     "daily_summary": True,
+    "community_replies": True,        # Faz T: kendi konuna cevap gelince bildir
 }
 
 
