@@ -334,3 +334,244 @@ aynı masalı ikinci kez dinlerken **TTS'e gidilmez** — dosya diskten servis e
 > cache'ten gelir. LRU sınırı 500 dosya / 100 MB; Railway'de disk efemer
 > olduğundan yeniden deploy sonrası cache boşalır ve ilk dinlemeler yeniden
 > üretilir. Kalıcılık isteniyorsa `data/audio_cache` klasörüne volume mount edilmeli.
+
+---
+
+# Faz T — Anne Topluluğu API (`/api/v1/community/*`)
+
+Metin tabanlı topluluk. **v1 kapsamı:** yalnız metin + düz cevap listesi.
+Kapsam DIŞI: DM, görsel, profil sayfası, kullanıcı-tanımlı kategori, iç içe cevap.
+
+## ⚠️ MOBİL BAĞLANTI — önce bunu oku (kategoriler yüklenmiyor sorunu)
+
+Uç canlıda **çalışıyor**; `GET /api/v1/community/categories` gerçek token'la **200**
+döner (aşağıda kanıt). "Kategoriler yüklenemedi" hatası neredeyse kesin **istemci
+tarafı** üç nedenden biri (canlı loglarla doğrulandı):
+
+| Belirti | Sunucu yanıtı | Sebep | Çözüm (mobil) |
+|---|---|---|---|
+| **401 Unauthorized** | `{"detail":"Geçersiz veya süresi dolmuş oturum"}` | Token yok / süresi dolmuş / `Authorization` başlığı eksik | Community sekmesini **giriş sonrası** çağır; `Authorization: Bearer <access_token>` ekle. Süre dolmuşsa `POST /api/v1/auth/refresh`. |
+| **404 Not Found** | `{"detail":"Not Found"}` | Yol **`/api/v1`** ön-ekini içermiyor (ör. `/community/categories`) | Taban URL `https://<host>/api/v1`; yol `community/categories`. Tam yol: `/api/v1/community/categories`. |
+| **307 Temporary Redirect** | (gövde yok) | Yolun **sonunda `/`** var (`…/categories/`). FastAPI `redirect_slashes` 307 döndürür ve bazı HTTP istemcileri redirect'te `Authorization`'ı düşürür → sonraki istek 401. | Yol sonuna `/` **koyma**. `…/categories` (slash yok). |
+
+> **KURAL:** Tüm uçlar **`/api/v1` ön-ekli**, **sonda slash yok**, **hepsi `Authorization: Bearer <token>` zorunlu** (health/community dahil değil — community %100 auth'lu). `/openapi.json` production'da **kapalıdır** (404, bilinçli — Faz G4); şema doğrulaması için bu bölüm resmî kaynaktır.
+
+**Ortak hata zarfları:**
+- **401** (auth): `{"detail":"Geçersiz veya süresi dolmuş oturum"}`
+- **400** (K0 moderasyon): `{"detail":{"code":"content_blocked","reason":"hakaret|iletisim_bilgisi|spam"}}`
+- **403** (gönderi yasağı): `{"detail":{"code":"posting_blocked","reason":"muted|banned"}}`
+- **429** (hız limiti, 60 sn'de 2. gönderi): `{"detail":{"code":"rate_limited","reason":"cok_sik_gonderi"}}` + `Retry-After` başlığı
+- **422** (Pydantic doğrulama): `{"detail":[{"type":"...","loc":["body","<alan>"],"msg":"..."}]}`
+
+---
+
+## Profil
+
+### `GET /api/v1/community/profile`
+Kendi topluluk profili. **Profil yoksa 404** → mobil takma ad ekranını açmalı.
+```jsonc
+// 200
+{"id":"24ddce0d-…","nickname":"DocAnne","status":"active","post_count":0,
+ "is_expert":false,"is_moderator":false,
+ "rules_accepted_at":"2026-08-04T22:09:19.548921Z","created_at":"2026-08-04T22:09:19.544893Z"}
+// 404 (profil yok)
+{"detail":"Topluluk profili yok — önce takma ad belirleyin"}
+```
+`status`: `active | muted | banned`. `is_expert` = İlayda/uzman rozeti. `is_moderator` = mod yetkisi.
+
+### `POST /api/v1/community/profile`
+Body: `{"nickname": "<2-24 karakter>"}` → **201** (yukarıdaki `ProfileResp`).
+Takma ad **K0 filtresinden geçer** (küfür → 400). `rules_accepted_at` otomatik set edilir.
+- **409** `{"detail":"Bu takma ad kullanılıyor"}` (çakışma) veya `{"detail":"Topluluk profili zaten var"}`.
+- **400** `{"detail":{"code":"content_blocked","reason":"hakaret"}}` (uygunsuz takma ad).
+
+### `PATCH /api/v1/community/profile`
+Body: `{"nickname": "<yeni>"}` → **200** güncellenmiş `ProfileResp`. Aynı 409/400 kuralları.
+
+---
+
+## Kategoriler
+
+### `GET /api/v1/community/categories`
+Sabit 5 kategori + her birinde **published** konu sayısı.
+```jsonc
+// 200 — CANLI DOĞRULANMIŞ GERÇEK YANIT
+{"categories":[
+  {"key":"uyku","thread_count":0},
+  {"key":"beslenme","thread_count":0},
+  {"key":"gelisim","thread_count":0},
+  {"key":"anne_hali","thread_count":0},
+  {"key":"oneri","thread_count":0}]}
+```
+Kategori anahtarları (enum, sabit): **`uyku` `beslenme` `gelisim` `anne_hali` `oneri`**.
+
+---
+
+## Konular (threads)
+
+### `GET /api/v1/community/threads`
+**Cursor pagination.** Query:
+- `category` (opsiyonel): yukarıdaki 5 anahtardan biri. Verilmezse tüm kategoriler.
+- `cursor` (opsiyonel): önceki yanıtın `next_cursor` değeri (opak base64). İlk sayfada gönderme.
+- `limit` (opsiyonel, default **20**, max **50**).
+
+Sıralama `last_activity_at` **DESC**. Engellenen kullanıcıların ve `hidden/removed`
+içerik **gizli**. Yanıt zarfı:
+```jsonc
+// 200 — GERÇEK YANIT
+{
+  "items": [
+    {
+      "id": "e871bcf5-…",
+      "nickname": "DocAnneX",
+      "is_expert": false,
+      "category": "uyku",
+      "title": "Gece uyanmalari nasil azalir",
+      "body_preview": "6 aylik bebegim gece 4-5 kez uyaniyor…",  // body ilk 140 karakter
+      "reply_count": 1,
+      "like_count": 1,
+      "expert_replied": false,
+      "liked_by_me": true,
+      "last_activity_at": "2026-08-04T22:10:11.421690Z",
+      "created_at": "2026-08-04T22:10:10.475063Z"
+    }
+  ],
+  "next_cursor": null    // null → son sayfa. Doluysa bir sonraki GET'te ?cursor=<bu değer>
+}
+```
+**Sayfalama akışı:** `next_cursor` `null` olana kadar `?cursor=<next_cursor>&limit=20` ile devam et.
+
+### `GET /api/v1/community/threads/{thread_id}`
+Konu + cevaplar (cevaplar **created_at ASC**, sayfalı). Query: `cursor`, `limit` (cevap sayfalama).
+Konu `published` değilse **404**.
+```jsonc
+// 200 — GERÇEK YANIT
+{
+  "id":"e871bcf5-…","nickname":"DocAnneX","is_expert":false,"category":"uyku",
+  "title":"Gece uyanmalari nasil azalir","body":"6 aylik bebegim…",
+  "reply_count":1,"like_count":1,"expert_replied":false,"liked_by_me":true,
+  "last_activity_at":"2026-08-04T22:10:11.421690Z","created_at":"2026-08-04T22:10:10.475063Z",
+  "replies":[
+    {"id":"f77ae6e0-…","nickname":"DocAnneY","is_expert":false,
+     "body":"Uyaniklik penceresine dikkat cok yardimci oldu",
+     "like_count":0,"liked_by_me":false,"created_at":"2026-08-04T22:10:11.416506Z"}
+  ],
+  "replies_next_cursor": null    // cevap sayfalama cursor'u (null → tüm cevaplar geldi)
+}
+```
+> **"Silinmiş kullanıcı":** hesabı silinmiş yazarın konusu/cevabı KALIR; `nickname` alanı
+> `"Silinmiş kullanıcı"`, `is_expert:false` döner.
+
+### `POST /api/v1/community/threads`
+Body: `{"category":"uyku","title":"<1-100>","body":"<1-1000>"}` → **201** (tam `ThreadDetail`
+zarfı, `replies:[]`). Moderasyon hattı K0→K1→K2 uygulanır (bkz. altta).
+```jsonc
+// 201 — GERÇEK YANIT
+{"id":"e871bcf5-…","nickname":"DocAnneX","is_expert":false,"category":"uyku",
+ "title":"Gece uyanmalari nasil azalir","body":"6 aylik bebegim…",
+ "reply_count":0,"like_count":0,"expert_replied":false,"liked_by_me":false,
+ "last_activity_at":"…","created_at":"…","replies":[],"replies_next_cursor":null}
+```
+Hatalar: **400** content_blocked (K0), **403** posting_blocked (muted/banned),
+**429** rate_limited (60 sn'de 2. gönderi), **404** profil yok, **422** geçersiz alan.
+
+### `DELETE /api/v1/community/threads/{thread_id}`
+Yalnız **sahibi** (status=`removed`). Başkasının / yok → **404** `{"detail":"Konu bulunamadı"}`.
+Başarı: **200** `{"detail":"Konu silindi"}`.
+
+---
+
+## Cevaplar (replies)
+
+### `POST /api/v1/community/threads/{thread_id}/replies`
+Body: `{"body":"<1-1000>"}` → **201**.
+```jsonc
+// 201 — GERÇEK YANIT
+{"id":"f77ae6e0-…","nickname":"DocAnneY","is_expert":false,
+ "body":"Uyaniklik penceresine dikkat cok yardimci oldu",
+ "like_count":0,"liked_by_me":false,"created_at":"2026-08-04T22:10:11.416506Z"}
+```
+Yazan **uzman (is_expert)** ise konunun `expert_replied` alanı `true` olur + konu sahibine
+**"İlayda konuna cevap verdi 🐰"** bildirimi gider (kendi cevabına gitmez).
+Aynı K0/K1/K2/403/429 kuralları. Konu yoksa/`published` değilse **404**.
+
+### `DELETE /api/v1/community/replies/{reply_id}`
+Yalnız sahibi (status=`removed`, konu `reply_count` düşer). Başkası/yok → **404**.
+
+---
+
+## Etkileşim
+
+### `POST /api/v1/community/like`  (toggle)
+Body: `{"target_type":"thread|reply","target_id":"<uuid>"}` → **200**.
+```jsonc
+// 200 — beğenildi
+{"liked":true,"like_count":1}
+// tekrar çağır → beğeni geri alınır
+{"liked":false,"like_count":0}
+```
+İçerik yok/`published` değil → **404** `{"detail":"İçerik bulunamadı"}`.
+
+### `POST /api/v1/community/report`
+Body: `{"target_type":"thread|reply","target_id":"<uuid>","reason":"<enum>","note":"<opsiyonel ≤500>"}`.
+`reason` enum: **`spam` `hakaret` `tibbi_risk` `reklam` `uygunsuz` `diger`**.
+```jsonc
+// 200
+{"detail":"Şikayet alındı"}
+// 200 — 2. farklı kullanıcı şikayeti → içerik otomatik gizlendi
+{"detail":"Şikayet alındı, içerik incelemeye alındı"}
+// 409 — aynı kullanıcı aynı içeriği tekrar şikayet edemez
+{"detail":"Bu içeriği zaten şikayet ettiniz"}
+```
+
+### `POST /api/v1/community/block`
+Body: `{"user_id":"<uuid>"}` → **200** `{"detail":"Kullanıcı engellendi"}` (idempotent).
+Kendini engelleme → **400**. Engellenen kullanıcının içeriği listelerde gizlenir.
+
+### `DELETE /api/v1/community/block/{blocked_user_id}` → **200** `{"detail":"Engel kaldırıldı"}` (idempotent).
+
+### `GET /api/v1/community/blocks`
+```jsonc
+// 200
+[]  // veya [{"blocked_user_id":"<uuid>","nickname":"…","created_at":"…"}]
+```
+
+---
+
+## Moderatör uçları  (`is_moderator` şart; değilse **403** `{"detail":"Moderatör yetkisi gerekli"}`)
+
+### `GET /api/v1/community/mod/reports?resolved=false`
+Bekleyen şikayetler (içerikle):
+```jsonc
+// 200
+{"reports":[{"id":"…","target_type":"thread","target_id":"…","reason":"uygunsuz",
+  "note":"…","resolved":false,"created_at":"…",
+  "content_status":"published","content_body":"…(≤300)"}]}
+```
+
+### `POST /api/v1/community/mod/action`
+Body: `{"target_type":"thread|reply","target_id":"<uuid>","action":"hide|restore|remove"}`
+→ **200** `{"detail":"Uygulandı: hide"}`. İlgili şikayetler `resolved=true` yapılır.
+
+### `POST /api/v1/community/mod/user`
+Body: `{"user_id":"<uuid>","action":"mute|unmute|ban|unban"}` → **200**.
+`mute` = 24 saat gönderi yasağı; `ban` = kalıcı + içerik gizli.
+
+---
+
+## Moderasyon davranışı (mobilin bilmesi gereken)
+
+- **K0 (senkron):** küfür/hakaret, iletişim bilgisi (URL/tel/IBAN/e-posta), spam → **400
+  content_blocked**, içerik KAYDEDİLMEZ. Kullanıcıya `reason`'a göre mesaj göster.
+- **Hız limiti:** aynı kullanıcı **60 sn**'de 2. gönderi → **429** (+`Retry-After`). Mobil,
+  gönder butonunu bu süre kısıtlamalı.
+- **K1+K2 (asenkron):** işaretli içerik **anında yayınlanır** (201 döner), arka planda
+  Haiku değerlendirir; uygunsuzsa sonradan gizlenir. Yani 201 = "yayınlandı", ama içerik
+  daha sonra listede kaybolabilir (moderasyon). Mobil bunu normal karşılamalı.
+- **muted/banned:** gönderi denemesi **403 posting_blocked**; `reason` = `muted`/`banned`.
+
+## Bildirim tercihi
+`GET/PATCH /api/v1/notifications/preferences` artık **`community_replies`** (default `true`)
+alanını da içerir: `{"plan_reminders":true,"daily_summary":true,"community_replies":true}`.
+Kapatmak: `PATCH {"community_replies": false}`.
+
