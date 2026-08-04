@@ -14,39 +14,85 @@ import logging
 import uuid
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from api.db import get_db
 from api.deps import get_current_user, get_owned_baby
 from api.models import SleepPlan, User
-from api.schemas.plan import PlanAdaptResp, PlanGenerateReq, PlanResp
-from api.services import plan_adapter, plan_service
+from api.schemas.plan import (
+    PlanAdaptResp, PlanGenerateReq, PlanJobResp, PlanJobStatusResp, PlanResp,
+)
+from api.services import plan_adapter, plan_jobs, plan_service
 
 logger = logging.getLogger("tavsan.plans")
 router = APIRouter(prefix="/plans", tags=["plans"])
 
 
-@router.post("/generate", response_model=PlanResp, status_code=status.HTTP_201_CREATED)
-def generate_plan(req: PlanGenerateReq, db: Session = Depends(get_db),
+@router.post("/generate", status_code=status.HTTP_202_ACCEPTED,
+             response_model=None,
+             responses={202: {"model": PlanJobResp}, 201: {"model": PlanResp}})
+def generate_plan(req: PlanGenerateReq, background: BackgroundTasks,
+                  sync: bool = Query(default=False,
+                                     description="true → senkron 201+PlanResp "
+                                                 "(geriye uyum/test); default async 202"),
+                  db: Session = Depends(get_db),
                   user: User = Depends(get_current_user)):
+    """Plan üret. Faz G1: üretim ~129 sn sürüyordu ve senkron istek worker'ı
+    bloke ediyordu → artık VARSAYILAN ASENKRON.
+
+    - Async (default): 202 + {job_id, status:"processing"}. Üretim arka planda
+      koşar; istemci GET /plans/generate/{job_id} ile yoklar.
+    - Sync (?sync=true): eski davranış — 201 + PlanResp (blocking). Test suite ve
+      hızlı script'ler için korunur; mobil async akışı kullanır.
+
+    Sahiplik + doğum tarihi 202/201'den ÖNCE senkron doğrulanır (erken 404/400)."""
     baby = get_owned_baby(req.baby_id, db, user)
     if baby.birth_date is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Plan için bebeğin doğum tarihi gereklidir")
-    try:
-        content = plan_service.generate_content(
-            baby, req.profile_overrides, req.dogum_haftasi)
-    except plan_service.PlanError as e:
-        logger.warning("Plan üretimi başarısız (baby=%s): %s", baby.id, e)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail=f"Plan üretilemedi: {e}")
 
-    today = datetime.now(timezone.utc).date()
-    plan = plan_service.upsert_plan(db, user, baby, today, content)
-    logger.info("Plan üretildi: plan_id=%s baby=%s (%s)",
-                plan.id, baby.id, content["generated_with"])
-    return plan
+    if sync:
+        try:
+            content = plan_service.generate_content(
+                baby, req.profile_overrides, req.dogum_haftasi)
+        except plan_service.PlanError as e:
+            logger.warning("Plan üretimi başarısız (baby=%s): %s", baby.id, e)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                                detail=f"Plan üretilemedi: {e}")
+        today = datetime.now(timezone.utc).date()
+        plan = plan_service.upsert_plan(db, user, baby, today, content)
+        logger.info("Plan üretildi (sync): plan_id=%s baby=%s (%s)",
+                    plan.id, baby.id, content["generated_with"])
+        from fastapi.responses import JSONResponse
+        from fastapi.encoders import jsonable_encoder
+        return JSONResponse(status_code=status.HTTP_201_CREATED,
+                            content=jsonable_encoder(PlanResp.model_validate(plan)))
+
+    # Async: iş kaydet + arka planda üret. baby.id'yi geçiriyoruz (Session kapanacak).
+    job_id = plan_jobs.create_job(user.id, baby.id)
+    background.add_task(plan_jobs.run_generation, job_id, baby.id,
+                        req.profile_overrides, req.dogum_haftasi)
+    logger.info("Plan job kuyruğa alındı: job=%s baby=%s", job_id, baby.id)
+    return PlanJobResp(job_id=job_id, status=plan_jobs.STATUS_PROCESSING)
+
+
+@router.get("/generate/{job_id}", response_model=PlanJobStatusResp)
+def generate_status(job_id: str, db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """Async plan üretim işinin durumu. status='done' ise plan dolu döner.
+
+    İş yalnız SAHİBİNE görünür (başka kullanıcı / bilinmeyen id → 404)."""
+    job = plan_jobs.get_job(job_id, user.id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="İş bulunamadı")
+    resp = PlanJobStatusResp(job_id=job_id, status=job["status"], error=job.get("error"))
+    if job["status"] == plan_jobs.STATUS_DONE and job.get("plan_id"):
+        plan = db.get(SleepPlan, uuid.UUID(job["plan_id"]))
+        if plan is not None:
+            resp.plan = PlanResp.model_validate(plan)
+    return resp
 
 
 @router.post("/adapt", response_model=PlanAdaptResp)

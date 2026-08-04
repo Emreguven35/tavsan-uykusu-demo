@@ -101,6 +101,13 @@ class Settings:
         # göreli path'e düşülür (lokal geliştirme + mevcut testler bozulmaz).
         self.public_base_url = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
 
+        # --- Abonelik / beta (Faz G5) ---------------------------------------
+        # Gerçek Apple/Google IAP doğrulaması ayrı sprint. Beta süresince premium'u
+        # SUNUCU TARAFI bu flag ile aç — istemcinin gönderdiği bir "premium" alanına
+        # ASLA güvenme. true → GET /subscriptions/status herkese premium döner.
+        self.beta_premium_all = (os.getenv("BETA_PREMIUM_ALL") or "").strip().lower() \
+            in ("1", "true", "yes", "on")
+
         # CORS — virgülle ayrılmış origin listesi. "*" YALNIZ development'ta geçerli;
         # production'da yok sayılır (aşağıda).
         self.allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").strip()

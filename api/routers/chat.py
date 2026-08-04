@@ -24,10 +24,26 @@ from engine import chatbot
 logger = logging.getLogger("tavsan.chat")
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+# Faz G6: sunucu-taraflı geçmiş sınırı. history şu an motora GEÇMİYOR (tek-turlu RAG)
+# ama sözleşmede taşınıyor; ileride multi-turn'e açılırsa istemcinin sınırsız geçmiş
+# göndererek prompt'u (ve maliyeti) karesel şişirmesini önlemek için burada, SUNUCUDA
+# kırpılır. Mobil de kırpar ama sunucu istemciye güvenmez.
+MAX_HISTORY_MESSAGES = 6
+
+
+def trim_history(history: list, limit: int = MAX_HISTORY_MESSAGES) -> list:
+    """Geçmişi son `limit` mesaja kırp (Faz G6). Saf fonksiyon — test edilebilir."""
+    if history and len(history) > limit:
+        return history[-limit:]
+    return history
+
 
 @router.post("", response_model=ChatResp)
 def chat(req: ChatReq, db: Session = Depends(get_db),
          user: User = Depends(get_current_user)):
+    # Faz G6: geçmişi SON 6 mesaja kırp (karesel büyüme freni; sunucu tarafı garanti).
+    req.history = trim_history(req.history)
+
     # Faz 6.5: baby_id verilmişse bebeğin profili + son 3 gün logu + bugünün planı
     # bağlama eklenir. Bebek çağırana ait değilse get_owned_baby 404 döner
     # (başka kullanıcının verisi sızmaz).

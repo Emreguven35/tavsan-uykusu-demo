@@ -24,6 +24,22 @@ class PlanResp(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PlanJobResp(BaseModel):
+    """POST /plans/generate (async) yanıtı — üretim arka planda başlatıldı.
+
+    İstemci job_id ile GET /plans/generate/{job_id}'yi yoklar (polling)."""
+    job_id: str
+    status: str                  # processing
+
+
+class PlanJobStatusResp(BaseModel):
+    """GET /plans/generate/{job_id} yanıtı. status='done' ise plan doludur."""
+    job_id: str
+    status: str                  # processing | done | failed
+    plan: PlanResp | None = None
+    error: str | None = None
+
+
 class PlanAdaptResp(BaseModel):
     """POST /plans/adapt yanıtı (Faz 6.1) — kaydedilen plan + adaptasyon kararı.
 

@@ -10,7 +10,7 @@ Sosyal giriş (Google/Apple): BU FAZDA YOK — TODO (aşağıda işaretli).
 """
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -22,7 +22,16 @@ from api.schemas.auth import (
     LoginReq, MessageResp, RefreshReq, RegisterReq, ResetPasswordReq,
     ResetPasswordRequestReq, ResetPasswordRequestResp, TokenPair,
 )
-from api.services import mailer, security
+from api.services import mailer, rate_limit, security
+
+
+def _too_many(retry_after: int) -> HTTPException:
+    """429 + Retry-After — brute-force/spray freni (Faz G2)."""
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Çok fazla deneme. Lütfen bir süre sonra tekrar deneyin.",
+        headers={"Retry-After": str(retry_after)},
+    )
 
 logger = logging.getLogger("tavsan.auth")
 settings = get_settings()
@@ -74,17 +83,29 @@ def register(req: RegisterReq, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenPair)
-def login(req: LoginReq, db: Session = Depends(get_db)):
+def login(req: LoginReq, request: Request, db: Session = Depends(get_db)):
+    # Faz G2: brute-force freni. Sıra: IP limiti → hesap kilidi → kimlik doğrulama.
+    ip = rate_limit.client_ip(request)
+    ra = rate_limit.check_ip(ip, "login")
+    if ra is not None:
+        raise _too_many(ra)
     email = req.email.strip().lower()
+    locked = rate_limit.check_account_locked(email)
+    if locked is not None:
+        raise _too_many(locked)
+
     user = db.query(User).filter(User.email == email).one_or_none()
     # Sabit-zaman: kullanıcı yoksa da bir verify çalıştır, sonra 401.
     if user is None:
         security.verify_password(req.password, _DUMMY_HASH)
+        rate_limit.record_failure(email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="E-posta veya parola hatalı")
     if not security.verify_password(req.password, user.password_hash):
+        rate_limit.record_failure(email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="E-posta veya parola hatalı")
+    rate_limit.record_success(email)            # başarı → sayaç/kilit temizle
     logger.info("Giriş: user_id=%s", user.id)
     return _issue_token_pair(db, user)
 
@@ -124,7 +145,8 @@ def logout(req: RefreshReq, db: Session = Depends(get_db),
 
 
 @router.post("/reset-password-request", response_model=ResetPasswordRequestResp)
-def reset_password_request(req: ResetPasswordRequestReq, db: Session = Depends(get_db)):
+def reset_password_request(req: ResetPasswordRequestReq, request: Request,
+                           db: Session = Depends(get_db)):
     """Sıfırlama token'ı üret + hash'ini DB'ye yaz.
 
     Faz 5R: ham token YANITTA DÖNMEZ (e-postasını bilen biri hesabı ele geçiremesin).
@@ -132,6 +154,10 @@ def reset_password_request(req: ResetPasswordRequestReq, db: Session = Depends(g
     mailer console moduna düşer — gönderim olmaz ama AKIŞ KIRILMAZ.
 
     Kullanıcı sayımını sızdırmamak için e-posta kayıtlı olmasa bile aynı yanıt döner."""
+    # Faz G2: IP başına limit — sınırsız e-posta gönderimi / Resend kotası tüketimini önler.
+    ra = rate_limit.check_ip(rate_limit.client_ip(request), "reset")
+    if ra is not None:
+        raise _too_many(ra)
     email = req.email.strip().lower()
     user = db.query(User).filter(User.email == email).one_or_none()
     generic = "Eğer bu e-posta kayıtlıysa, sıfırlama talimatı gönderildi"

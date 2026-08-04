@@ -92,7 +92,18 @@ async def lifespan(app: FastAPI):
         notifier.shutdown_scheduler()
 
 
-app = FastAPI(title="Tavşan Uykusu API", version="1.0.0", lifespan=lifespan)
+# Faz G4: production'da interaktif dokümantasyon + OpenAPI şeması KAPALI —
+# tüm uç/şema yapısını ifşa edip saldırı yüzeyi keşfini kolaylaştırıyordu.
+# Development'ta açık kalır (geliştirici deneyimi). ENVIRONMENT ile kontrol edilir.
+_docs_kapali = settings.is_production
+app = FastAPI(
+    title="Tavşan Uykusu API",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url=None if _docs_kapali else "/docs",
+    redoc_url=None if _docs_kapali else "/redoc",
+    openapi_url=None if _docs_kapali else "/openapi.json",
+)
 
 # --- CORS: izinli origin'ler env'den (ALLOWED_ORIGINS, virgülle ayrılmış). ------
 # UYARI: production'da ALLOWED_ORIGINS'i gerçek EXPO_PUBLIC domain(ler)ine sabitleyin;

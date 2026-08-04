@@ -80,7 +80,20 @@ def stories(user: User = Depends(get_current_user)):
 
 
 @router.post("/generate", response_model=VoiceGenerateResp)
-def generate(req: VoiceGenerateReq, user: User = Depends(get_current_user)):
+def generate(req: VoiceGenerateReq, db: Session = Depends(get_db),
+             user: User = Depends(get_current_user)):
+    # Faz G3: voiceId SAHİPLİK doğrulaması. Önceden gövdedeki voiceId doğrudan
+    # ElevenLabs'e gidiyordu; başkasının voice_id'sini bilen onun (klonlu, biyometrik)
+    # sesiyle üretim yaptırıp kredi harcatabiliyordu. Artık voiceId, çağıranın kendi
+    # voice_profiles kaydıyla eşleşmeli; yoksa 403.
+    sahip = (db.query(VoiceProfile)
+             .filter(VoiceProfile.user_id == user.id,
+                     VoiceProfile.elevenlabs_voice_id == req.voiceId)
+             .first())
+    if sahip is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Bu ses profili size ait değil")
+
     # storyId verildiyse katalogdan metni çöz; yoksa doğrudan text.
     if req.storyId:
         story = voice_svc.find_story(req.storyId)
