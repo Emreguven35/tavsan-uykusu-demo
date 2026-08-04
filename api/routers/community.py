@@ -64,6 +64,11 @@ def _author(prof: CommunityProfile | None, user_id) -> tuple[str, bool]:
     return prof.nickname, bool(prof.is_expert)
 
 
+def _resp_status(internal: str) -> str:
+    """İç durum → mobil sözleşme durumu. published → visible; diğerleri aynen."""
+    return "visible" if internal == "published" else internal
+
+
 def _encode_cursor(dt: datetime, id_: uuid.UUID) -> str:
     return base64.urlsafe_b64encode(f"{dt.isoformat()}|{id_}".encode()).decode()
 
@@ -173,7 +178,10 @@ def list_threads(db: Session = Depends(get_db), user: User = Depends(get_current
     blocked = _blocked_ids(db, user)
     q = (db.query(Thread, CommunityProfile)
          .outerjoin(CommunityProfile, CommunityProfile.user_id == Thread.user_id)
-         .filter(Thread.status == "published"))
+         # published herkese; hidden YALNIZ sahibine (kendi gizlenen gönderisini görür);
+         # removed hiç kimseye.
+         .filter(or_(Thread.status == "published",
+                     and_(Thread.status == "hidden", Thread.user_id == user.id))))
     if category is not None:
         q = q.filter(Thread.category == category)
     if blocked:                              # engellenenlerin konuları gizli (NULL yazar kalır)
@@ -193,10 +201,11 @@ def list_threads(db: Session = Depends(get_db), user: User = Depends(get_current
     for t, prof in rows:
         nick, is_expert = _author(prof, t.user_id)
         items.append(ThreadListItem(
-            id=t.id, nickname=nick, is_expert=is_expert, category=t.category,
-            title=t.title, body_preview=t.body[:140], reply_count=t.reply_count,
-            like_count=t.like_count, expert_replied=t.expert_replied,
-            liked_by_me=t.id in liked, last_activity_at=t.last_activity_at,
+            id=t.id, author_id=t.user_id, nickname=nick, is_expert=is_expert,
+            category=t.category, title=t.title, body_preview=t.body[:140],
+            reply_count=t.reply_count, like_count=t.like_count,
+            expert_replied=t.expert_replied, liked_by_me=t.id in liked,
+            status=_resp_status(t.status), last_activity_at=t.last_activity_at,
             created_at=t.created_at))
     next_cursor = None
     if has_more and items:
@@ -211,7 +220,10 @@ def get_thread(thread_id: uuid.UUID, db: Session = Depends(get_db),
                cursor: str | None = Query(default=None),
                limit: int = Query(default=PAGE_DEFAULT, ge=1, le=PAGE_MAX)):
     t = db.get(Thread, thread_id)
-    if t is None or t.status != "published":
+    # published herkese; hidden yalnız sahibine; removed/pending hiç kimseye → 404.
+    gorunur = t is not None and (
+        t.status == "published" or (t.status == "hidden" and t.user_id == user.id))
+    if not gorunur:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konu bulunamadı")
     tprof = _profile_of(db, t.user_id)
     nick, is_expert = _author(tprof, t.user_id)
@@ -219,7 +231,10 @@ def get_thread(thread_id: uuid.UUID, db: Session = Depends(get_db),
     blocked = _blocked_ids(db, user)
     rq = (db.query(Reply, CommunityProfile)
           .outerjoin(CommunityProfile, CommunityProfile.user_id == Reply.user_id)
-          .filter(Reply.thread_id == thread_id, Reply.status == "published"))
+          # published herkese; hidden yalnız sahibine; removed hiç.
+          .filter(Reply.thread_id == thread_id,
+                  or_(Reply.status == "published",
+                      and_(Reply.status == "hidden", Reply.user_id == user.id))))
     if blocked:
         rq = rq.filter(or_(Reply.user_id.is_(None), Reply.user_id.notin_(blocked)))
     cur = _decode_cursor(cursor)
@@ -234,17 +249,19 @@ def get_thread(thread_id: uuid.UUID, db: Session = Depends(get_db),
     replies = []
     for r, rp in rrows:
         rnick, rexp = _author(rp, r.user_id)
-        replies.append(ReplyItem(id=r.id, nickname=rnick, is_expert=rexp, body=r.body,
-                                 like_count=r.like_count, liked_by_me=r.id in rliked,
+        replies.append(ReplyItem(id=r.id, author_id=r.user_id, nickname=rnick,
+                                 is_expert=rexp, body=r.body, like_count=r.like_count,
+                                 liked_by_me=r.id in rliked, status=_resp_status(r.status),
                                  created_at=r.created_at))
     rnext = _encode_cursor(rrows[-1][0].created_at, rrows[-1][0].id) if (has_more and rrows) else None
 
     return ThreadDetailResp(
-        id=t.id, nickname=nick, is_expert=is_expert, category=t.category, title=t.title,
-        body=t.body, reply_count=t.reply_count, like_count=t.like_count,
-        expert_replied=t.expert_replied, liked_by_me=bool(_liked_set(db, user, "thread", [t.id])),
-        last_activity_at=t.last_activity_at, created_at=t.created_at,
-        replies=replies, replies_next_cursor=rnext)
+        id=t.id, author_id=t.user_id, nickname=nick, is_expert=is_expert,
+        category=t.category, title=t.title, body=t.body, reply_count=t.reply_count,
+        like_count=t.like_count, expert_replied=t.expert_replied,
+        liked_by_me=bool(_liked_set(db, user, "thread", [t.id])),
+        status=_resp_status(t.status), last_activity_at=t.last_activity_at,
+        created_at=t.created_at, replies=replies, replies_next_cursor=rnext)
 
 
 def _profile_of(db: Session, user_id) -> CommunityProfile | None:
@@ -271,10 +288,11 @@ def create_thread(req: ThreadCreateReq, background: BackgroundTasks,
                   db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     prof = _require_profile(db, user)
     _guard_posting(db, prof)
-    if moderation.check_rate(user.id):
+    limited, retry = moderation.check_rate(user.id, "thread")   # B4: konu sayacı (60 sn)
+    if limited:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                            detail={"code": "rate_limited", "reason": "cok_sik_gonderi"},
-                            headers={"Retry-After": str(moderation.RATE_WINDOW_S)})
+                            detail={"code": "rate_limited", "reason": "cok_sik_konu"},
+                            headers={"Retry-After": str(retry)})
     combined = f"{req.title}\n{req.body}"
     reason = moderation.check_content(combined)          # K0
     if reason is not None:
@@ -291,9 +309,10 @@ def create_thread(req: ThreadCreateReq, background: BackgroundTasks,
 
     nick, is_expert = prof.nickname, bool(prof.is_expert)
     return ThreadDetailResp(
-        id=t.id, nickname=nick, is_expert=is_expert, category=t.category, title=t.title,
-        body=t.body, reply_count=0, like_count=0, expert_replied=False,
-        liked_by_me=False, last_activity_at=t.last_activity_at, created_at=t.created_at,
+        id=t.id, author_id=user.id, nickname=nick, is_expert=is_expert,
+        category=t.category, title=t.title, body=t.body, reply_count=0, like_count=0,
+        expert_replied=False, liked_by_me=False, status="visible",
+        last_activity_at=t.last_activity_at, created_at=t.created_at,
         replies=[], replies_next_cursor=None)
 
 
@@ -306,10 +325,11 @@ def create_reply(thread_id: uuid.UUID, req: ReplyCreateReq, background: Backgrou
     t = db.get(Thread, thread_id)
     if t is None or t.status != "published":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konu bulunamadı")
-    if moderation.check_rate(user.id):
+    limited, retry = moderation.check_rate(user.id, "reply")   # B4: cevap sayacı (15 sn, ayrı)
+    if limited:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                            detail={"code": "rate_limited", "reason": "cok_sik_gonderi"},
-                            headers={"Retry-After": str(moderation.RATE_WINDOW_S)})
+                            detail={"code": "rate_limited", "reason": "cok_sik_cevap"},
+                            headers={"Retry-After": str(retry)})
     reason = moderation.check_content(req.body)          # K0
     if reason is not None:
         raise _content_blocked(reason)
@@ -333,8 +353,9 @@ def create_reply(thread_id: uuid.UUID, req: ReplyCreateReq, background: Backgrou
         except Exception:
             logger.exception("Topluluk cevap bildirimi gönderilemedi")
 
-    return ReplyItem(id=r.id, nickname=prof.nickname, is_expert=bool(prof.is_expert),
-                     body=r.body, like_count=0, liked_by_me=False, created_at=r.created_at)
+    return ReplyItem(id=r.id, author_id=user.id, nickname=prof.nickname,
+                     is_expert=bool(prof.is_expert), body=r.body, like_count=0,
+                     liked_by_me=False, status="visible", created_at=r.created_at)
 
 
 @router.delete("/threads/{thread_id}", response_model=MessageResp)
@@ -432,9 +453,14 @@ def report(req: ReportReq, db: Session = Depends(get_db),
 @router.post("/block", response_model=MessageResp)
 def block_user(req: BlockReq, db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
+    # B1: kendini engelleme reddedilir (mobil butonu gizlese de backend garantiler).
     if req.user_id == user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Kendinizi engelleyemezsiniz")
+    # B2: var olmayan kullanıcı → 404 (önceden FK ihlali → 500 idi).
+    if db.get(User, req.user_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Kullanıcı bulunamadı")
     exists = db.query(Block).filter(Block.user_id == user.id,
                                     Block.blocked_user_id == req.user_id).one_or_none()
     if exists is None:

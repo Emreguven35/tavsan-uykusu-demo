@@ -36,7 +36,11 @@ WORDLIST_PATH = DATA_DIR / "mod_wordlist.txt"
 MODEL = "claude-haiku-4-5"
 HAIKU_TIMEOUT_S = 5.0
 HAIKU_CONFIDENCE = 0.7        # izin=false & güven>=bu → hidden
-RATE_WINDOW_S = 60           # aynı kullanıcı bu sürede 2. gönderi → 429
+# Hız limitleri AYRI sayaçlar (B4): "konu aç → hemen ilk cevabı yaz" akışı duvara
+# çarpmasın. Konu açma spam frenlidir (uzun); cevap daha sık yazılabilir.
+THREAD_RATE_S = 60           # konu açma: 60 sn'de 1
+REPLY_RATE_S = 15            # cevap yazma: 15 sn'de 1
+RATE_WINDOW_S = THREAD_RATE_S  # geriye uyum (eski ad)
 HIDDEN_MUTE_THRESHOLD = 3    # bu kadar hidden → muted (24s)
 HIDDEN_BAN_THRESHOLD = 5     # bu kadar hidden → banned
 MUTE_HOURS = 24
@@ -152,26 +156,29 @@ def check_content(text: str) -> str | None:
     return None
 
 
-# --- Hız limiti (60 sn'de 2. gönderi → 429) ---------------------------------
+# --- Hız limiti — konu/cevap AYRI sayaç (B4) --------------------------------
 _LOCK = threading.Lock()
-_last_post: dict[str, float] = {}
+_last_action: dict[str, float] = {}     # anahtar: "{scope}:{user_id}"
 
 
-def check_rate(user_id) -> bool:
-    """True → çok hızlı (429 verilmeli). İzinliyse zaman damgasını KAYDEDER."""
-    key = str(user_id)
+def check_rate(user_id, scope: str = "thread") -> tuple[bool, int]:
+    """Dönen: (limitli_mi, retry_after_sn). scope='thread' (60 sn) | 'reply' (15 sn).
+    Konu ve cevap AYRI pencerelerdir → biri diğerini bloklamaz. İzinliyse zaman
+    damgasını KAYDEDER."""
+    win = REPLY_RATE_S if scope == "reply" else THREAD_RATE_S
+    key = f"{scope}:{user_id}"
     now = time.time()
     with _LOCK:
-        last = _last_post.get(key)
-        if last is not None and (now - last) < RATE_WINDOW_S:
-            return True
-        _last_post[key] = now
-        return False
+        last = _last_action.get(key)
+        if last is not None and (now - last) < win:
+            return True, int(win - (now - last)) + 1
+        _last_action[key] = now
+        return False, 0
 
 
 def rate_reset() -> None:
     with _LOCK:
-        _last_post.clear()
+        _last_action.clear()
 
 
 # --- K1: risk skorlama -------------------------------------------------------

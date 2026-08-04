@@ -57,6 +57,7 @@ class ReplyCreateReq(BaseModel):
 
 class ThreadListItem(BaseModel):
     id: uuid.UUID
+    author_id: uuid.UUID | None      # engelleme için; hesap silinmişse null
     nickname: str
     is_expert: bool
     category: str
@@ -66,6 +67,7 @@ class ThreadListItem(BaseModel):
     like_count: int
     expert_replied: bool
     liked_by_me: bool
+    status: str                  # visible | hidden (hidden yalnız sahibine döner)
     last_activity_at: datetime
     created_at: datetime
 
@@ -77,16 +79,19 @@ class ThreadListResp(BaseModel):
 
 class ReplyItem(BaseModel):
     id: uuid.UUID
+    author_id: uuid.UUID | None      # engelleme için; hesap silinmişse null
     nickname: str
     is_expert: bool
     body: str
     like_count: int
     liked_by_me: bool
+    status: str                  # visible | hidden (hidden yalnız sahibine döner)
     created_at: datetime
 
 
 class ThreadDetailResp(BaseModel):
     id: uuid.UUID
+    author_id: uuid.UUID | None
     nickname: str
     is_expert: bool
     category: str
@@ -96,6 +101,7 @@ class ThreadDetailResp(BaseModel):
     like_count: int
     expert_replied: bool
     liked_by_me: bool
+    status: str                  # visible | hidden
     last_activity_at: datetime
     created_at: datetime
     replies: list[ReplyItem]

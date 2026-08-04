@@ -155,10 +155,14 @@ def test_k2():
     _HAIKU["verdict"] = {"izin": False, "sebep": "uygunsuz", "guven": 0.9}
     r = mkthread(tok, title="şüpheli içerik başlığı", body="bebekte ateş çıkınca ne yapmalı")
     tid = r.json()["id"]
-    # background task TestClient'ta senkron koştu → içerik gizlenmiş olmalı
+    # background task TestClient'ta senkron koştu → içerik gizlenmiş olmalı.
+    # B3: SAHİBİ kendi hidden'ını görür (status=hidden); başkası göremez.
     det = client.get(f"/api/v1/community/threads/{tid}", headers=H(tok))
-    check("K2 izin=false → hidden (detay 404)", det.status_code == 404,
-          f"{det.status_code}")
+    check("K2 izin=false → hidden (sahibi status=hidden görür)",
+          det.status_code == 200 and det.json().get("status") == "hidden", f"{det.status_code}")
+    stok = reg("t_k2_other@example.com"); mkprofile(stok, "K2Other")
+    dother = client.get(f"/api/v1/community/threads/{tid}", headers=H(stok))
+    check("K2 gizli içerik başkasına → 404", dother.status_code == 404, f"{dother.status_code}")
 
     # timeout/None (fail-open) → published KALIR
     _HAIKU["verdict"] = None
@@ -297,14 +301,19 @@ def test_moderator():
 
     ra = client.post("/api/v1/community/mod/action", headers=H(mod),
                      json={"target_type": "thread", "target_id": tid, "action": "hide"})
-    hidden = client.get(f"/api/v1/community/threads/{tid}", headers=H(author))
-    check("moderatör hide → içerik gizli", ra.status_code == 200 and hidden.status_code == 404,
-          f"{ra.status_code}/{hidden.status_code}")
+    # B3: sahibi (author) status=hidden görür; NON-owner (mod) 404.
+    own = client.get(f"/api/v1/community/threads/{tid}", headers=H(author))
+    others = client.get(f"/api/v1/community/threads/{tid}", headers=H(mod))
+    check("moderatör hide → sahibi status=hidden, başkası 404",
+          ra.status_code == 200 and own.status_code == 200
+          and own.json().get("status") == "hidden" and others.status_code == 404,
+          f"action={ra.status_code} own={own.status_code} others={others.status_code}")
     rr = client.post("/api/v1/community/mod/action", headers=H(mod),
                      json={"target_type": "thread", "target_id": tid, "action": "restore"})
-    back = client.get(f"/api/v1/community/threads/{tid}", headers=H(author))
-    check("moderatör restore → geri gelir", rr.status_code == 200 and back.status_code == 200,
-          f"{rr.status_code}/{back.status_code}")
+    back = client.get(f"/api/v1/community/threads/{tid}", headers=H(mod))
+    check("moderatör restore → herkese görünür (visible)",
+          rr.status_code == 200 and back.status_code == 200
+          and back.json().get("status") == "visible", f"{rr.status_code}/{back.status_code}")
     # mod/user ban
     client.post("/api/v1/community/mod/user", headers=H(mod),
                 json={"user_id": str(uid_of(author)), "action": "ban"})
@@ -370,15 +379,105 @@ def test_account_deletion_render():
     # konu KALMALI, yazar "Silinmiş kullanıcı"
     det = client.get(f"/api/v1/community/threads/{tid}", headers=H(viewer))
     ok = (dr.status_code == 200 and det.status_code == 200
-          and det.json()["nickname"] == "Silinmiş kullanıcı")
-    check("hesap silme → konu kalır + 'Silinmiş kullanıcı'", ok,
-          f"del={dr.status_code} det={det.status_code} nick={det.json().get('nickname') if det.status_code==200 else '-'}")
+          and det.json()["nickname"] == "Silinmiş kullanıcı"
+          and det.json()["author_id"] is None)     # B1: silinmiş kullanıcıda author_id null
+    check("hesap silme → konu kalır + 'Silinmiş kullanıcı' + author_id null", ok,
+          f"del={dr.status_code} det={det.status_code} "
+          f"nick={det.json().get('nickname') if det.status_code==200 else '-'} "
+          f"aid={det.json().get('author_id') if det.status_code==200 else '-'}")
+
+
+# ===========================================================================
+# B1 — author_id + kendini engelleme 400
+# ===========================================================================
+def test_author_id_selfblock():
+    _HAIKU["verdict"] = {"izin": True, "sebep": "temiz", "guven": 0.9}
+    a = reg("t_aid_a@example.com"); mkprofile(a, "AidA"); set_profile(uid_of(a), post_count=5)
+    b = reg("t_aid_b@example.com"); mkprofile(b, "AidB"); set_profile(uid_of(b), post_count=5)
+    aid = str(uid_of(a)); bid = str(uid_of(b))
+    r = mkthread(a, title="author id testi konu baslik", body="icerik metni")
+    tid = r.json()["id"]
+    check("B1 thread yanıtı author_id taşıyor", r.json().get("author_id") == aid, str(r.json().get("author_id")))
+    moderation.rate_reset()
+    rr = client.post(f"/api/v1/community/threads/{tid}/replies", headers=H(b),
+                     json={"body": "cevap metni buraya gelir"})
+    check("B1 reply yanıtı author_id taşıyor", rr.json().get("author_id") == bid, str(rr.json().get("author_id")))
+    lst = client.get("/api/v1/community/threads?category=uyku", headers=H(a)).json()
+    it = [i for i in lst["items"] if i["id"] == tid][0]
+    check("B1 liste item author_id var", it.get("author_id") == aid, str(it.get("author_id")))
+    det = client.get(f"/api/v1/community/threads/{tid}", headers=H(a)).json()
+    check("B1 detay + reply author_id var",
+          det.get("author_id") == aid and det["replies"][0].get("author_id") == bid, "")
+    sb = client.post("/api/v1/community/block", headers=H(a), json={"user_id": aid})
+    check("B1 kendini engelleme (author_id) → 400", sb.status_code == 400, f"{sb.status_code}")
+
+
+# ===========================================================================
+# B2 — var olmayan UUID block → 404
+# ===========================================================================
+def test_block_404():
+    a = reg("t_blk404@example.com"); mkprofile(a, "Blk404")
+    fake = str(_uuid.uuid4())
+    r = client.post("/api/v1/community/block", headers=H(a), json={"user_id": fake})
+    check("B2 var olmayan UUID block → 404 (500 değil)", r.status_code == 404, f"{r.status_code} {r.text[:80]}")
+
+
+# ===========================================================================
+# B3 — status: gizli içerik SADECE sahibine
+# ===========================================================================
+def test_status_owner_visibility():
+    _HAIKU["verdict"] = {"izin": True, "sebep": "temiz", "guven": 0.9}
+    a = reg("t_st_a@example.com"); mkprofile(a, "StA"); set_profile(uid_of(a), post_count=5)
+    other = reg("t_st_o@example.com"); mkprofile(other, "StO"); set_profile(uid_of(other), post_count=5)
+    mod = reg("t_st_mod@example.com"); mkprofile(mod, "StMod"); set_profile(uid_of(mod), is_moderator=True, post_count=5)
+    tid = mkthread(a, title="gizlenecek konu baslik metni", body="icerik metni").json()["id"]
+    client.post("/api/v1/community/mod/action", headers=H(mod),
+                json={"target_type": "thread", "target_id": tid, "action": "hide"})
+    la = client.get("/api/v1/community/threads?category=uyku", headers=H(a)).json()
+    mine = [i for i in la["items"] if i["id"] == tid]
+    check("B3 sahibi kendi hidden konusunu listede görür (status=hidden)",
+          len(mine) == 1 and mine[0]["status"] == "hidden", str(mine[:1])[:150])
+    lo = client.get("/api/v1/community/threads?category=uyku", headers=H(other)).json()
+    check("B3 başkası hidden konuyu listede görmez", all(i["id"] != tid for i in lo["items"]), "")
+    da = client.get(f"/api/v1/community/threads/{tid}", headers=H(a))
+    do = client.get(f"/api/v1/community/threads/{tid}", headers=H(other))
+    check("B3 sahibi hidden detay görür (200, status=hidden)",
+          da.status_code == 200 and da.json()["status"] == "hidden", f"{da.status_code}")
+    check("B3 başkası hidden detay → 404", do.status_code == 404, f"{do.status_code}")
+
+
+# ===========================================================================
+# B4 — hız sınırı ayrı: konu 60sn, cevap 15sn
+# ===========================================================================
+def test_rate_limits_separate():
+    _HAIKU["verdict"] = {"izin": True, "sebep": "temiz", "guven": 0.9}
+    a = reg("t_rl@example.com"); mkprofile(a, "RateAnne"); set_profile(uid_of(a), post_count=5)
+    moderation.rate_reset()
+    t1 = client.post("/api/v1/community/threads", headers=H(a),
+                     json={"category": "uyku", "title": "rate konu bir baslik", "body": "icerik bir"})
+    check("B4 ilk konu → 201", t1.status_code == 201, f"{t1.status_code}")
+    tid = t1.json()["id"]
+    # AYRI sayaç: konu açtıktan HEMEN sonra cevap → 201 (duvara çarpmaz)
+    rp = client.post(f"/api/v1/community/threads/{tid}/replies", headers=H(a),
+                     json={"body": "hemen ilk cevap metni buraya"})
+    check("B4 konu sonrası HEMEN cevap → 201 (ayrı sayaç)", rp.status_code == 201, f"{rp.status_code} {rp.text[:80]}")
+    # 60sn içinde 2. konu → 429
+    t2 = client.post("/api/v1/community/threads", headers=H(a),
+                     json={"category": "uyku", "title": "rate konu iki baslik", "body": "icerik iki"})
+    check("B4 60sn içinde 2. konu → 429", t2.status_code == 429, f"{t2.status_code}")
+    # 15sn içinde 2. cevap → 429
+    rp2 = client.post(f"/api/v1/community/threads/{tid}/replies", headers=H(a),
+                      json={"body": "ikinci cevap metni buraya"})
+    check("B4 15sn içinde 2. cevap → 429", rp2.status_code == 429, f"{rp2.status_code}")
+    moderation.rate_reset()
 
 
 def main() -> int:
     for fn in (test_k0, test_k1, test_k2, test_k3, test_mute_ban,
                test_block_and_pagination, test_authz, test_moderator,
-               test_notifications, test_account_deletion_render):
+               test_notifications, test_account_deletion_render,
+               test_author_id_selfblock, test_block_404,
+               test_status_owner_visibility, test_rate_limits_separate):
         try:
             fn()
         except Exception as e:

@@ -242,24 +242,29 @@ def test_g4():
     check("G4.2 dev'de /openapi.json açık (200)", o.status_code == 200,
           f"status={o.status_code}")
 
-    # Production app'te docs KAPALI — temiz süreçte ENVIRONMENT=production ile
+    # Production'da /docs KAPALI (404); /openapi.json X-API-Key (DEMO_API_KEY) ARKASINDA
+    # (Faz T2 güncellemesi): anahtarsız 401, doğru anahtar 200. Temiz süreçte doğrula.
     code = (
         "import os;"
         "os.environ['ENVIRONMENT']='production';"
         "os.environ['JWT_SECRET']='test-secret-en-az-otuz-iki-karakter-uzunlugunda';"
         "os.environ['DATABASE_URL']='sqlite:///./_g4_prod_test.db';"
         "os.environ['MAIL_PROVIDER']='disabled';"
+        "os.environ['DEMO_API_KEY']='g4-openapi-key';"
         "os.environ.setdefault('ANTHROPIC_API_KEY','x');"
         "from fastapi.testclient import TestClient;"
         "from api.main import app;"
         "c=TestClient(app);"
         "import sys;"
-        "sys.exit(0 if (c.get('/docs').status_code==404 and "
-        "c.get('/openapi.json').status_code==404) else 1)"
+        "ok=(c.get('/docs').status_code==404 "                      # docs kapalı
+        "and c.get('/openapi.json').status_code==401 "             # anahtarsız 401
+        "and c.get('/openapi.json',headers={'X-API-Key':'yanlis'}).status_code==401 "
+        "and c.get('/openapi.json',headers={'X-API-Key':'g4-openapi-key'}).status_code==200);"
+        "sys.exit(0 if ok else 1)"
     )
     p = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT),
                        capture_output=True, text=True)
-    check("G4.3 production'da /docs + /openapi.json → 404",
+    check("G4.3 production'da /docs 404 + /openapi.json X-API-Key arkasında (401/200)",
           p.returncode == 0, f"rc={p.returncode} err={p.stderr[-200:]}")
     try:
         (ROOT / "_g4_prod_test.db").unlink()

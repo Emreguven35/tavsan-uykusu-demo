@@ -360,8 +360,12 @@ tarafı** üç nedenden biri (canlı loglarla doğrulandı):
 - **401** (auth): `{"detail":"Geçersiz veya süresi dolmuş oturum"}`
 - **400** (K0 moderasyon): `{"detail":{"code":"content_blocked","reason":"hakaret|iletisim_bilgisi|spam"}}`
 - **403** (gönderi yasağı): `{"detail":{"code":"posting_blocked","reason":"muted|banned"}}`
-- **429** (hız limiti, 60 sn'de 2. gönderi): `{"detail":{"code":"rate_limited","reason":"cok_sik_gonderi"}}` + `Retry-After` başlığı
+- **429** (hız limiti): `{"detail":{"code":"rate_limited","reason":"cok_sik_konu | cok_sik_cevap"}}` + `Retry-After` (sn). **AYRI sayaçlar:** konu açma **60 sn/1**, cevap **15 sn/1** — konu açıp hemen cevap yazma akışı bloklanmaz.
+- **404** (`/block` var olmayan kullanıcı): `{"detail":"Kullanıcı bulunamadı"}`
 - **422** (Pydantic doğrulama): `{"detail":[{"type":"...","loc":["body","<alan>"],"msg":"..."}]}`
+
+> **🔴 Engelleme akışı (Apple 1.2):** thread/reply yanıtları artık **`author_id`** (uuid, silinmiş kullanıcıda `null`) taşır. Bir gönderiden kullanıcı engellemek için `POST /block {"user_id": <author_id>}`. Kendi `author_id`'ini engelleme → **400**. Var olmayan uuid → **404**.
+> **`status` alanı:** her thread/reply yanıtında `status` ∈ `visible | hidden`. Moderasyonla gizlenen içerik listede/detayda **yalnız SAHİBİNE** `status:"hidden"` olarak döner (mobil "kurallara aykırı bulundu" etiketi gösterir); başkasına hiç görünmez (listede yok, detayda 404).
 
 ---
 
@@ -423,6 +427,7 @@ içerik **gizli**. Yanıt zarfı:
   "items": [
     {
       "id": "e871bcf5-…",
+      "author_id": "24ddce0d-…",         // engelleme için (POST /block user_id). Silinmişte null
       "nickname": "DocAnneX",
       "is_expert": false,
       "category": "uyku",
@@ -432,6 +437,7 @@ içerik **gizli**. Yanıt zarfı:
       "like_count": 1,
       "expert_replied": false,
       "liked_by_me": true,
+      "status": "visible",               // visible | hidden (hidden yalnız sahibine döner)
       "last_activity_at": "2026-08-04T22:10:11.421690Z",
       "created_at": "2026-08-04T22:10:10.475063Z"
     }
@@ -440,40 +446,41 @@ içerik **gizli**. Yanıt zarfı:
 }
 ```
 **Sayfalama akışı:** `next_cursor` `null` olana kadar `?cursor=<next_cursor>&limit=20` ile devam et.
+Kendi **gizlenmiş** (moderasyon) gönderin listede `status:"hidden"` ile döner (başkasına görünmez).
 
 ### `GET /api/v1/community/threads/{thread_id}`
 Konu + cevaplar (cevaplar **created_at ASC**, sayfalı). Query: `cursor`, `limit` (cevap sayfalama).
-Konu `published` değilse **404**.
+Konu görünür değilse **404** (published herkese; `hidden` yalnız sahibine; `removed`/pending hiç).
 ```jsonc
 // 200 — GERÇEK YANIT
 {
-  "id":"e871bcf5-…","nickname":"DocAnneX","is_expert":false,"category":"uyku",
-  "title":"Gece uyanmalari nasil azalir","body":"6 aylik bebegim…",
-  "reply_count":1,"like_count":1,"expert_replied":false,"liked_by_me":true,
+  "id":"e871bcf5-…","author_id":"24ddce0d-…","nickname":"DocAnneX","is_expert":false,
+  "category":"uyku","title":"Gece uyanmalari nasil azalir","body":"6 aylik bebegim…",
+  "reply_count":1,"like_count":1,"expert_replied":false,"liked_by_me":true,"status":"visible",
   "last_activity_at":"2026-08-04T22:10:11.421690Z","created_at":"2026-08-04T22:10:10.475063Z",
   "replies":[
-    {"id":"f77ae6e0-…","nickname":"DocAnneY","is_expert":false,
+    {"id":"f77ae6e0-…","author_id":"…","nickname":"DocAnneY","is_expert":false,
      "body":"Uyaniklik penceresine dikkat cok yardimci oldu",
-     "like_count":0,"liked_by_me":false,"created_at":"2026-08-04T22:10:11.416506Z"}
+     "like_count":0,"liked_by_me":false,"status":"visible","created_at":"2026-08-04T22:10:11.416506Z"}
   ],
   "replies_next_cursor": null    // cevap sayfalama cursor'u (null → tüm cevaplar geldi)
 }
 ```
-> **"Silinmiş kullanıcı":** hesabı silinmiş yazarın konusu/cevabı KALIR; `nickname` alanı
-> `"Silinmiş kullanıcı"`, `is_expert:false` döner.
+> **"Silinmiş kullanıcı":** hesabı silinmiş yazarın konusu/cevabı KALIR; `nickname` = `"Silinmiş kullanıcı"`, `is_expert:false`, **`author_id:null`** döner.
+> **`status:"hidden"`:** moderasyonla gizlenmiş; yalnız sahibi görür. Mobil "kurallara aykırı bulundu" etiketi gösterir. Sahibinin cevapları da aynı kuralla (`hidden` yalnız sahibine).
 
 ### `POST /api/v1/community/threads`
 Body: `{"category":"uyku","title":"<1-100>","body":"<1-1000>"}` → **201** (tam `ThreadDetail`
 zarfı, `replies:[]`). Moderasyon hattı K0→K1→K2 uygulanır (bkz. altta).
 ```jsonc
 // 201 — GERÇEK YANIT
-{"id":"e871bcf5-…","nickname":"DocAnneX","is_expert":false,"category":"uyku",
- "title":"Gece uyanmalari nasil azalir","body":"6 aylik bebegim…",
- "reply_count":0,"like_count":0,"expert_replied":false,"liked_by_me":false,
+{"id":"e871bcf5-…","author_id":"24ddce0d-…","nickname":"DocAnneX","is_expert":false,
+ "category":"uyku","title":"Gece uyanmalari nasil azalir","body":"6 aylik bebegim…",
+ "reply_count":0,"like_count":0,"expert_replied":false,"liked_by_me":false,"status":"visible",
  "last_activity_at":"…","created_at":"…","replies":[],"replies_next_cursor":null}
 ```
 Hatalar: **400** content_blocked (K0), **403** posting_blocked (muted/banned),
-**429** rate_limited (60 sn'de 2. gönderi), **404** profil yok, **422** geçersiz alan.
+**429** rate_limited (**konu: 60 sn/1**), **404** profil yok, **422** geçersiz alan.
 
 ### `DELETE /api/v1/community/threads/{thread_id}`
 Yalnız **sahibi** (status=`removed`). Başkasının / yok → **404** `{"detail":"Konu bulunamadı"}`.
@@ -487,13 +494,13 @@ Başarı: **200** `{"detail":"Konu silindi"}`.
 Body: `{"body":"<1-1000>"}` → **201**.
 ```jsonc
 // 201 — GERÇEK YANIT
-{"id":"f77ae6e0-…","nickname":"DocAnneY","is_expert":false,
+{"id":"f77ae6e0-…","author_id":"…","nickname":"DocAnneY","is_expert":false,
  "body":"Uyaniklik penceresine dikkat cok yardimci oldu",
- "like_count":0,"liked_by_me":false,"created_at":"2026-08-04T22:10:11.416506Z"}
+ "like_count":0,"liked_by_me":false,"status":"visible","created_at":"2026-08-04T22:10:11.416506Z"}
 ```
 Yazan **uzman (is_expert)** ise konunun `expert_replied` alanı `true` olur + konu sahibine
 **"İlayda konuna cevap verdi 🐰"** bildirimi gider (kendi cevabına gitmez).
-Aynı K0/K1/K2/403/429 kuralları. Konu yoksa/`published` değilse **404**.
+K0/K1/K2/403 aynı; **hız limiti AYRI** (cevap **15 sn/1**, konu sayacından bağımsız). Konu yoksa/`published` değilse **404**.
 
 ### `DELETE /api/v1/community/replies/{reply_id}`
 Yalnız sahibi (status=`removed`, konu `reply_count` düşer). Başkası/yok → **404**.
@@ -526,7 +533,10 @@ Body: `{"target_type":"thread|reply","target_id":"<uuid>","reason":"<enum>","not
 
 ### `POST /api/v1/community/block`
 Body: `{"user_id":"<uuid>"}` → **200** `{"detail":"Kullanıcı engellendi"}` (idempotent).
-Kendini engelleme → **400**. Engellenen kullanıcının içeriği listelerde gizlenir.
+`user_id` = engellenecek gönderinin **`author_id`**'si (thread/reply yanıtından alınır).
+- **400** `{"detail":"Kendinizi engelleyemezsiniz"}` (kendi author_id'in).
+- **404** `{"detail":"Kullanıcı bulunamadı"}` (var olmayan uuid — artık 500 değil).
+Engellenen kullanıcının içeriği listelerde/detayda gizlenir.
 
 ### `DELETE /api/v1/community/block/{blocked_user_id}` → **200** `{"detail":"Engel kaldırıldı"}` (idempotent).
 
@@ -563,12 +573,16 @@ Body: `{"user_id":"<uuid>","action":"mute|unmute|ban|unban"}` → **200**.
 
 - **K0 (senkron):** küfür/hakaret, iletişim bilgisi (URL/tel/IBAN/e-posta), spam → **400
   content_blocked**, içerik KAYDEDİLMEZ. Kullanıcıya `reason`'a göre mesaj göster.
-- **Hız limiti:** aynı kullanıcı **60 sn**'de 2. gönderi → **429** (+`Retry-After`). Mobil,
-  gönder butonunu bu süre kısıtlamalı.
+- **Hız limiti (AYRI sayaç):** konu açma **60 sn/1**, cevap yazma **15 sn/1** → **429**
+  (+`Retry-After` sn). Konu açıp hemen cevap yazma akışı bloklanmaz. Mobil gönder butonunu
+  ilgili süreyle kısıtlayabilir (ya da 429'da `Retry-After`'ı kullanır).
 - **K1+K2 (asenkron):** işaretli içerik **anında yayınlanır** (201 döner), arka planda
   Haiku değerlendirir; uygunsuzsa sonradan gizlenir. Yani 201 = "yayınlandı", ama içerik
-  daha sonra listede kaybolabilir (moderasyon). Mobil bunu normal karşılamalı.
+  moderasyonla **`status:"hidden"`**e düşebilir — sahibi görmeye devam eder (etiketli),
+  başkasından gizlenir. Mobil bunu normal karşılamalı.
 - **muted/banned:** gönderi denemesi **403 posting_blocked**; `reason` = `muted`/`banned`.
+- **Engelleme (Apple 1.2):** her gönderi `author_id` taşır → `POST /block {"user_id":<author_id>}`.
+  Kendi author_id → 400; var olmayan → 404. Engellenen kullanıcının içeriği listelerde/detayda gizlenir.
 
 ## Bildirim tercihi
 `GET/PATCH /api/v1/notifications/preferences` artık **`community_replies`** (default `true`)
