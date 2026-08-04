@@ -106,6 +106,19 @@ app = FastAPI(
     openapi_url=None if _docs_kapali else "/openapi.json",
 )
 
+# Faz T2: production'da OpenAPI şeması X-API-Key (DEMO_API_KEY) ARKASINDA açılır —
+# mobil şema doğrulaması/codegen için. Yapı (public keşif) yalnız anahtar sahibine
+# görünür. DEMO_API_KEY tanımsız → require_demo_key 503 döner (kapalı kalır); anahtar
+# yanlış/eksik → 401. Development'ta zaten açık (built-in openapi_url) olduğundan bu
+# gate yalnız production'da eklenir (built-in ile çakışma olmaz).
+# NOT: /docs (Swagger UI) kapalı kalır — tarayıcı openapi.json'ı header'sız çeker.
+# Şema doğrulaması için openapi.json'ı X-API-Key ile doğrudan tüketin (Postman/codegen).
+if _docs_kapali:
+    @app.get("/openapi.json", include_in_schema=False,
+             dependencies=[Depends(require_demo_key)])
+    def _gated_openapi():
+        return app.openapi()
+
 # --- CORS: izinli origin'ler env'den (ALLOWED_ORIGINS, virgülle ayrılmış). ------
 # UYARI: production'da ALLOWED_ORIGINS'i gerçek EXPO_PUBLIC domain(ler)ine sabitleyin;
 # "*" (default) herkese açıktır — geliştirme kolaylığı için, prod'da daraltın.
