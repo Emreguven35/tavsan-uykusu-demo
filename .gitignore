@@ -31,9 +31,9 @@ Thumbs.db
 tests/test_results.json
 *.log
 
-# Denetim raporları (hassas: bulgular + canlı test sonuçları — repoya girmez)
+# Denetim/faz raporları (hassas: bulgular + canlı test sonuçları — repoya girmez)
 AUDIT_RAPORU.md
-FAZ_G_RAPORU.md
+FAZ_*_RAPORU.md
 # Üretilmiş canlı plan çıktıları + denetim listesi (test profillerine ait üretilmiş içerik; repo'ya girmez)
 test_outputs/
 
