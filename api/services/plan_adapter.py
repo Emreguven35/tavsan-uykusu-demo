@@ -6,9 +6,9 @@ Tüm mantık deterministiktir: aynı girdi → aynı çıktı. Bu yüzden birim 
 tam kapsanabilir ve maliyet üretmez (Claude çağrısı YOK).
 
 Akış:
-    1. build_schedule()  — yaş bandı parametrelerinden (master_knowledge_base)
-       saat saat çizelge kur. KB'de hazır çizelge YOKTUR; uyanıklık penceresi +
-       uyku sayısı + gündüz uyku toplamı + yatma vakti aralığından türetilir.
+    1. build_schedule()  — YAŞ BANDI TABLOSUNDAN (data/yas_bantlari.json, Faz Y)
+       saat saat çizelge kur. Hazır çizelge YOKTUR; uyanıklık penceresi + uyku
+       sayısı + gündüz uyku toplamı + gece uykusu aralığından türetilir.
     2. summarize_logs()  — son N günün kayıtlarından gerçek sabah uyanışı, gece
        yatışı, şekerleme sayısı/süresi ve gece uyanma sayısı ortalamalarını çıkar.
     3. adapt()           — plandaki uyanış ile gerçek uyanış arasındaki sapmaya
@@ -33,6 +33,8 @@ import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
+
+from engine import yas_bantlari
 
 logger = logging.getLogger("tavsan.plan_adapter")
 
@@ -75,7 +77,28 @@ BEDTIME_WINDOW = (16 * 60, 24 * 60 + 2 * 60)  # 16:00–02:00 (ertesi güne taş
 
 
 # =============================================================================
-# Yaş bandı parametre ayrıştırıcıları
+# Yaş bandı çözümü — TEK KAYNAK: data/yas_bantlari.json (Faz Y)
+# =============================================================================
+# Çizelge ve uyanıklık penceresi kontrolü artık İlayda'nın yapılandırılmış yaş
+# bandı tablosundan beslenir. Aşağıdaki KB metin ayrıştırıcıları YALNIZCA geriye
+# uyumluluk içindir: yaş bilgisi taşımayan eski çağrılar ve Faz Y öncesi
+# saklanmış planlar için. Yeni kod yolları daima `yas_ay` geçirir.
+
+
+def bant_coz(bucket_params: Any, yas_ay: float | None,
+             tek_uyku: bool | None = None) -> dict | None:
+    """Etkin yaş bandını çöz. Çözülemezse None (çağıran KB yoluna düşer).
+
+    Öncelik: açık `yas_ay` > bucket_params'ın kendisi zaten çözülmüş bantsa o."""
+    if yas_ay is not None:
+        return yas_bantlari.yas_bandi_getir(yas_ay, tek_uyku=tek_uyku)
+    if yas_bantlari.bant_mi(bucket_params):
+        return bucket_params
+    return None
+
+
+# =============================================================================
+# Yaş bandı parametre ayrıştırıcıları (GERİYE UYUMLULUK — KB serbest metinleri)
 # =============================================================================
 # KB metinleri elle yazılmıştır ve biçimleri tutarsızdır:
 #   "40-60 Dakika" | "90 Dakika" | "1.5 - 2.5 Saat" | "5 Saat 30 Dakika - 7 Saat"
@@ -191,32 +214,50 @@ def _fmt(minute: int) -> str:
     return f"{minute // 60:02d}:{minute % 60:02d}"
 
 
-def build_schedule(bucket_params: dict, wake_minute: int = DEFAULT_WAKE_MIN) -> list[dict]:
-    """Yaş bandı parametrelerinden saat saat çizelge üret.
+def build_schedule(bucket_params: dict, wake_minute: int = DEFAULT_WAKE_MIN, *,
+                   yas_ay: float | None = None,
+                   tek_uyku: bool | None = None) -> list[dict]:
+    """Saat saat çizelge üret. `yas_ay` verildiğinde TABLO (Faz Y) tek kaynaktır.
 
     Mantık (motorun 'uyanıklık süresi' ilkesiyle aynı): sabah uyanışına yaşa uygun
     uyanıklık penceresi eklenerek ilk uyku; her uykudan sonra tekrar pencere kadar
-    uyanıklık. Gece yatışı, yaş bandının yatma_vakti aralığına kırpılır.
+    uyanıklık. Gece yatışı, gece uykusu süresinden türetilen aralığa kırpılır.
+
+    yas_ay yoksa (Faz Y öncesi çağrılar) KB serbest metinleri ayrıştırılır —
+    davranış değişmez, yalnız yeni yol tercih edilir.
 
     Dönen her blok (mobil sözleşmesi):
         {time, end?, type, title, note?, key, start_minute, end_minute}
       time/end : "HH:MM" duvar saati (mobilin gösterdiği alanlar)
       type     : 'wake' | 'nap' | 'sleep' | 'feed' | 'routine'
                  (v1'de yalnız wake/nap/sleep üretilir; feed/routine şemada
-                  ayrılmıştır — KB'de bu blokları türetecek veri henüz yok.)
+                  ayrılmıştır — bu blokları türetecek veri henüz yok.)
       title    : ekranda görünen başlık
       key/start_minute/end_minute : dahili (kaydırma, bildirim penceresi) —
                  mobil bunlara bakmak zorunda değildir.
     """
+    bant = bant_coz(bucket_params, yas_ay, tek_uyku)
+    if bant is not None:
+        cp = yas_bantlari.cizelge_parametreleri(bant)
+        return _cizelge_kur(wake_minute, cp["uyku_sayisi"],
+                            cp["uyaniklik_penceresi_dk"], cp["uyku_suresi_dk"],
+                            yas_bantlari.yatma_araligi(bant, wake_minute))
+
+    # --- Geriye uyumluluk: KB serbest metinleri -----------------------------
     p = bucket_params or {}
     ww = parse_duration_range(p.get("uyaniklik_penceresi")) or DEFAULT_WAKE_WINDOW
-    ww_mid = _mid(ww)
     n_naps = parse_count(p.get("uyku_sayisi"))
     if n_naps is None:
         n_naps = 2
     day_sleep = parse_duration_range(p.get("gunduz_uyku_total")) or DEFAULT_DAY_SLEEP
     bed_range = parse_time_range(p.get("yatma_vakti")) or DEFAULT_BEDTIME_RANGE
+    nap_len = max(30, _mid(day_sleep) // n_naps) if n_naps > 0 else 0
+    return _cizelge_kur(wake_minute, n_naps, _mid(ww), nap_len, bed_range)
 
+
+def _cizelge_kur(wake_minute: int, n_naps: int, ww: int, nap_len: int,
+                 bed_range: tuple[int, int]) -> list[dict]:
+    """Uyanış + (pencere, uyku) tekrarı + gece yatışı → blok listesi."""
     blocks: list[dict] = [{
         "key": "wake", "type": "wake",
         "start_minute": wake_minute, "end_minute": wake_minute,
@@ -224,20 +265,18 @@ def build_schedule(bucket_params: dict, wake_minute: int = DEFAULT_WAKE_MIN) -> 
     }]
 
     cursor = wake_minute
-    if n_naps > 0:
-        nap_len = max(30, _mid(day_sleep) // n_naps)     # tek uyku min 30dk
-        for i in range(1, n_naps + 1):
-            start = cursor + ww_mid
-            end = start + nap_len
-            blocks.append({
-                "key": f"nap_{i}", "type": "nap",
-                "start_minute": start, "end_minute": end,
-                "title": f"{i}. gündüz uykusu",
-                "note": f"Uyanıklık penceresi ~{ww_mid} dk sonra",
-            })
-            cursor = end
+    for i in range(1, max(0, n_naps) + 1):
+        start = cursor + ww
+        end = start + nap_len
+        blocks.append({
+            "key": f"nap_{i}", "type": "nap",
+            "start_minute": start, "end_minute": end,
+            "title": f"{i}. gündüz uykusu",
+            "note": f"Uyanıklık penceresi ~{ww} dk sonra",
+        })
+        cursor = end
 
-    bedtime_ham = cursor + ww_mid
+    bedtime_ham = cursor + ww
     bedtime = max(bed_range[0], min(bed_range[1], bedtime_ham))   # yaş bandına kırp
     gece = {
         "key": "bedtime", "type": "sleep",
@@ -245,7 +284,7 @@ def build_schedule(bucket_params: dict, wake_minute: int = DEFAULT_WAKE_MIN) -> 
         "title": "Gece uykusu",
     }
     if bedtime != bedtime_ham:
-        gece["note"] = (f"Yaş bandının yatma aralığına "
+        gece["note"] = (f"Yaş bandının yatış aralığına "
                         f"({_fmt(bed_range[0])}–{_fmt(bed_range[1])}) getirildi")
     blocks.append(gece)
     return [_with_labels(b) for b in blocks]
@@ -337,8 +376,10 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
 
     Dönen: {
       days_with_data, avg_wake_minute, avg_bedtime_minute,
-      avg_nap_count, avg_nap_minutes, avg_night_wakes
+      avg_nap_count, avg_nap_minutes, avg_day_sleep_minutes, avg_night_wakes
     }
+    avg_day_sleep_minutes: GÜN BAŞINA gündüz uyku toplamı (kestirme kuralının
+    girdisi) — avg_nap_minutes ise uyku BAŞINA ortalamadır; karıştırılmamalıdır.
     Değer hesaplanamıyorsa ilgili alan None (çağıran karar verir)."""
     today = today or datetime.now(timezone.utc).date()
     start = today - timedelta(days=lookback_days - 1)
@@ -401,6 +442,9 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
 
     nap_counts = [len(v) for v in naps_by_day.values()]
     nap_durs = [d for v in naps_by_day.values() for d in v if d > 0]
+    # Gün başına gündüz uyku toplamı — yalnız SÜRESİ BİLİNEN uykusu olan günler
+    # sayılır (ended_at'i olmayan kayıtlar günü 0 dk göstermesin).
+    day_totals = [sum(v) for v in naps_by_day.values() if any(d > 0 for d in v)]
 
     return {
         "days_with_data": len(days_seen),
@@ -410,6 +454,7 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
                                if bed_by_day else None),
         "avg_nap_count": _avg(nap_counts),
         "avg_nap_minutes": _avg(nap_durs),
+        "avg_day_sleep_minutes": _avg(day_totals),
         # Gece uyanma: kaydı olan günler üzerinden ortalama (0 kayıtlı gün 0 sayılır
         # ancak hiç veri yoksa None).
         "avg_night_wakes": (round(sum(night_wakes_by_day.get(d, 0) for d in days_seen)
@@ -451,25 +496,64 @@ def detect_regression(training_completed_at: date | None, log_summary: dict,
 # =============================================================================
 # Adaptasyon kuralları
 # =============================================================================
-def _violates_age_band(schedule: list[dict], bucket_params: dict) -> str | None:
+def _violates_age_band(schedule: list[dict], bucket_params: dict,
+                       yas_ay: float | None = None,
+                       tek_uyku: bool | None = None) -> str | None:
     """Kaydırılmış çizelge yaş bandına aykırı mı? Aykırıysa sebep metni döner.
 
-    İki kontrol:
-      1. Gece yatışı, yaş bandının yatma_vakti aralığının DIŞINDA mı?
-      2. Son uykudan yatışa kadarki uyanıklık, yaş bandının penceresi dışında mı?
-    """
-    p = bucket_params or {}
-    bed_range = parse_time_range(p.get("yatma_vakti")) or DEFAULT_BEDTIME_RANGE
-    ww = parse_duration_range(p.get("uyaniklik_penceresi")) or DEFAULT_WAKE_WINDOW
+    Tablo yolunda (yas_ay verilmişse) ÜÇ kontrol — hepsi yas_bantlari.json'dan:
+      1. Gündüz uyku sayısı bandın öngördüğünden farklı mı? (bebek bant atladıysa
+         eski çizelge artık geçersizdir → yeniden üretim)
+      2. Son uykudan yatışa kadarki uyanıklık, bandın penceresi dışında mı?
+      3. Gece uykusu süresi (yatıştan ertesi sabah uyanışına) bandın gece uykusu
+         aralığı dışında mı?
+    Üçü de çizelgenin TAMAMI eşit kaydığında DEĞİŞMEZ — yani günlük ±45 dk
+    kaydırma tek başına yeniden üretim tetiklemez (doğru davranış: bütün gün
+    kaydığında bandın oranları bozulmaz). Asıl tetikleyici bebeğin BANT
+    ATLAMASIDIR.
 
+    MUTLAK KAYMA SINIRI: yaş bandı tablosu mutlak yatış saati vermez, dolayısıyla
+    burada duvar saati sınırı UYDURULMAZ. Buna gerek de yoktur: summarize_logs
+    sabah uyanışını yalnız MORNING_WINDOW (04:00–11:00) içinde arar ve kaydırma
+    daima gerçek uyanışa doğru yapılır, dolayısıyla çizelge 11:00'i geçemez —
+    kayma kendiliğinden sınırlıdır, birikip saat etrafında dolanamaz.
+
+    Tablo yoksa (Faz Y öncesi çağrı) eski KB kontrolü uygulanır."""
     bed = next((b for b in schedule if b["key"] == "bedtime"), None)
     if bed is None:
         return None
+    naps = [b for b in schedule if b["type"] == "nap"]
+    bant = bant_coz(bucket_params, yas_ay, tek_uyku)
+
+    if bant is not None:
+        cp = yas_bantlari.cizelge_parametreleri(bant)
+        ww_lo, ww_hi = bant["uyaniklik_penceresi_dk"]
+        if len(naps) != cp["uyku_sayisi"]:
+            return (f"Çizelgede {len(naps)} gündüz uykusu var; {bant['ad']} bandı "
+                    f"{cp['uyku_sayisi']} uyku öngörüyor")
+        if naps:
+            gap = bed["start_minute"] - naps[-1]["end_minute"]
+            if not (ww_lo <= gap <= ww_hi):
+                return (f"Son uyku ile yatış arası {gap} dk; {bant['ad']} bandının "
+                        f"uyanıklık penceresi {ww_lo}–{ww_hi} dk dışında")
+        wake_b = next((b for b in schedule if b["key"] == "wake"), None)
+        if wake_b is not None:
+            gece_lo, gece_hi = bant["gece_uykusu_dk"]
+            gece = (wake_b["start_minute"] + 1440) - bed["start_minute"]
+            if not (gece_lo <= gece <= gece_hi):
+                return (f"Yatış {_fmt(bed['start_minute'])} ile sabah uyanışı "
+                        f"{_fmt(wake_b['start_minute'])} arası {gece} dk; "
+                        f"{bant['ad']} bandının gece uykusu {gece_lo}–{gece_hi} dk "
+                        "dışında")
+        return None
+
+    # --- Geriye uyumluluk: KB serbest metinleri -----------------------------
+    p = bucket_params or {}
+    bed_range = parse_time_range(p.get("yatma_vakti")) or DEFAULT_BEDTIME_RANGE
+    ww = parse_duration_range(p.get("uyaniklik_penceresi")) or DEFAULT_WAKE_WINDOW
     if not (bed_range[0] <= bed["start_minute"] <= bed_range[1]):
         return (f"Kaydırılmış yatış saati {_fmt(bed['start_minute'])}, yaş bandının "
                 f"yatma aralığı ({_fmt(bed_range[0])}–{_fmt(bed_range[1])}) dışında")
-
-    naps = [b for b in schedule if b["type"] == "nap"]
     last_end = naps[-1]["end_minute"] if naps else None
     if last_end is not None:
         gap = bed["start_minute"] - last_end
@@ -481,8 +565,10 @@ def _violates_age_band(schedule: list[dict], bucket_params: dict) -> str | None:
 
 def adapt(plan_content: dict, bucket_params: dict, log_summary: dict,
           training_completed_at: date | None = None,
-          today: date | None = None) -> dict:
-    """Kural tabanlı adaptasyon + regresyon tespiti.
+          today: date | None = None,
+          yas_ay: float | None = None,
+          tek_uyku: bool | None = None) -> dict:
+    """Kural tabanlı adaptasyon + regresyon tespiti + kestirme değerlendirmesi.
 
     Dönen: {
       adjusted: bool,                    # çizelge kaydırıldı mı
@@ -490,6 +576,7 @@ def adapt(plan_content: dict, bucket_params: dict, log_summary: dict,
       regenerate_required: bool,         # yaş bandı ihlali → çağıran TAM YENİDEN ÜRETİM yapar
       regression_detected: bool,         # İlayda protokolü (eğitim sonrası geri gidiş)
       restart_program_suggested: bool,   # kullanıcıya sorulacak ÖNERİ — otomatik üretim YOK
+      kestirme: {...} | None,            # evrensel 30dk kestirme kuralı değerlendirmesi
       reasons: [str],
       schedule: [...]                    # sonuç çizelge (kaydırılmış veya orijinal)
     }
@@ -498,13 +585,15 @@ def adapt(plan_content: dict, bucket_params: dict, log_summary: dict,
     KALDIRILDI; yerine İlayda'nın regresyon protokolü geldi (detect_regression).
     """
     reasons: list[str] = []
+    bant = bant_coz(bucket_params, yas_ay, tek_uyku)
 
     # Temel çizelge: plan içinde varsa onu kullan, yoksa yaş bandından türet
     # (Faz 5R öncesi planlarda 'schedule' yoktur — geriye uyumluluk).
     schedule = plan_content.get("schedule") if isinstance(plan_content, dict) else None
     schedule = normalize_schedule(schedule)          # eski şema → güncel sözleşme
     if not schedule:
-        schedule = build_schedule(bucket_params, DEFAULT_WAKE_MIN)
+        schedule = build_schedule(bucket_params, DEFAULT_WAKE_MIN,
+                                  yas_ay=yas_ay, tek_uyku=tek_uyku)
         reasons.append("Planda yapısal çizelge yoktu; yaş bandından türetildi")
 
     wake_block = next((b for b in schedule if b["key"] == "wake"), None)
@@ -517,9 +606,23 @@ def adapt(plan_content: dict, bucket_params: dict, log_summary: dict,
         "regenerate_required": False,
         "regression_detected": False,
         "restart_program_suggested": False,
+        "kestirme": None,
         "reasons": reasons,
         "schedule": schedule,
     }
+
+    # --- Evrensel kural: gündüz minimumu tutmadıysa 30dk kestirme -----------
+    # Bant çözülemiyorsa (Faz Y öncesi çağrı) değerlendirme yapılmaz.
+    if bant is not None:
+        kestirme = yas_bantlari.kestirme_degerlendir(
+            bant, log_summary.get("avg_day_sleep_minutes"))
+        result["kestirme"] = kestirme
+        if kestirme["gerekli"]:
+            reasons.append(
+                f"Gündüz toplam uyku {kestirme['gerceklesen_dk']} dk; "
+                f"{bant['ad']} bandının minimumu {kestirme['min_gunduz_dk']} dk "
+                f"({kestirme['eksik_dk']} dk eksik) — {kestirme['sure_dk']} dk'lık "
+                "ilave kestirme uykusu yaptırılmalı")
 
     # --- Regresyon katmanı: kaydırmadan BAĞIMSIZ, yalnız BAYRAK -------------
     # Otomatik hiçbir şey üretilmez; mobil kullanıcıya "Programı baştan başlatmak
@@ -546,7 +649,7 @@ def adapt(plan_content: dict, bucket_params: dict, log_summary: dict,
     shifted = shift_schedule(schedule, shift)
 
     # --- Kural 2: kaydırma yaş bandına aykırıysa → TAM YENİDEN ÜRETİM --------
-    violation = _violates_age_band(shifted, bucket_params)
+    violation = _violates_age_band(shifted, bucket_params, yas_ay, tek_uyku)
     if violation:
         result["regenerate_required"] = True
         reasons.append(f"{violation} — kaydırma yerine plan yeniden üretilecek")

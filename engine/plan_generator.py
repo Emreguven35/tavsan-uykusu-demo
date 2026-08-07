@@ -95,6 +95,8 @@ G) BEBEK ARABASI GÜVENLİK KURALI: Bebek arabasıyla (veya hareketle/sallayarak
 
 H) SON GÜNDÜZ UYKUSU BİTİŞ SAATİ ESNEKTİR: Günlük programda son gündüz uykusu için bir bitiş saati (örn. 16:00) belirtildiğinde, o satırın/tablonun altına şu içerikte bir not ekle: "Not: Bu bitiş saati katı değildir. Önceliğimiz, bebeğin gün içinde uyuması gereken minimum uykuyu tamamlamasıdır. Bebek yaşına uygun minimum gündüz uyku süresini (YAŞ PARAMETRELERİ'ndeki gunduz_uyku_total değeri) ya da günlük toplam uyku hedefini dolduramadıysa, bu bitiş saati aşılsa bile İLAVE bir gündüz uykusu yaptırın; yani bebek yeterince uyumadıysa uykuyu 16:00'da bitirmenin bir kıymeti yoktur. Bu ilave uykudan sonra, bebeği yaşına uygun uyanıklık penceresi kadar uyanık tutup gece uykusuna geçin — gece uykusu biraz gecikse bile minimum gündüz/toplam uyku önceliklidir." Bu kural yalnızca alışma evresinde değil, eğitim tamamlandıktan sonra da geçerlidir. İlave uyku gerektiğinde, o yaşın normal gündüz uyku sayısının bir fazlasına çıkılabilir (ör. 8 ay: 3 yerine 4 uyku). Bu nottaki sayısal değerleri YAŞ PARAMETRELERİ bölümündeki gerçek değerlerden al; tabloda olmayan bir yaş için değer uydurma.
 
+I) EVRENSEL KESTİRME KURALI (HER YAŞTA GEÇERLİ — MUTLAKA YAZ): Bebek yaşına uygun GÜNDÜZ TOPLAM UYKU MİNİMUMUNU tamamlayamazsa, ilave bir kestirme uykusu yaptırılır. Bu kestirme {param.get('kestirme_protokolu', {}).get('sure_dk', 30)} DAKİKADIR ve süre dolunca bebek UYANDIRILIR. Bu kestirmeden uyandıktan {param.get('kestirme_protokolu', {}).get('gece_uykusuna_gecis_dk', 60)} dakika (1 saat) sonra bile gece uykusuna geçilebilir — yani gece uykusu bir miktar gecikse dahi minimum gündüz uykusunu tamamlamak önceliklidir. Bu kuralı "Günlük Program" bölümünün altında ayrı bir not olarak yaz; süreyi ve 1 saat kuralını AÇIKÇA belirt. Minimum gündüz uyku süresini YAŞ PARAMETRELERİ'ndeki gunduz_uyku_total değerinden al, uydurma.
+
 PROFIL:
 {_format_dict(param['profile_summary'])}
 
@@ -264,6 +266,18 @@ def _fallback_plan(param: dict) -> str:
             for k, v in uy.items():
                 lines.append(f"- **{k}**: {v}")
     lines.append("")
+
+    # Evrensel kestirme kuralı (Faz Y) — her yaşta geçerli, plandan düşmemeli.
+    kestirme = param.get("kestirme_protokolu") or {}
+    if kestirme:
+        lines.append(f"**Kestirme uykusu kuralı:** Bebeğiniz gündüz toplam uyku "
+                     f"minimumunu ({p.get('gunduz_uyku_total', '-')}) tamamlayamazsa "
+                     f"ilave {kestirme.get('sure_dk', 30)} dakikalık bir kestirme "
+                     f"uykusu yaptırın; {kestirme.get('sure_dk', 30)} dakika dolunca "
+                     f"uyandırın. Bu kestirmeden uyandıktan "
+                     f"{kestirme.get('gece_uykusuna_gecis_dk', 60)} dakika (1 saat) "
+                     "sonra bile gece uykusuna geçebilirsiniz.")
+        lines.append("")
 
     # Bölüm 5: Eğitim Planı
     lines.append(f"## Eğitim Planı — {plan['gunler']} Günlük {plan['tip']}")

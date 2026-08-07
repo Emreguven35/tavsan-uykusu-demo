@@ -150,6 +150,19 @@ YAS_BANT_SIRASI = [
     "18_ay", "18-24_ay", "2-3_yas", "40_ay_buyuk_cocuk",
 ]
 
+# FAZ Y: sayısal yaş parametreleri artık data/yas_bantlari.json'dan gelir (plan
+# motoruyla AYNI kaynak). KB bucket'ları yalnız yardımcı içerik (yatma vakti,
+# gündüz uykusunu bitirme saati, örnek program) için okunur.
+# Soru metninde yaş geçmeyip yalnız `yas_bandi` parametresi geldiğinde tabloyu
+# sorgulayabilmek için her KB bucket'ının TEMSİLİ AYI:
+BANT_TEMSILI_AY = {
+    "0-6_hafta": 1.0, "7-12_hafta": 2.0, "3_ay": 3.0, "4_ay": 4.0, "5_ay": 5.0,
+    "6_ay": 6.0, "7_ay": 7.0, "8_ay": 8.0, "9_ay": 9.0, "10_ay": 10.0,
+    "11_ay": 11.0, "12_ay": 12.0, "12-13_ay": 12.5, "14_ay": 14.0,
+    "15-17_ay": 16.0, "18_ay": 18.0, "18-24_ay": 21.0, "2-3_yas": 30.0,
+    "40_ay_buyuk_cocuk": 40.0,
+}
+
 # Bağlama taşınacak sayısal parametreler (insan-okur etiketleriyle).
 YAS_PARAM_ETIKET = {
     "toplam_uyku_24h": "Toplam uyku (24 saat)",
@@ -242,31 +255,104 @@ def _param_deger(buckets: dict, band: str, alan: str) -> tuple[Any, str] | None:
     return None
 
 
+# Tablodan gelen (birincil) değerlerin tekrar KB'den yazılmasını önle.
+_TABLO_KAPSAMINDAKI_ALANLAR = {
+    "uyaniklik_penceresi", "uyku_sayisi", "gunduz_uyku_total", "gece_uyku",
+}
+
+
+def _tablo_bant_ay(band: str, yas_ay: float | None) -> float | None:
+    """Bir KB bandı için yaş bandı tablosuna sorulacak ay değeri.
+
+    Sorudaki yaş O BANDA düşüyorsa ayın kendisi kullanılır (en isabetli);
+    aksi halde (geçiş dönemindeki komşu bant) bandın temsili ayı kullanılır."""
+    from engine.parameter_engine import yas_bucket_sec
+    if yas_ay is not None and yas_bucket_sec(yas_ay) == band:
+        return yas_ay
+    return BANT_TEMSILI_AY.get(band)
+
+
 def yas_bandi_blok(bantlar: list[str], yas_ay: float | None = None) -> str:
     """Yaş bandı parametrelerini LLM bağlamına girecek metin bloğu olarak kur.
 
-    Boş alanlar en yakın banttan doldurulur ve bu AÇIKÇA belirtilir — model
-    cevabında hangi banda dayandığını söyleyebilsin."""
+    FAZ Y — İKİ KATMAN:
+      1. BİRİNCİL: İlayda yaş bandı tablosu (data/yas_bantlari.json). Plan
+         motorunun kullandığı sayıların BİREBİR aynısı; 0-36 ay arasında ara yaş
+         yoktur, "9 aylık" sorusu artık boşluğa düşemez.
+      2. TAMAMLAYICI: KB bucket'ından tabloda BULUNMAYAN alanlar (yatma vakti,
+         gündüz uykusunu bitirme saati, 24 saatlik toplam). Boşsa en yakın
+         banttan doldurulur ve bu AÇIKÇA belirtilir.
+    Ayrıca evrensel kestirme kuralı her cevaba taşınır."""
     if not bantlar:
         return ""
     kb = _load_kb_safe()
     buckets = kb.get("yas_buckets", {}) if kb else {}
-    if not buckets:
-        return ""
 
     satirlar: list[str] = []
+    tablo_bulundu = False
     for band in bantlar:
         baslik = _humanize(band)
-        satirlar.append(f"[{baslik} bandı]")
+        bant_satirlari: list[str] = []
+        # Bu bant tablodan çözülebildi mi? BANT BAŞINA tutulur: bir bant tablodan
+        # gelirken diğerinin KB alanları yanlışlıkla elenmesin.
+        bu_bant_tablodan = False
+
+        # 1) Tablo (birincil sayısal kaynak)
+        ay = _tablo_bant_ay(band, yas_ay)
+        if ay is not None:
+            try:
+                from engine import yas_bantlari
+                cozulmus = yas_bantlari.yas_bandi_getir(ay)
+                bant_satirlari.append(f"[{cozulmus['ad']} bandı — Tavşan Uykusu yaş tablosu]")
+                bant_satirlari += yas_bantlari.bant_ozet_satirlari(cozulmus)
+                if cozulmus.get("tek_uykuya_gecis_sartlari"):
+                    sartlar = cozulmus["tek_uykuya_gecis_sartlari"]
+                    bant_satirlari.append(
+                        "- Tek uykuya geçiş şartları (ÜÇÜ BİRDEN gerekli): "
+                        + "; ".join(s["metin"] for s in sartlar["sartlar"])
+                        + f". {sartlar['saglanmazsa']}")
+                if cozulmus.get("ogle_uykusu_reddi_protokolu"):
+                    red = cozulmus["ogle_uykusu_reddi_protokolu"]
+                    bant_satirlari.append(
+                        "- Öğlen uykusu reddi protokolü: "
+                        + " ".join(f"{a['sira']}) {a['metin']}" for a in red["adimlar"]))
+                bu_bant_tablodan = True
+                tablo_bulundu = True
+            except Exception as e:                   # tablo bozuk → KB'ye düş
+                logger.warning("Yaş bandı tablosu okunamadı: %s", e)
+
+        if not bant_satirlari:
+            bant_satirlari.append(f"[{baslik} bandı]")
+
+        # 2) KB'den tamamlayıcı alanlar (tabloda olmayanlar)
         for alan, etiket in YAS_PARAM_ETIKET.items():
-            bulunan = _param_deger(buckets, band, alan)
+            if bu_bant_tablodan and alan in _TABLO_KAPSAMINDAKI_ALANLAR:
+                continue
+            bulunan = _param_deger(buckets, band, alan) if buckets else None
             if bulunan is None:
                 continue
             val, kaynak_band = bulunan
             not_ = "" if kaynak_band == band else f"  (en yakın bant: {_humanize(kaynak_band)})"
-            satirlar.append(f"- {etiket}: {val}{not_}")
+            bant_satirlari.append(f"- {etiket}: {val}{not_}")
+
+        satirlar += bant_satirlari
+
     if not satirlar:
         return ""
+
+    # Evrensel kural — tüm bantlarda geçerli, her cevaba taşınır.
+    if tablo_bulundu:
+        try:
+            from engine import yas_bantlari
+            proto = yas_bantlari.kestirme_protokolu()
+            satirlar.append(
+                f"[Tüm yaşlarda geçerli kural] Gündüz toplam uyku minimumu "
+                f"tamamlanamazsa ilave {proto['sure_dk']} dakikalık kestirme uykusu "
+                f"yaptırılır ({proto['sure_dk']} dakika dolunca uyandırılır); bu "
+                f"kestirmeden uyandıktan {proto['gece_uykusuna_gecis_dk']} dakika "
+                "(1 saat) sonra bile gece uykusuna geçilebilir.")
+        except Exception:
+            pass
 
     yas_ifade = ""
     if yas_ay is not None:
@@ -279,20 +365,43 @@ def yas_bandi_blok(bantlar: list[str], yas_ay: float | None = None) -> str:
             f"{yas_ifade}:{gecis}\n" + "\n".join(satirlar))
 
 
+def _tablo_bant_onekleri(bantlar: list[str]) -> list[str]:
+    """KB bant adlarını yaş bandı tablosunun chunk_id öneklerine çevir.
+
+    'yas_bucket:9_ay' → 'yas_bandi:9-12_ay' (tekrarlar teke indirilir, sıra korunur)."""
+    onekler: list[str] = []
+    for band in bantlar:
+        ay = BANT_TEMSILI_AY.get(band)
+        if ay is None:
+            continue
+        try:
+            from engine import yas_bantlari
+            onek = f"yas_bandi:{yas_bantlari.yas_bandi_getir(ay)['id']}"
+        except Exception:
+            continue
+        if onek not in onekler:
+            onekler.append(onek)
+    return onekler
+
+
 def _bant_birimleriyle_birlestir(retrieved: list[dict], bantlar: list[str],
                                  max_ek: int = 4) -> list[dict]:
     """Çözülen bantların korpustaki birimlerini sonuca EKLE (skorları değiştirmeden).
 
     Retrieval sıralamasına dokunulmaz; yalnızca eksik bant birimleri sona eklenir.
     Böylece semantik sıralama bandı ıskalasa bile o bandın içeriği bağlama girer.
-    Zaten getirilmiş birimler tekrar eklenmez."""
+    Zaten getirilmiş birimler tekrar eklenmez.
+
+    Faz Y: KB bucket birimlerinin YANINDA, yaş bandı tablosunun (yas_bantlari.json)
+    o yaşa karşılık gelen metin birimi de eklenir — KB'de karşılığı olmayan
+    aralıklarda (12-13/14/15-17 ay) bağlam boş kalmaz."""
     units = (_state.get("units") or []) if isinstance(_state, dict) else []
     if not units:
         return retrieved
     mevcut = {u.get("chunk_id") for u in retrieved}
     ekler: list[dict] = []
-    for band in bantlar:
-        onek = f"yas_bucket:{band}."
+    for band in _tablo_bant_onekleri(bantlar) + [f"yas_bucket:{b}." for b in bantlar]:
+        onek = band
         for u in units:
             cid = u.get("chunk_id", "")
             if cid.startswith(onek) and cid not in mevcut:
@@ -342,13 +451,17 @@ def _load_expansions() -> dict:
 
 # Doc2query genişletmesi uygulanacak birimler: curated kurallar (terse + yüksek değer).
 def _is_expandable(unit: dict) -> bool:
-    return (unit["source"] in ("global_rule", "yas_bucket")
+    return (unit["source"] in ("global_rule", "yas_bucket", "yas_bandi")
             or unit["chunk_id"].startswith("kural"))
 
 
 def build_corpus() -> list[dict]:
     """Birleşik aranabilir korpusu kur. Sıra deterministiktir (embeddings.npy ile hizalı):
-    1) chunks.json, 2) global_rules (metinsel), 3) yaş bucket'larının açıklayıcı metinleri.
+    1) chunks.json, 2) global_rules (metinsel), 3) yaş bucket'larının açıklayıcı
+    metinleri, 4) İlayda yaş bandı tablosu (Faz Y — metin formu).
+
+    (4) metinleri data/yas_bantlari.json'daki SAYILARDAN deterministik üretilir
+    (engine.yas_bantlari.bant_metinleri): motor ile chat cevabı asla ayrışamaz.
 
     Her birimde 'text' (modele gösterilecek temiz metin) bulunur. Doc2query
     genişletmesi ayrı RETRIEVAL SATIRLARI olarak eklenir (bkz. _build_rows) — tek
@@ -400,6 +513,21 @@ def build_corpus() -> list[dict]:
                     "lesson_id": None,
                     "label": label,
                 })
+
+    # 4) İlayda yaş bandı tablosu — metin formu (0-36 ay tam kapsam + evrensel
+    #    kestirme kuralı + 12-18 ay geçiş şartları + 24-36 ay reddi protokolü).
+    try:
+        from engine import yas_bantlari
+        for b in yas_bantlari.bant_metinleri():
+            units.append({
+                "chunk_id": b["chunk_id"],
+                "text": b["text"],
+                "source": "yas_bandi",
+                "lesson_id": None,
+                "label": b["label"],
+            })
+    except Exception as e:                       # tablo yoksa korpus yine çalışır
+        logger.warning("Yaş bandı tablosu korpusa eklenemedi: %s", e)
 
     return units
 

@@ -1,12 +1,18 @@
 """
 Parameter Engine — 37 cevap → kişisel parametreler.
 
-Sayısal değerler ASLA LLM'den değil, master_knowledge_base.json'dan gelir (deterministik).
+Sayısal değerler ASLA LLM'den gelmez (deterministik):
+  • Yaş bandı sayıları (uyanıklık penceresi, uyku sayısı, gündüz/gece uyku süresi)
+    → data/yas_bantlari.json (İlayda tablosu, Faz Y). TEK KAYNAK.
+  • Diğer bant içeriği (örnek program, gece beslenme notları, görsel referanslar)
+    → master_knowledge_base.json.
 """
 import json
 from datetime import datetime, date
 from pathlib import Path
 from typing import Any
+
+from engine import yas_bantlari
 
 # ---------------------------------------------------------------------------
 # Veri yükleme — data/ klasörü app.py'nin yanında
@@ -440,6 +446,51 @@ def bekleme_sureleri_planla(plan_tipi: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Faz Y — yaş bandı tablosu köprüsü
+# ---------------------------------------------------------------------------
+def _tek_uyku_mu(profile: dict) -> bool | None:
+    """Profilden 12-18 ay tek/çift uyku ayrımını çöz.
+
+    Profil `tek_uyku` (bool) taşıyorsa doğrudan kullanılır. Aksi halde üç geçiş
+    şartı ölçülebiliyorsa (ogle_yatis_dk / tek_ogun_uyku_dk / uyaniklik_penceresi_dk)
+    değerlendirilir; hiçbiri yoksa None → varsayılan (2 uyku) uygulanır."""
+    if isinstance(profile.get("tek_uyku"), bool):
+        return profile["tek_uyku"]
+    alanlar = ("ogle_yatis_dk", "tek_ogun_uyku_dk", "uyaniklik_penceresi_dk")
+    if not any(profile.get(a) is not None for a in alanlar):
+        return None
+    return yas_bantlari.tek_uykuya_gecis_degerlendir(
+        **{a: profile.get(a) for a in alanlar})["tek_uyku"]
+
+
+def _bant_parametreleri(bant: dict) -> dict:
+    """Çözülmüş bandı, plan prompt'unun beklediği METİN alanlarına çevir.
+
+    KB'nin aynı adlı (ve tutarsız) alanlarının ÜSTÜNE yazılır — plan yazarına
+    giden sayılar artık yalnız İlayda tablosundan gelir."""
+    ww = yas_bantlari._aralik(bant["uyaniklik_penceresi_dk"])
+    if bant.get("uyaniklik_penceresi_kaynak"):
+        ww += f" (komşu banttan devralındı: {bant['uyaniklik_penceresi_kaynak']})"
+    proto = bant["kestirme_protokolu"]
+    return {
+        "yas_bandi_adi": bant["ad"],
+        "uyaniklik_penceresi": ww,
+        "uyku_sayisi": yas_bantlari._sayi_aralik(bant["gunduz_uyku_sayisi"],
+                                                 bant["gunduz_uyku_sayisi_sabit"]),
+        "gunduz_uyku_total": yas_bantlari._aralik(bant["gunduz_uyku_toplam_dk"]),
+        "gece_uyku": yas_bantlari._aralik(bant["gece_uykusu_dk"]),
+        "kestirme_protokolu": (
+            f"Gündüz toplam uyku minimumu ({yas_bantlari._aralik(bant['gunduz_uyku_toplam_dk'])}) "
+            f"tamamlanamazsa ilave {proto['sure_dk']} dakikalık kestirme uykusu "
+            f"yaptırılır; {proto['sure_dk']} dakika dolunca bebek uyandırılır. Bu "
+            f"kestirmeden uyandıktan {proto['gece_uykusuna_gecis_dk']} dakika "
+            "(1 saat) sonra bile gece uykusuna geçilebilir."
+        ),
+        "yas_bandi_notlari": list(bant.get("notlar") or []),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Ana fonksiyon
 # ---------------------------------------------------------------------------
 def parametre_uret(profile: dict) -> dict:
@@ -454,7 +505,14 @@ def parametre_uret(profile: dict) -> dict:
     )
 
     bucket_key = yas_bucket_sec(yas["duzeltilmis_ay"])
-    bucket = kb["yas_buckets"].get(bucket_key, {})
+    bucket = dict(kb["yas_buckets"].get(bucket_key, {}))
+
+    # --- Faz Y: yaş bandı sayıları TABLODAN gelir (KB metinlerinin üstüne yazar).
+    # 12-18 ay tek/çift uyku ayrımı profilden gelen `tek_uyku` ile çözülür; profil
+    # bilgisi yoksa İlayda kuralı gereği çocuk 2 uyku bandında sayılır.
+    bant = yas_bantlari.yas_bandi_getir(yas["duzeltilmis_ay"],
+                                        tek_uyku=_tek_uyku_mu(profile))
+    bucket.update(_bant_parametreleri(bant))
 
     uygun, uyarilar = egitim_uygunlugu_kontrol(profile, yas)
     on_hazirlik = on_hazirlik_belirle(profile, yas)
@@ -468,6 +526,9 @@ def parametre_uret(profile: dict) -> dict:
         "yas": yas,
         "bucket": bucket_key,
         "parametreler": bucket,
+        # Faz Y: çizelge kurucusunun ve mobilin okuduğu YAPILANDIRILMIŞ bant.
+        "yas_bandi": bant,
+        "kestirme_protokolu": yas_bantlari.kestirme_protokolu(),
         "uygun_mu": uygun,
         "uyarilar": uyarilar,
         "on_hazirlik": on_hazirlik,

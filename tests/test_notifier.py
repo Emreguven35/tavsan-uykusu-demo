@@ -357,13 +357,19 @@ db.close()
 from api.models import SleepLog                      # noqa: E402
 from api.services import plan_service                # noqa: E402
 
-# Bebek 8 aylık; plan 07:00 uyanışa göre kurulu (nap_1 10:00, bedtime 19:00).
+# Bebek 8 aylık; plan 07:00 uyanışa göre kurulu.
+# Faz Y: çizelge YAŞ BANDI TABLOSUNDAN kurulur — 6-8 ay bandı SABİT 3 uyku
+# öngörür, dolayısıyla bu bebeğe 2 uykuluk çizelge verilemez (verilseydi
+# adaptasyon "bant uyuşmuyor" deyip planı yeniden üretirdi, kaydırmazdı).
+# 8 aylık için tablo: pencere 150 dk, 3 uyku × 70 dk → nap_1 09:30, bedtime 20:30.
 u14 = new_user("n14@tavsansmoke.com")
+_yas14 = 8 * 30 / 30.44                       # gün → ay (motorun kullandığı çevrim)
+SCHEDULE_14 = plan_adapter.build_schedule({}, 7 * 60, yas_ay=_yas14)
 b14 = Baby(user_id=u14.id, name="Zeynep14",
            birth_date=(datetime(2026, 8, 14) - timedelta(days=8 * 30)).date())
 db.add(b14); db.commit(); db.refresh(b14)
 p14 = SleepPlan(user_id=u14.id, baby_id=b14.id, plan_date=datetime(2026, 8, 14).date(),
-                content={"schedule": SCHEDULE, "bucket": "8_ay",
+                content={"schedule": SCHEDULE_14, "bucket": "8_ay",
                          "dogum_haftasi": 40, "adapted": False})
 db.add(p14); db.commit()
 add_token(u14, "ExponentPushToken[SYNC]")
@@ -375,17 +381,18 @@ for d in range(3):
     db.add(SleepLog(user_id=u14.id, baby_id=b14.id, type="wake", started_at=st))
 db.commit()
 
-# nap_1 kaydırılınca 10:00 → 10:45 olur. 10:15'te tarama yaparsak (30dk sonra)
-# ANCAK kaydırılmış saat pencereye girer; kaydırılmamış 10:00 ÇOKTAN GEÇMİŞTİR.
+# nap_1 kaydırılınca 09:30 → 10:15 olur. 09:40'ta tarama yaparsak hatırlatma
+# penceresi [10:05, 10:20] olur: KAYDIRILMIŞ saat pencereye girer, kaydırılmamış
+# 09:30 ise ÇOKTAN GEÇMİŞTİR. Yani bildirim ancak adaptasyon koştuysa gider.
 SENT.clear()
-stats14 = notifier.run_reminder_cycle(db, now=utc_at(10, 15, day=14))
+stats14 = notifier.run_reminder_cycle(db, now=utc_at(9, 40, day=14))
 _m14 = next((m for tur in SENT for m in tur
              if m.get("to") == "ExponentPushToken[SYNC]"), None)
 check("14) Uygulama açılmadan adaptasyon koştu ve bildirim gitti",
       _m14 is not None, f"stats={stats14} sent={SENT}")
-check("14b) Bildirim KAYDIRILMIŞ saatle gitti (10:45, 10:00 değil)",
-      _m14 is not None and "10:45" in _m14.get("body", "")
-      and "10:00" not in _m14.get("body", ""),
+check("14b) Bildirim KAYDIRILMIŞ saatle gitti (10:15, 09:30 değil)",
+      _m14 is not None and "10:15" in _m14.get("body", "")
+      and "09:30" not in _m14.get("body", ""),
       f"body={_m14.get('body') if _m14 else None}")
 check("14c) Mesaj biçimi: 🌙 {ad} için uyku vakti yaklaşıyor (saat)",
       _m14 is not None and _m14["body"].startswith("🌙 Zeynep14 için uyku vakti"),
@@ -400,7 +407,7 @@ check("14d) Plan bugüne adapte edilmiş olarak kaydedildi",
 # --- İKİNCİ TUR: aynı gün tekrar adapt YAPILMAMALI (gereksiz DB yazımı yok) ---
 _once = _plan14.content
 _updated_before = str(_plan14.content.get("adaptation", {}).get("log_summary"))
-stats14b = notifier.run_reminder_cycle(db, now=utc_at(10, 20, day=14))
+stats14b = notifier.run_reminder_cycle(db, now=utc_at(9, 45, day=14))
 check("14e) Aynı gün İKİNCİ adapt YAPILMADI",
       stats14b.get("adapted", 0) == 0, f"stats={stats14b}")
 

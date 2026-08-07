@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from api.models import Baby, SleepLog, SleepPlan, User
 from api.services import plan_adapter
-from engine import plan_generator
+from engine import plan_generator, yas_bantlari
 from engine.parameter_engine import hesapla_yas_ay, load_kb, parametre_uret, yas_bucket_sec
 
 logger = logging.getLogger("tavsan.plan_service")
@@ -52,11 +52,25 @@ def profile_from_baby(baby: Baby, overrides: dict | None,
     return profile
 
 
-def bucket_params(baby: Baby, dogum_haftasi: int | None = None) -> tuple[str, dict]:
-    """Bebeğin yaşına karşılık gelen yaş bandı parametreleri (KB'den)."""
+def bucket_params(baby: Baby, dogum_haftasi: int | None = None
+                  ) -> tuple[str, dict, float]:
+    """Bebeğin yaşına karşılık gelen bant parametreleri.
+
+    Dönen: (kb_bucket_key, kb_bucket, duzeltilmis_ay). Sayısal çizelge kararları
+    duzeltilmis_ay üzerinden yas_bantlari.json'dan alınır (Faz Y); kb_bucket
+    yalnız yardımcı içerik (örnek program, görsel referans) taşır."""
     yas = hesapla_yas_ay(baby.birth_date.isoformat(), int(dogum_haftasi or 40))
     key = yas_bucket_sec(yas["duzeltilmis_ay"])
-    return key, load_kb()["yas_buckets"].get(key, {})
+    return key, load_kb()["yas_buckets"].get(key, {}), yas["duzeltilmis_ay"]
+
+
+def tek_uyku_bayragi(content: dict | None) -> bool | None:
+    """Plan içeriğinden 12-18 ay tek/çift uyku bayrağını çöz.
+
+    True → tek uyku; None → bandın varsayılanı (2 uyku). False DÖNMEZ: varsayılan
+    zaten 2 uyku olduğu için ikisi aynı sonucu verir, None niyeti daha nettir
+    ("bilgi yok" ile "iki uyku ölçüldü" karışmasın)."""
+    return ((content or {}).get("yas_bandi") or {}).get("varyant") == "tek_uyku" or None
 
 
 # =============================================================================
@@ -134,6 +148,10 @@ def ensure_current_schema(db: Session, plan: SleepPlan | None) -> SleepPlan | No
     if not content.get("night_wake_protocol"):
         content["night_wake_protocol"] = dict(plan_adapter.NIGHT_WAKE_PROTOCOL)
         degisti = True
+    # Faz Y: evrensel kestirme kuralı tüm planlarda bulunmalı (eski planlarda yok).
+    if not content.get("kestirme_protokolu"):
+        content["kestirme_protokolu"] = yas_bantlari.kestirme_protokolu()
+        degisti = True
 
     if degisti:
         content["schedule"] = yeni
@@ -158,14 +176,20 @@ def generate_content(baby: Baby, req_overrides: dict | None,
         raise PlanError(str(e)) from e
     used_claude = bool(os.getenv("ANTHROPIC_API_KEY")) and plan_generator.HAS_ANTHROPIC
 
+    # Faz Y: çizelge YAŞ BANDI TABLOSUNDAN kurulur (düzeltilmiş ay üzerinden).
     schedule = plan_adapter.build_schedule(
-        param.get("parametreler", {}), plan_adapter.DEFAULT_WAKE_MIN)
+        param.get("parametreler", {}), plan_adapter.DEFAULT_WAKE_MIN,
+        yas_ay=param["yas"]["duzeltilmis_ay"],
+        tek_uyku=tek_uyku_bayragi(param))
 
     return {
         "markdown": markdown,                       # KALIR (geriye uyum + detay metni)
         "headline": plan_adapter.headline(baby.name, param["bucket"], schedule),
         "bucket": param["bucket"],
         "yas": param["yas"],
+        # Faz Y — mobilin gösterdiği yapılandırılmış bant + evrensel kestirme kuralı.
+        "yas_bandi": param["yas_bandi"],
+        "kestirme_protokolu": param["kestirme_protokolu"],
         "plan_secimi": param["plan_secimi"],
         "uygun_mu": param["uygun_mu"],
         "uyarilar": param["uyarilar"],
@@ -200,12 +224,15 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
     TAM YENİDEN ÜRETİR."""
     base_content = dict(base_plan.content or {})
     dogum_haftasi = base_content.get("dogum_haftasi", 40)
-    _, params = bucket_params(baby, dogum_haftasi)
+    _, params, yas_ay = bucket_params(baby, dogum_haftasi)
+    # 12-18 ay tek/çift uyku ayrımı planla birlikte saklanır; bant değişmedikçe korunur.
+    tek_uyku = tek_uyku_bayragi(base_content)
 
     summary = plan_adapter.summarize_logs(logs, today=today)
     result = plan_adapter.adapt(
         base_content, params, summary,
-        training_completed_at=baby.training_completed_at, today=today)
+        training_completed_at=baby.training_completed_at, today=today,
+        yas_ay=yas_ay, tek_uyku=tek_uyku)
 
     if result["regenerate_required"]:
         content = generate_content(baby, None, dogum_haftasi)     # PlanError yükselebilir
@@ -220,6 +247,11 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         content = base_content
         content.update({
             "schedule": result["schedule"],
+            # Kestirme kuralı her adaptasyonda yeniden değerlendirilir (gündüz
+            # uyku minimumu tutmadıysa mobil kartı gösterir).
+            "kestirme_protokolu": (base_content.get("kestirme_protokolu")
+                                   or yas_bantlari.kestirme_protokolu()),
+            "kestirme_degerlendirme": result["kestirme"],
             # Çizelge kaydıysa başlıktaki yatış saati de güncellenmeli.
             "headline": plan_adapter.headline(
                 baby.name, base_content.get("bucket"), result["schedule"]),
@@ -288,5 +320,7 @@ def ensure_today_plan(db: Session, user: User, baby: Baby,
             baby.name, content.get("bucket"), sched),
         "night_wake_protocol": content.get("night_wake_protocol")
         or dict(plan_adapter.NIGHT_WAKE_PROTOCOL),
+        "kestirme_protokolu": (content.get("kestirme_protokolu")
+                               or yas_bantlari.kestirme_protokolu()),
     })
     return upsert_plan(db, user, baby, today, content)
