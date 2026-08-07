@@ -25,14 +25,22 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     cached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # --- Kapsama telemetrisi (Faz 6.4) --------------------------------------
-    # Hangi fallback katmanında cevaplandı: k1 (doğrudan) | k2 (en yakın bilgi) |
-    # k3 (genel ilke + netleştirme sorusu) | k4 (kapsam dışı). Cache hit'te NULL
-    # (retrieval yapılmadı → kapsama analizine karışmasın).
-    # Haftalık analiz: k3/k4 satırları korpusta karşılıksız kalan soruları verir
-    # → İlayda ile korpus güncelleme turlarının girdisi.
+    # --- Kapsama telemetrisi (Faz 6.4, genişletildi) ------------------------
+    # Hangi fallback katmanında cevaplandı:
+    #   k1  (doğrudan) | k2 (en yakın bilgi) | k3 (genel ilke + netleştirme)
+    #   k3_5 (alan içi ama kayıt yok — ilkelerden cevap + netleştirme)
+    #   k4  (GERÇEKTEN alan dışı — son çare)
+    #   ruhsal_kriz (Faz E: deterministik destek kapısı)
+    # Cache hit'te NULL (retrieval yapılmadı → kapsama analizine karışmasın).
+    # Haftalık analiz: k3/k3_5/k4 satırları korpusta karşılıksız kalan soruları
+    # verir → İlayda ile korpus güncelleme turlarının girdisi.
+    #
+    # UZUNLUK: Faz 6.4'te String(2) idi ('k1'..'k4'). Faz E 'ruhsal_kriz' (11
+    # karakter) yazınca Postgres StringDataRightTruncation fırlatıyor ve KRİZ
+    # ANINDAKİ ANNE 500 alıyordu. SQLite VARCHAR uzunluğunu ZORLAMADIĞI için
+    # yerel testler bunu görmedi. 32'ye genişletildi (migration 0008).
     retrieval_layer: Mapped[str | None] = mapped_column(
-        String(2), nullable=True, index=True)
+        String(32), nullable=True, index=True)
     # O sorgudaki en yüksek retrieval skoru (eşikten bağımsız ham değer).
     top_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 

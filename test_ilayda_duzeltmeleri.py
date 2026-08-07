@@ -565,9 +565,14 @@ def bolum_E():
         hits = chatbot.retrieve(soru, top_k=1, min_score=0.0)
         top = float(hits[0]["_score"]) if hits else 0.0
         bantlar, yas_ay = chatbot.bant_coz(soru)
+        # Faz E-2: katman kararı artık ebeveynlik + kapsam-dışı sinyallerini de
+        # kullanıyor. Bu çağrı motorun kullandığı argümanların TAMAMINI vermeli;
+        # eksik verilirse test motordan farklı bir katman hesaplar (yanlış KALDI).
         katman = chatbot._katman_belirle(
             top, chatbot._alan_sinyali(soru, yas_ay),
-            bool(chatbot.yas_bandi_blok(bantlar, yas_ay)))
+            bool(chatbot.yas_bandi_blok(bantlar, yas_ay)),
+            ebeveynlik=chatbot._ebeveynlik_sinyali(soru),
+            kapsam_disi=chatbot._kapsam_disi_sinyali(soru))
         rec("E-katman", f"'{soru[:38]}' → {beklenen}", katman == beklenen,
             f"bulunan={katman} top={top:.3f}")
 

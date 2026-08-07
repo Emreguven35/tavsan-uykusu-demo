@@ -266,7 +266,27 @@ cevapladığını raporlar (`ChatResp.retrieval_layer`):
 | **k1** | Alan içi, `top_score ≥ 0.55` | Metodolojiden doğrudan cevap |
 | **k2** | Alan içi, `top_score ≥ 0.40` **veya** yaş bandı çözüldü | Eşik bir kademe düşer (−0.05) + yaş bandı genişletme; "en yakın bilgiye göre" çerçevelenir |
 | **k3** | Alan içi ama skor düşük | Yaş-bağımsız **genel ilkeler** (`global_rule:*`) havuza girer + cevabın sonunda **1 netleştirme sorusu** sorulur |
-| **k4** | Alan sinyali yok ve skor düşük | Kibar kapsam-dışı mesajı (**deterministik, LLM çağrılmaz**) |
+| **k3_5** | Alan sözlüğü tutmadı ama soru bebek/ebeveynlik dünyasında | Eksikliği **dürüstçe söyler** ("bu konuda net bir kayıt yok, ama şu ilkeler geçerli…") + genel ilkelerden yardım + netleştirme sorusu. **"Kapsam dışı" DEMEZ** |
+| **k4** | Soru **gerçekten** başka konuda (mama tarifi, vergi, hava durumu) | Kibar kapsam-dışı mesajı (**deterministik, LLM çağrılmaz**) |
+
+### K4 SON ÇAREDİR (Faz E-2 — kalıcı kural)
+
+Cevap üretilemeyen her durumda **önce K3.5 denenir.** K4 artık varsayılan değil,
+**pozitif bir karardır**: yalnız açık kapsam-dışı işareti varsa (`tarif`, `vergi`,
+`hava durumu`…) ya da hiçbir alan/ebeveynlik sinyali yoksa verilir.
+
+**Neden değişti:** "Üçüncü gündeyiz hiç düzelmedi, bırakmak istiyorum" gibi
+gerçek anne cümleleri hiçbir metodoloji terimi içermediği için K4'e düşüyordu —
+tam da yardıma en çok ihtiyaç duyan kullanıcı kapıdan çevriliyordu. Artık
+**duygusal/motivasyon sinyali TEK BAŞINA kapsam-içi sayılır**; metodoloji terimi
+şartı aranmaz.
+
+> **Türkçe kök tuzağı:** alan sözlüğündeki `"ağla"` kökü `"ağlıyor"`u YAKALAMAZ
+> (ağla + ıyor → ağlıyor). "3 gündür ağlıyor hiç düzelmedi" bu yüzden alan dışı
+> sayılıyordu. Kök `"ağl"` olarak düzeltildi; çekim biçimleri testte sabitlendi.
+
+**Serbest yorum yok:** K3.5'te de cevap yalnız KB ilkelerinden kurulur. Bilgi
+gerçekten yoksa bunu söylemek serbesttir, uydurmak değildir.
 
 **Eşik kalibrasyonu ölçümle yapıldı:** kapsam içi sorular `0.63–0.89`, kapsam dışı
 `0.21–0.53`. Skor tek başına yetmiyor (`"mama tarifi"` 0.526 ile `"odası kaç derece"`
@@ -314,8 +334,35 @@ Test: `tests/test_duygusal_ton.py` (golden-set, senaryo başına 2 canlı örnek
 
 ### Kapsama telemetrisi
 
-`chat_messages` tablosuna `retrieval_layer` (k1..k4, indeksli) ve `top_score`
-eklendi (migration `0005`). Cache hit'te ikisi de NULL (retrieval yapılmadı).
+`chat_messages` tablosuna `retrieval_layer` (indeksli) ve `top_score` eklendi
+(migration `0005`). Cache hit'te ikisi de NULL (retrieval yapılmadı).
+
+> ⚠️ **Kolon uzunluğu (migration `0007`):** `retrieval_layer` başlangıçta
+> `String(2)` idi (`k1`..`k4`). Faz E `ruhsal_kriz` (11 karakter) yazmaya
+> başlayınca **Postgres `StringDataRightTruncation` fırlatıyor** ve kriz
+> anındaki anne destek mesajı yerine 500 alıyordu. **SQLite VARCHAR uzunluğunu
+> ZORLAMAZ**, bu yüzden yerel testler bunu görmedi. Kolon `String(32)`'ye
+> genişletildi ve `tests/test_kapsama.py` artık üretilen tüm katman adlarının
+> kolona sığdığını şema seviyesinde doğruluyor. **Yeni katman adı eklerken bu
+> testi kontrol edin.**
+
+### Haftalık kapsama raporu
+
+```bash
+python scripts/kapsama_raporu.py --gun 7            # ekrana
+python scripts/kapsama_raporu.py --gun 7 --json rapor.json
+```
+
+`k3` + `k3_5` satırları **korpusun eksik olduğu yerlerdir** — rapor bunları
+konu başlıklarına göre gruplar (gece uyanma, ağlama/motivasyon, beslenme…) ve
+örnek soruları listeler. Bu liste İlayda'ya gider ve korpus güncelleme turunun
+girdisi olur; **kalıcı çözüm budur, sözlük yamamak değil.**
+
+Rapor `k4`'e düşenleri de ayrı gösterir: aralarında alan içi bir soru varsa bu,
+alan sözlüğünün eksik olduğunu gösterir (K3.5 kapısı kaçırmış demektir).
+
+> **KVKK:** rapor soru metnini içerir (eksik konuyu görmenin tek yolu) ama
+> `user_id` **hiç girmez**. Dışarı paylaşırken kişisel ayrıntı kontrolü yapılmalı.
 
 Haftalık korpus boşluğu analizi — İlayda ile güncelleme turlarının girdisi:
 

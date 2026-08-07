@@ -782,8 +782,13 @@ UYKU_ALANI_KOKLERI = (
     "uyku", "uyu", "uyan", "uyut", "yat", "nap", "şeker", "kestir",
     "gece", "gündüz", "sabah", "akşam", "rutin", "düzen", "program", "çizelge",
     "emzik", "emerek", "beşik", "yatak", "oda", "sıcaklık", "derece", "ortam",
-    "karanlık", "ışık", "gürültü", "kundak", "ağla", "kucak", "sallama",
+    "karanlık", "ışık", "gürültü", "kundak", "kucak", "sallama",
     "eğitim", "regres", "diş", "büyüme atağ", "biberon", "meme", "beslen",
+    # TÜRKÇE ÜNLÜ DEĞİŞİMİ TUZAĞI: "ağla" kökü "ağlıyor"/"ağlıyordu"/"ağlamış"
+    # biçimlerini YAKALAMAZ (ağla + ıyor → ağlıyor). Gerçek anne cümlesi
+    # "3 gündür ağlıyor hiç düzelmedi" bu yüzden ALAN DIŞI sayılıyordu.
+    # Kök "ağl" olmalı; "ağlı" ve "ağla" ikisini de kapsar.
+    "ağl",
 )
 # Tıbbi terimler: bu sorular ASLA K4 (kapsam dışı) sayılmaz — tıbbi sınır
 # kapısının çalışması için LLM katmanına düşmeleri gerekir (çocuk doktoru yanıtı).
@@ -798,15 +803,49 @@ MEDIKAL_TERIMLER = (
 # metodoloji terimi içermediği için K4'e düşüyor ve tam da motivasyona en çok
 # ihtiyaç duyan anne kapıdan çevriliyordu.
 MOTIVASYON_TERIMLERI = (
-    "vazgeç", "pes et", "bırakmak istiyor", "bıraksam", "devam edemiyor",
-    "dayanamıyor", "dayanamam", "yorgun", "bitkin", "tükendi", "çaresiz",
-    "moral", "motivasyon", "umut", "güven bağ", "bağlanma", "travma",
-    "zarar ver", "kötü anne", "suçluluk", "pişman", "işe yaramıyor",
+    # Pes etme / vazgeçme — GERÇEK ANNE DİLİ. Bu cümlelerin çoğunda hiçbir
+    # metodoloji terimi geçmez; sözlük onları yakalamazsa cevapsız kalırlar.
+    "vazgeç", "pes et", "pes ett", "bırakmak istiyor", "bıraksam", "bırakıyorum",
+    "devam edemiyor", "devam edemeyeceğ", "dayanamıyor", "dayanamam",
+    "yapamıyorum", "yapamayacağ", "beceremiyor", "becerem", "başaramıyor",
+    "başaramad", "olmuyor", "olmadı", "işe yaramıyor", "işe yaramad", "boşuna",
+    "hiç düzelmedi", "düzelmiyor", "değişen bir şey yok", "fark etmiyor",
+    "denedim", "denedik", "yürümüyor", "işe yaramaz", "sonuç alamı",
+    "umudum", "umutsuz", "moral", "motivasyon",
+    # Ebeveynin duygu durumu
+    "yorgun", "bitkin", "tükendi", "çaresiz", "kötü anne", "suçluluk", "pişman",
+    # Ağlama/bağlanma kaygısı
+    "güven bağ", "bağlanma", "travma", "zarar ver",
+)
+
+
+# --- KAPSAM DIŞI: K4 artık VARSAYILAN değil, POZİTİF bir karardır -----------
+# Eski davranış: "alan sözlüğünde yoksa K4" → sözlükte olmayan her gerçek anne
+# cümlesi ("ben beceremiyorum") kapıdan çevriliyordu. Yeni kural: K4 yalnızca
+# soru GERÇEKTEN başka bir konudaysa verilir; onun dışında en kötü ihtimalle
+# K3.5 (ilkelerden cevap + netleştirme sorusu) çalışır.
+KAPSAM_DISI_KOKLERI = (
+    "tarif", "yemek yap", "kek", "kurabiye", "çorba", "puf böre",
+    "vergi", "beyanname", "fatura", "kredi", "borsa", "döviz", "faiz",
+    "hava durumu", "maç", "skor tahmin", "seçim", "siyaset", "tatil rezervas",
+    "bilet al", "kargo", "sipariş", "telefon öner", "yazılım", "kod yaz",
+)
+
+# Bebek/ebeveynlik alanı — uyku metodolojisi terimleri geçmese bile sorunun
+# bu uygulamanın dünyasına ait olduğunu gösterir (K3.5 kapısı).
+EBEVEYNLIK_KOKLERI = (
+    "bebek", "bebeğ", "çocuk", "kız", "oğl", "anne", "baba", "ebeveyn",
+    "aylık", "haftalık", "yaşında", "kreş", "bakıcı", "kardeş", "aile",
+    "ben ", "biz ", "bizde", "bende", "evde", "bizim",
 )
 
 
 def _alan_sinyali(soru: str, yas_ay: float | None) -> bool:
-    """Soru uyku metodolojisi alanına giriyor mu? (yaş belirtimi de sinyaldir)"""
+    """Soru uyku metodolojisi alanına giriyor mu? (yaş belirtimi de sinyaldir)
+
+    FAZ E-2: duygusal/motivasyon sinyali TEK BAŞINA yeterlidir — metodoloji
+    terimi şartı ARANMAZ. "Bırakmak istiyorum" diyen anne, cümlesinde 'uyku'
+    kelimesi geçmese bile alan içidir."""
     if yas_ay is not None:
         return True
     low = tr_lower_safe(soru)
@@ -815,9 +854,49 @@ def _alan_sinyali(soru: str, yas_ay: float | None) -> bool:
             or any(k in low for k in MOTIVASYON_TERIMLERI))
 
 
+def _kapsam_disi_sinyali(soru: str) -> bool:
+    """Soru AÇIKÇA başka bir konuda mı? (mama tarifi, vergi, hava durumu...)"""
+    low = tr_lower_safe(soru)
+    return any(k in low for k in KAPSAM_DISI_KOKLERI)
+
+
+def _ebeveynlik_sinyali(soru: str) -> bool:
+    """Metodoloji terimi geçmese de soru bebek/ebeveynlik dünyasına ait mi?
+
+    K3.5 kapısı: burada True dönen ama retrieval'ı zayıf olan sorular K4'e
+    DÜŞMEZ; KB'nin genel ilkelerinden cevaplanır + netleştirme sorusu sorulur."""
+    low = tr_lower_safe(soru)
+    return (any(k in low for k in EBEVEYNLIK_KOKLERI)
+            or duygu_sinyali(soru) is not None)
+
+
 def tr_lower_safe(s: str) -> str:
     """Türkçe güvenli küçültme (I/İ tuzağı) — alan sözlüğü eşleşmesi için."""
     return (s or "").replace("I", "ı").replace("İ", "i").lower()
+
+
+def _motivasyon_birimleri(limit: int = 8) -> list[dict]:
+    """KB'nin küratörlü 'ağlama ve motivasyon' birimleri.
+
+    NEDEN: "ben beceremiyorum" gibi cümlelerde semantik retrieval, İlayda'nın
+    DANIŞMANLIK SÜRECİNİ anlattığı ham transkript parçalarını (mesajlaşma
+    saatleri, rapor gönderme, ücret iadesi) en üste taşıyabiliyor. Bunlar anneye
+    yardımcı olmadığı gibi, modelin cevabı danışmanlığa yönlendirmesine yol
+    açıyordu (ölçüldü). Metin bazlı filtre denendi ve DEĞERLİ içeriği de eliyordu
+    (destek detoksu, 'metotta yanında olmak var').
+
+    Çözüm: skorlara DOKUNMADAN, duygusal sorularda küratörlü motivasyon
+    birimlerini bağlamın başına koymak — model temiz ve doğru malzemeyi bulur."""
+    units = (_state.get("units") or []) if isinstance(_state, dict) else []
+    out = []
+    for u in units:
+        if "aglama_ve_motivasyon" in str(u.get("chunk_id", "")):
+            ek = dict(u)
+            ek.setdefault("_score", 0.0)          # skor yok: sıralamaya karışmaz
+            out.append(ek)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _genel_ilke_birimleri(limit: int = K3_ILKE_LIMIT) -> list[dict]:
@@ -836,8 +915,22 @@ def _genel_ilke_birimleri(limit: int = K3_ILKE_LIMIT) -> list[dict]:
     return out
 
 
-def _katman_belirle(top_score: float, alan_ici: bool, bant_var: bool) -> str:
-    """Hangi fallback katmanında cevaplanacak? Dönen: 'k1'|'k2'|'k3'|'k4'."""
+def _katman_belirle(top_score: float, alan_ici: bool, bant_var: bool,
+                    ebeveynlik: bool = False, kapsam_disi: bool = False) -> str:
+    """Hangi fallback katmanında cevaplanacak?
+
+    Dönen: 'k1'|'k2'|'k3'|'k3_5'|'k4'.
+
+    GENEL İLKE (Faz E-2): **K4 SON ÇAREDİR.** Cevap üretilemeyen her durumda
+    önce K3.5 denenir — soru bebek uykusu/ebeveynlik dünyasındaysa KB'nin genel
+    ilkelerinden cevaplanır ve netleştirme sorusu sorulur. K4 yalnızca soru
+    GERÇEKTEN başka bir konudaysa (mama tarifi, vergi, hava durumu) verilir.
+
+    ebeveynlik/kapsam_disi varsayılanları geriye uyumluluk içindir (eski
+    çağrılar 3 argümanla da çalışır)."""
+    # Açıkça başka bir konu → K4 (skor yüksekse bile: "mama tarifi" 0.53 alıyor).
+    if kapsam_disi and top_score < K1_MIN_SCORE:
+        return "k4"
     if alan_ici and top_score >= K1_MIN_SCORE:
         return "k1"
     if alan_ici and (top_score >= K2_MIN_SCORE or bant_var):
@@ -847,7 +940,45 @@ def _katman_belirle(top_score: float, alan_ici: bool, bant_var: bool) -> str:
     # Alan sinyali yok: skor çok yüksekse yine de içeri al (sözlük her şeyi bilemez).
     if top_score >= K1_MIN_SCORE:
         return "k1"
+    # Sözlük tutmadı ama soru bu uygulamanın dünyasına ait görünüyor → K3.5.
+    if ebeveynlik or top_score >= K2_MIN_SCORE:
+        return "k3_5"
     return "k4"
+
+
+# Katmana özel çerçeveleme kuralı (user prompt'a eklenir). DEĞİŞMEZLER: tıbbi
+# sınır ve "yalnız KB'den cevapla" kuralları HİÇBİR katmanda gevşemez
+# (SYSTEM_PROMPT'ta sabit). Modül seviyesinde: testler doğrudan denetleyebilsin.
+KATMAN_KURALLARI = {
+    "k1": "",
+    "k2": ("\n- Bu soruda birebir kayıt bulunmayabilir: cevabını EN YAKIN "
+           "bilgiye dayandır ve bunu doğal bir dille belirt "
+           "(örn. 'en yakın yaş bandına göre')."),
+    "k3": ("\n- Bu soruda spesifik kayıt YOK. Yukarıdaki GENEL İLKELERDEN "
+           "yararlanarak genel bir çerçeve ver (uyku ortamı, rutin, kendi "
+           "kendine dalma, uyanıklık penceresi mantığı, ağlama ve motivasyon). "
+           "Genel ilkelerin dışına ÇIKMA, kendi bilgini ekleme."
+           "\n- Cevabın SONUNDA kullanıcıya TEK bir netleştirme sorusu sor "
+           "(örn. bebeğin kaç aylık olduğu, gece kaç kez uyandığı) ki "
+           "sohbet devam edebilsin. Asla 'bilgim yok' deyip bırakma."),
+    # K3.5 — alan içi ama korpusta karşılığı zayıf. ASLA "kapsam dışı" deme;
+    # eksikliği DÜRÜSTÇE söyle, sonra geçerli ilkelerden yardım et.
+    "k3_5": ("\n- Bu soru bebek uykusu/ebeveynlik alanında ama bilgi "
+             "tabanında BU SORUYA ÖZEL net bir kayıt yok. Cevabına bunu "
+             "dürüstçe söyleyerek başla — şu forma yakın: 'Bu konuda "
+             "İlayda'nın yönteminde net bir kayıt yok, ama şu ilkeler "
+             "geçerli...'. 'Kapsam dışı' ifadesini ASLA kullanma, kullanıcıyı "
+             "geri çevirme."
+             "\n- Ardından yukarıdaki GENEL İLKELERDEN yararlanarak "
+             "yardımcı olabildiğin kadarını ver (uyku ortamı, rutin, kendi "
+             "kendine dalma, uyanıklık penceresi mantığı, ağlama ve "
+             "motivasyon). İLKELERİN DIŞINA ÇIKMA: kendi genel bilgini, "
+             "internetten hatırladığını ya da tahminini EKLEME. Bilgi "
+             "gerçekten yoksa bunu söylemen serbest, uydurman değil."
+             "\n- Cevabın SONUNDA kullanıcıya TEK bir netleştirme sorusu sor "
+             "(bebeğin yaşı, mevcut düzeni, neyi denediği) ki doğru kaydı "
+             "bulabilelim."),
+}
 
 
 # K4 — kapsam dışı. Deterministik metin: LLM çağrılmaz (maliyet yok, sapma yok).
@@ -1146,6 +1277,22 @@ DUYGU_KURALI_ZORLANMA = (
     "('Bu bir süreç ve bunun bir sonu var', 'Yolun sonu ışık', 'Elim omzunuzda')."
 )
 
+# Zorlanan anne sorularında getirilen kayıtlar danışmanlık sürecini anlatan ham
+# parçalar olabiliyor ve model bunları cevaba taşıyabiliyor.
+#
+# DİKKAT — YASAKLI KELİMEYİ YAZMAK ONU TETİKLİYOR: bu kuralın ilk hâli yasaklı
+# kanalları tek tek sayıyordu ("rapor göndermeye, WhatsApp'a, danışmana...").
+# Ölçüm sızıntıyı 1/8'den 3/8'e ÇIKARDI — model kelimeleri talimattan alıp
+# cevabına taşıdı ("raporları mı?" diye sordu). Kural artık hiçbir kanal adı
+# GEÇİRMEDEN, olumlu biçimde yazılır.
+_DANISMANLIK_YASAGI = (
+    "\n- Yardımı BURADA, kendi cevabında tam ve kendine yeter biçimde ver. "
+    "Kullanıcıyı başka bir kişiye, kanala ya da sürece havale etme; kaynak "
+    "parçalarda böyle bir işleyiş anlatılıyorsa cevabına taşıma."
+)
+DUYGU_KURALI_AGLAMA += _DANISMANLIK_YASAGI
+DUYGU_KURALI_ZORLANMA += _DANISMANLIK_YASAGI
+
 
 def duygu_sinyali(soru: str) -> str | None:
     """Kriz/sıkıntı ALTINDAKİ duygusal kademe: 'aglama_endisesi' | 'zorlanma' | None.
@@ -1233,7 +1380,9 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
     # Katman kararı için ham en yüksek skor (eşikten bağımsız ölçülür).
     _olcum = retrieved or retrieve(soru, top_k=1, min_score=0.0)
     top_score = float(_olcum[0].get("_score", 0.0)) if _olcum else 0.0
-    katman = _katman_belirle(top_score, _alan_sinyali(soru, yas_ay), bool(bant_blok))
+    katman = _katman_belirle(top_score, _alan_sinyali(soru, yas_ay), bool(bant_blok),
+                             ebeveynlik=_ebeveynlik_sinyali(soru),
+                             kapsam_disi=_kapsam_disi_sinyali(soru))
 
     # FAZ E, KADEME 1: ruhsal sıkıntı ifade eden anne ASLA "bu soru kapsam dışı"
     # cevabı almaz. Duygu ifadesi retrieval skorunu düşürebilir (metodoloji
@@ -1260,8 +1409,8 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
             if all(u.get("chunk_id") != r.get("chunk_id") for r in retrieved):
                 retrieved.append(u)
 
-    # --- K3: yaş-bağımsız genel ilkeler havuza EKLENİR ----------------------
-    if katman == "k3":
+    # --- K3 / K3.5: yaş-bağımsız genel ilkeler havuza EKLENİR ---------------
+    if katman in ("k3", "k3_5"):
         for u in _genel_ilke_birimleri():
             if all(u.get("chunk_id") != r.get("chunk_id") for r in retrieved):
                 retrieved.append(u)
@@ -1272,6 +1421,13 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
                 "anahtar": h, "llm": False, "in_chars": 0,
                 "out_chars": len(KAPSAM_DISI_MESAJ),
                 "retrieval_layer": "k4", "top_score": top_score}
+
+    # Duygusal soruda küratörlü motivasyon birimleri bağlamın BAŞINA konur ki
+    # model ham danışmanlık-süreci parçaları yerine bunları kullansın.
+    if ruhsal == "sikinti" or duygu_sinyali(soru) is not None:
+        _mevcut = {r.get("chunk_id") for r in retrieved}
+        retrieved = [m for m in _motivasyon_birimleri()
+                     if m.get("chunk_id") not in _mevcut] + retrieved
 
     context = "\n\n".join([f"- {c['text']}" for c in retrieved])
     if bant_blok:                       # yaş tablosu bloğu bağlamın BAŞINA
@@ -1291,21 +1447,7 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
                 "anahtar": h, "llm": False, "in_chars": 0, "out_chars": len(msg),
                 "retrieval_layer": katman, "top_score": top_score}
 
-    # Katmana özel çerçeveleme kuralı. DEĞİŞMEZLER: tıbbi sınır ve "yalnız KB'den
-    # cevapla" kuralları HİÇBİR katmanda gevşemez (SYSTEM_PROMPT'ta sabit).
-    katman_kurali = {
-        "k1": "",
-        "k2": ("\n- Bu soruda birebir kayıt bulunmayabilir: cevabını EN YAKIN "
-               "bilgiye dayandır ve bunu doğal bir dille belirt "
-               "(örn. 'en yakın yaş bandına göre')."),
-        "k3": ("\n- Bu soruda spesifik kayıt YOK. Yukarıdaki GENEL İLKELERDEN "
-               "yararlanarak genel bir çerçeve ver (uyku ortamı, rutin, kendi "
-               "kendine dalma, uyanıklık penceresi mantığı). Genel ilkelerin "
-               "dışına ÇIKMA, kendi bilgini ekleme."
-               "\n- Cevabın SONUNDA kullanıcıya TEK bir netleştirme sorusu sor "
-               "(örn. bebeğin kaç aylık olduğu, gece kaç kez uyandığı) ki "
-               "sohbet devam edebilsin. Asla 'bilgim yok' deyip bırakma."),
-    }.get(katman, "")
+    katman_kurali = KATMAN_KURALLARI.get(katman, "")
 
     # FAZ E, KADEME 1: sıkıntı çerçevesi katman kuralının ÜSTÜNE eklenir ve
     # onu geçersiz kılar (K3'ün "netleştirme sorusu sor" talimatı dahil —
