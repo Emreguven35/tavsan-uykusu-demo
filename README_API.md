@@ -278,6 +278,40 @@ daha kötüdür. Skor `≥0.55` ise sözlük eşleşmese bile soru alan içi say
 asla K4 sayılmaz, doktor yönlendirmesi kapısına düşer); Claude K3'te bile yalnız
 KB ilkelerinden konuşur, serbest bilgi eklemez.
 
+## 6.7 Faz E — duygusal ton ve annenin ruhsal durumu
+
+`/chat` cevapları bilgi verirken İlayda'nın sıcaklığını da taşır. Ton kuralları
+`SYSTEM_PROMPT`'ta; ancak duygusal sinyal yakalandığında aynı kural **sorunun
+yanına** (user prompt'un kural listesinin BAŞINA) enjekte edilir — yalnız sistem
+promptuna bırakıldığında empatik açılış ve somut veri örnekten örneğe düşüyordu.
+
+**Dört kademe** (`ruhsal_durum_tespit` + `duygu_sinyali`):
+
+| Kademe | Tetik | Davranış | `retrieval_layer` |
+|---|---|---|---|
+| **kriz** | Anne kendine/bebeğine zarar İFADE ediyor (birinci tekil şahıs) | **LLM çağrılmaz.** Sabit destek mesajı + profesyonel yardım. Uyku tekniği ANLATILMAZ, cache'e yazılmaz | `ruhsal_kriz` |
+| **sıkıntı** | Derin çaresizlik / tükenmişlik | LLM çağrılır, prompt'a "önce duygusal destek + uzman yönlendirmesi, teknik anlatma" zorunlu eklenir. **K4'e düşmez** (K3'e çekilir) | k1..k3 |
+| **ağlama endişesi** | Ağlamanın zararı / güven bağı kaygısı | Empatik açılış + İlayda'nın ŞARTLARI + somut umut verisi (45 dk → 5 dk) zorunlu | k1..k3 |
+| **zorlanma** | Yorgunluk, pes etme eşiği | İlk cümle duygusal tanıma, ardından somut yönlendirme | k1..k3 |
+
+> **Kritik ayrım:** zarar **ifadesi** ile zarar **sorusu** aynı şey değildir.
+> "bebeğime zarar vereceğimden korkuyorum" → kriz. "ağlamanın bebeğime zararı
+> olur mu" → sıradan ağlama sorusu. Kalıp birinci tekil şahıs çekimi zorunlu
+> kılar; aksi hâlde en sık sorulan ağlama sorusu kriz kapısına düşer.
+
+**Mutlak iddia yasağı:** "ağlama zarar vermez" MUTLAK olarak kurulmaz. Yalnız
+İlayda'nın şartlarıyla verilir — *"tıbbi bir problem ve duygu regülasyon
+bozukluğu yoksa genel olarak zarar oluşturmuyor"* + *"teknik olarak kesin bir
+ifade kullanılamaz"*. 3-6 haftalık süreç çerçevesi de aynı şartlarla verilir.
+
+**Alan sözlüğü genişledi:** ağlama/güven bağı/motivasyon artık KB'de küratörlü
+bir bölüm (`global_rules.aglama_ve_motivasyon`), dolayısıyla bu sorular alan
+içidir. Önceden "Üçüncü gündeyiz, bırakmak istiyorum" gibi bir cümle hiçbir
+metodoloji terimi içermediği için **K4'e düşüyor** ve tam da motivasyona en çok
+ihtiyaç duyan anne kapıdan çevriliyordu.
+
+Test: `tests/test_duygusal_ton.py` (golden-set, senaryo başına 2 canlı örnek).
+
 ### Kapsama telemetrisi
 
 `chat_messages` tablosuna `retrieval_layer` (k1..k4, indeksli) ve `top_score`

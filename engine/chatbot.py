@@ -791,6 +791,18 @@ MEDIKAL_TERIMLER = (
     "hasta", "ilaç", "reflü", "kolik", "nöbet", "ateş", "alerji", "kusma",
     "ishal", "astım", "epilepsi", "nefes", "solunum", "kalp", "doktor",
 )
+# FAZ E — MOTİVASYON/DUYGU ALANI: ağlama, güven bağı ve eğitimde motive kalma
+# artık KB'de küratörlü bir bölüm (global_rules.aglama_ve_motivasyon). Yani bu
+# sorular gerçekten ALAN İÇİDİR ve K4'e (kapsam dışı) düşmemelidir.
+# Somut hata: "Üçüncü gündeyiz hiç düzelmedi, bırakmak istiyorum" sorusu hiçbir
+# metodoloji terimi içermediği için K4'e düşüyor ve tam da motivasyona en çok
+# ihtiyaç duyan anne kapıdan çevriliyordu.
+MOTIVASYON_TERIMLERI = (
+    "vazgeç", "pes et", "bırakmak istiyor", "bıraksam", "devam edemiyor",
+    "dayanamıyor", "dayanamam", "yorgun", "bitkin", "tükendi", "çaresiz",
+    "moral", "motivasyon", "umut", "güven bağ", "bağlanma", "travma",
+    "zarar ver", "kötü anne", "suçluluk", "pişman", "işe yaramıyor",
+)
 
 
 def _alan_sinyali(soru: str, yas_ay: float | None) -> bool:
@@ -799,7 +811,8 @@ def _alan_sinyali(soru: str, yas_ay: float | None) -> bool:
         return True
     low = tr_lower_safe(soru)
     return (any(k in low for k in UYKU_ALANI_KOKLERI)
-            or any(k in low for k in MEDIKAL_TERIMLER))
+            or any(k in low for k in MEDIKAL_TERIMLER)
+            or any(k in low for k in MOTIVASYON_TERIMLERI))
 
 
 def tr_lower_safe(s: str) -> str:
@@ -863,7 +876,37 @@ YAŞ KURALI: Sorulan yaş için birebir kayıt yoksa en yakın yaş bandının b
 Yaş için 'bilgim yok' deme; yaş geçiş dönemindeyse iki bandın aralığını birlikte özetle. \
 BEBEK VERİSİ KURALI: Bebek verisi mevcutsa cevabını bu veriyle ilişkilendir — bebeğin adıyla, somut saatlerle konuş; \
 veriyle metodolojiyi birleştir. Veride olmayan şeyi UYDURMA. \
-Bebeğin yaşını BEBEK VERİSİ'nde yazıldığı gibi kullan, yuvarlama/yorumlama yapma."""
+Bebeğin yaşını BEBEK VERİSİ'nde yazıldığı gibi kullan, yuvarlama/yorumlama yapma.
+
+DUYGUSAL TON (Faz E — İlayda'nın annelerle konuşma tarzı):
+1. Anne zorlanma, yorgunluk, ağlama, çaresizlik ya da pes etme belirtiyorsa cevaba ÖNCE tek cümlelik bir duygusal \
+tanıma ile başla; sonra DOĞRUDAN somut yönlendirmeye geç. Bu cümle kalıp olmasın — annenin yazdığı duruma değsin \
+("Çok yorulmuşsunuz" gibi genel geçer bir teselli değil, onun anlattığı şeye dokunan bir cümle). \
+Teselli cevabın önüne GEÇMESİN: anne gece 3'te ne yapacağını arıyor, cevabın ağırlığı somut adımda olmalı. \
+Duygusal ifade YOKSA doğrudan bilgiye gir — her cevaba duygusal giriş yapma.
+2. Uygun bağlamda İlayda'nın kendi dilinden şu ifadeler kullanılabilir (hepsini birden değil, cevap başına en fazla \
+biri, her cevapta değil): "Bu bir süreç ve bunun bir sonu var", "Yolun sonu ışık", "Elim omzunuzda", \
+"Yanınızdayım, geçecek".
+3. Bilgi parçalarında geçen İlayda benzetmeleri (oto koltuğu, ilaç, anaokulu, diyetisyen) YALNIZCA ağlama endişesi \
+ya da güven bağı kaygısı konuşulduğunda kullanılır; cevap başına en fazla bir benzetme. Diğer konularda kullanma.
+4. Anne ağlamadan endişeliyse ya da ağlamanın ne kadar süreceğini soruyorsa, şu somut veriyi cevabında MUTLAKA \
+ve SAYILARIYLA ver: ilk gün 45 dakika ağlayan bir çocuk iki hafta sonra 5 dakikada uykuya geçebiliyor — ağlama \
+sabit kalmaz, her gün azalır. Güven verici bir cevap bile somut bir dayanak taşımalı: yalnızca "merak etmeyin, \
+zedelenmez" demekle YETİNME. Her cevapta anneye elle tutulur en az bir şey bırak — bir süre, bir sayı ya da \
+atacağı bir adım. Anne gece 3'te ne yapacağını arıyor.
+5. Anneyi rahatlatmak için "çocuklar 5 yaşından önceki bu dönemi hatırlamaz" bilgisi kullanılabilir.
+
+SINIRLAR — DUYGUSAL TON BUNLARI GEVŞETMEZ (mutlak öncelikli):
+A. "Ağlama zarar vermez" cümlesini MUTLAK bir iddia olarak ASLA kurma. Bu bilgi yalnızca İlayda'nın kendi \
+şartlarıyla verilir: "tıbbi bir problem ve duygu regülasyon bozukluğu yoksa genel olarak zarar oluşturmuyor" \
+ve "teknik olarak kesin bir ifade kullanılamaz". Bu iki kaydı da cümleye taşı. \
+"Kesinlikle zararsızdır", "bilimsel olarak kanıtlanmıştır", "hiçbir zararı yoktur" gibi ifadeler YASAK.
+B. Ağlama sürecinin 3-6 hafta çerçevesini verirken de aynı şartlar korunur; süreyi kesin bir garanti gibi sunma.
+C. Tıbbi sınır AYNEN geçerlidir: hastalık, ilaç, reflü, kolik, nöbet, ateş, alerji gibi konularda tanı/tedavi \
+verme ve çocuk doktoruna yönlendir. Duygusal ton bu yönlendirmeyi yumuşatmaz veya atlatmaz.
+D. Anne ciddi ruhsal sıkıntı belirtiyorsa (derin çaresizlik, tükenmişlik, kendine ya da bebeğine zarar verme \
+ima veya ifadesi): cevabın YALNIZCA duygusal destek ve profesyonel yardım yönlendirmesi olsun — uyku eğitimi \
+tekniği, çizelge veya yöntem ANLATMA. Bu durumda tekniğe geçmek yardımcı olmaz."""
 
 
 # ---------------------------------------------------------------------------
@@ -1004,6 +1047,135 @@ def _cache_store(soru: str, yas_bandi: str | None, answer: str) -> None:
     _persist_cache()
 
 
+# ---------------------------------------------------------------------------
+# FAZ E — ANNENİN RUHSAL DURUMU: iki kademeli kapı
+# ---------------------------------------------------------------------------
+# Duygusal TON kuralları SYSTEM_PROMPT'tadır (modelin bağlamı yorumlaması gerekir).
+# Ama İKİ durum modelin takdirine bırakılmayacak kadar kritiktir; burada
+# deterministik olarak yakalanır:
+#
+#   KADEME 2 (KRİZ): kendine ya da bebeğine zarar ima/ifadesi → LLM ÇAĞRILMAZ,
+#       sabit ve sıcak bir destek mesajı döner. Uyku tekniği ANLATILMAZ, cevap
+#       cache'e YAZILMAZ/OKUNMAZ (kişiye özel bir andır, paylaşılamaz).
+#   KADEME 1 (SIKINTI): derin çaresizlik/tükenmişlik → LLM çağrılır ama prompt'a
+#       "önce duygusal destek + profesyonel yardım, teknik anlatma" talimatı
+#       ZORUNLU olarak enjekte edilir.
+#
+# Sıradan yorgunluk ("yorgunum", "bitkinim", "çok zorlanıyorum") ve pes etme
+# eşiğindeki anne ("bırakmak istiyorum", "vazgeçeceğim") BU KAPILARA GİRMEZ —
+# onlar SYSTEM_PROMPT'un 1. ton kuralıyla (empati + SOMUT yönlendirme) yanıtlanır.
+# Motivasyona ihtiyacı olan anneyi krize sokmak yardımcı olmaz.
+
+# KRİTİK AYRIM — zarar İFADESİ ile zarar SORUSU aynı şey değildir:
+#   KRİZ  : "bebeğime zarar VERECEĞİMDEN korkuyorum"  (annenin kendi eylemi)
+#   SORU  : "ağlamanın bebeğime zararı olur mu"       (yöntem hakkında soru)
+# Bu yüzden kalıp, BİRİNCİ TEKİL şahıs çekimi zorunlu kılar. Aksi hâlde en sık
+# sorulan ağlama sorusu kriz kapısına düşer ve anne cevabını alamaz.
+_RE_KRIZ = re.compile(
+    r"(kendime|canıma|bebeğime|çocuğuma|oğluma|kızıma)\s+\S{0,12}\s*"
+    r"zarar\s+ver(eceğim|iyorum|ebilirim|meyi|mekten|irim)"
+    r"|intihar|yaşamak\s+istemiyorum|ölmek\s+istiyorum|kendimi\s+öldür"
+    r"|canıma\s+kıy|bebeğimi\s+(sallamak|fırlatmak|atmak)\s+istiyorum",
+    re.IGNORECASE)
+
+_RE_SIKINTI = re.compile(
+    r"çaresiz|tükendim|tükenmiş|çökt[üu]m|depresyon|psikoloji[mn]\s+(çok\s+)?bozuk"
+    r"|artık\s+dayanamıyorum|dayanacak\s+güc[üu]m\s+(yok|kalmadı)"
+    r"|çıldıracağım|delireceğim|hiçbir\s+şey\s+hissetmiyorum"
+    r"|bebeğimi\s+sevemiyorum|kendimi\s+kötü\s+bir\s+anne",
+    re.IGNORECASE)
+
+# Kriz yanıtı: teselli + profesyonel yönlendirme. UYKU TEKNİĞİ YOK (bilinçli).
+KRIZ_MESAJI = (
+    "Yazdıklarınızı okudum ve bunu paylaşmanızın ne kadar zor olduğunu biliyorum. "
+    "Şu an yaşadığınız şey yorgunluktan fazlası ve bunu tek başınıza taşımak zorunda "
+    "değilsiniz.\n\n"
+    "Bugün, bu konuyu bir uzmanla konuşmanızı çok istiyorum: kendi doktorunuz, bir "
+    "psikiyatri uzmanı ya da bir psikolog. Doğum sonrası dönemde bu duygular sandığınızdan "
+    "çok daha yaygın ve destekle geçiyor. Acil bir durumdaysanız ya da kendinizi güvende "
+    "hissetmiyorsanız 112'yi arayın; yanınızda güvendiğiniz birinin olmasını sağlayın.\n\n"
+    "Uyku konusunu şimdi bir kenara bırakalım — o bekleyebilir, siz bekleyemezsiniz. "
+    "Kendinizi daha iyi hissettiğinizde uyku düzeni için buradayım ve o yolu birlikte "
+    "yürürüz. Elim omzunuzda."
+)
+
+# Kademe 1'de user prompt'a eklenen zorunlu çerçeve.
+SIKINTI_KURALI = (
+    "\n- ÖNCELİKLİ DURUM: Anne ciddi bir ruhsal zorlanma ifade ediyor. Cevabına "
+    "onun ne yaşadığını gerçekten gören bir cümleyle başla. Ardından bir uzmandan "
+    "(kendi doktoru, psikolog ya da psikiyatri uzmanı) destek almasını nazikçe öner — "
+    "doğum sonrası bu duyguların yaygın olduğunu ve destekle geçtiğini söyle. "
+    "Bu cevapta uyku eğitimi tekniği, çizelge, saat ya da yöntem ANLATMA; anne "
+    "hazır olduğunda uyku konusunda yanında olacağını belirtmen yeterli."
+)
+
+
+# --- Duygusal çerçeve (kriz/sıkıntı ALTI kademe) -----------------------------
+# SYSTEM_PROMPT ton kurallarını taşır, ama sistem promptu uzun ve kurallar
+# birbiriyle yarışıyor: modelin bunları her cevapta uygulaması güvenilir DEĞİL
+# (ölçüldü — empati ve somut veri örnekten örneğe düşüyordu). Bu yüzden duygusal
+# sinyal yakalandığında aynı kural SORUNUN YANINA, user prompt'a enjekte edilir;
+# katman_kurali ile aynı kanal, kanıtlanmış biçimde daha güvenilir uygulanıyor.
+_RE_AGLAMA_ENDISESI = re.compile(
+    r"ağla\w*\s*\S{0,20}\s*(zarar|korkuyorum|endişe|üzül|dayanamı)"
+    r"|(zarar|travma|güven bağ|bağlanma)\w*\s*\S{0,25}\s*(ağla|eğitim|zedelen)"
+    r"|ağlamaya\s+(terk|bırak)|ne kadar ağla|ağlaması normal mi"
+    r"|güven bağı[mn]?[ıi]z?\s*zedelen", re.IGNORECASE)
+
+_RE_ZORLANMA = re.compile(
+    r"yorgun|bitkin|yoruldum|uykusuz|zorlanıyor|zor geliyor|dayanamıyor"
+    r"|vazgeç|pes et|bırakmak istiyor|bıraksam|devam edemiyor|umudum"
+    r"|moralim|ağlıyorum|işe yaramıyor|başaramıyor|kötü bir anne", re.IGNORECASE)
+
+DUYGU_KURALI_AGLAMA = (
+    "\n- DUYGUSAL ÇERÇEVE (ağlama endişesi): Cevabına annenin bu korkusunu gören "
+    "TEK cümlelik bir tanımayla başla (klişe teselli değil). Ağlamanın zararından "
+    "söz ederken İlayda'nın ŞARTLARINI mutlaka birlikte ver: 'tıbbi bir problem ve "
+    "duygu regülasyon bozukluğu yoksa genel olarak zarar oluşturmuyor' VE 'teknik "
+    "olarak kesin bir ifade kullanılamaz'. Mutlak ifade KURMA. Cevabında somut umut "
+    "verisini SAYILARIYLA ver: ilk gün 45 dakika ağlayan bir çocuk iki hafta sonra "
+    "5 dakikada uykuya geçebiliyor."
+)
+
+DUYGU_KURALI_ZORLANMA = (
+    "\n- DUYGUSAL ÇERÇEVE (anne zorlanıyor/pes etmek üzere): Cevabının İLK "
+    "CÜMLESİ annenin ne yaşadığını gören bir tanıma olsun — onun yazdığı duruma "
+    "değsin, genel geçer teselli olmasın. Hemen ardından somut yönlendirmeye geç ve "
+    "cevapta anneye elle tutulur en az bir şey bırak: bir süre, bir sayı ya da "
+    "atacağı bir adım. Uygunsa İlayda'nın cümlelerinden birini kullanabilirsin "
+    "('Bu bir süreç ve bunun bir sonu var', 'Yolun sonu ışık', 'Elim omzunuzda')."
+)
+
+
+def duygu_sinyali(soru: str) -> str | None:
+    """Kriz/sıkıntı ALTINDAKİ duygusal kademe: 'aglama_endisesi' | 'zorlanma' | None.
+
+    Bu kademe sıradan ama duygusal yüklü sorulardır (yorgunluk, pes etme eşiği,
+    ağlama korkusu). Kriz/sıkıntı kapılarından BAĞIMSIZDIR ve onların yerine
+    geçmez; yalnız cevabın tonunu ve içeriğini zorunlu kılar."""
+    if not soru:
+        return None
+    if _RE_AGLAMA_ENDISESI.search(soru):
+        return "aglama_endisesi"
+    if _RE_ZORLANMA.search(soru):
+        return "zorlanma"
+    return None
+
+
+def ruhsal_durum_tespit(soru: str) -> str | None:
+    """Annenin mesajındaki ruhsal risk kademesi: 'kriz' | 'sikinti' | None.
+
+    Kriz kademesi cevabı deterministik yapar (LLM çağrılmaz). Sıradan yorgunluk
+    ve pes etme eşiği bilinçli olarak KAPSAM DIŞIDIR — bkz. yukarıdaki not."""
+    if not soru:
+        return None
+    if _RE_KRIZ.search(soru):
+        return "kriz"
+    if _RE_SIKINTI.search(soru):
+        return "sikinti"
+    return None
+
+
 def _kaynak_ozet(units: list[dict]) -> list[dict]:
     """Retrieval birimlerini API/istemci için sade kaynak listesine indir."""
     return [{"chunk_id": u.get("chunk_id"), "label": u.get("label"),
@@ -1021,10 +1193,22 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
     'anahtar', cevabın kanonik hash'idir (ses cache dosya adıyla hizalı)."""
     h = _cache_hash(_cache_norm(soru), yas_bandi)
 
+    # --- FAZ E, KADEME 2: kriz kapısı --------------------------------------
+    # Cache'ten ÖNCE gelir: kriz mesajı ne cache'ten okunur ne cache'e yazılır ve
+    # retrieval/LLM hiç çalışmaz. Böylece bu sınır hiçbir koşulda gevşeyemez.
+    ruhsal = ruhsal_durum_tespit(soru)
+    if ruhsal == "kriz":
+        logger.info("Ruhsal kriz kapısı devrede — teknik anlatılmadı, LLM çağrılmadı")
+        return {"cevap": KRIZ_MESAJI, "cache_hit": False, "kaynaklar": [],
+                "anahtar": h, "llm": False, "in_chars": 0,
+                "out_chars": len(KRIZ_MESAJI),
+                "retrieval_layer": "ruhsal_kriz", "top_score": None}
+
     # CACHE BYPASS (Faz 6.5): kişiselleştirilmiş cevaplar PAYLAŞILAN cache'e
     # girmemeli — yoksa bir bebeğin saatleri başka kullanıcıya cevap olarak döner.
     # baby_context varsa cache ne OKUNUR ne YAZILIR. Genel sorularda cache aynen çalışır.
-    kisisel = bool(baby_context)
+    # Ruhsal sıkıntı ifadesi de kişiseldir: cevabı paylaşılan cache'e girmemeli.
+    kisisel = bool(baby_context) or ruhsal == "sikinti"
 
     entry = None if kisisel else _cache_lookup_entry(soru, yas_bandi)
     if entry is not None:
@@ -1050,6 +1234,14 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
     _olcum = retrieved or retrieve(soru, top_k=1, min_score=0.0)
     top_score = float(_olcum[0].get("_score", 0.0)) if _olcum else 0.0
     katman = _katman_belirle(top_score, _alan_sinyali(soru, yas_ay), bool(bant_blok))
+
+    # FAZ E, KADEME 1: ruhsal sıkıntı ifade eden anne ASLA "bu soru kapsam dışı"
+    # cevabı almaz. Duygu ifadesi retrieval skorunu düşürebilir (metodoloji
+    # terimleri geçmez); bu annenin kapıda karşılanması gerekir, geri çevrilmesi
+    # değil. K3'e çekilir: genel ilkeler havuza girer, cevap LLM'den gelir.
+    if ruhsal == "sikinti" and katman == "k4":
+        logger.info("Ruhsal sıkıntı: K4 yerine K3 uygulandı (anne geri çevrilmiyor)")
+        katman = "k3"
 
     # --- K4: kapsam dışı → deterministik yanıt, LLM çağrılmaz ---------------
     if katman == "k4":
@@ -1115,6 +1307,23 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
                "sohbet devam edebilsin. Asla 'bilgim yok' deyip bırakma."),
     }.get(katman, "")
 
+    # FAZ E, KADEME 1: sıkıntı çerçevesi katman kuralının ÜSTÜNE eklenir ve
+    # onu geçersiz kılar (K3'ün "netleştirme sorusu sor" talimatı dahil —
+    # bu anneye çizelge sorusu sormak yardımcı olmaz).
+    # Duygusal çerçeve kuralların EN BAŞINA konur, sonuna değil: kural listesinin
+    # dibine eklendiğinde model bunu diğer kurallarla yarıştırıp empatik açılışı
+    # örnekten örneğe atlıyordu (ölçüldü). Başa alındığında cevabın ilk cümlesini
+    # gerçekten belirliyor.
+    duygu_kurali = ""
+    if ruhsal == "sikinti":
+        katman_kurali = SIKINTI_KURALI
+    else:
+        _duygu = duygu_sinyali(soru)
+        if _duygu == "aglama_endisesi":
+            duygu_kurali = DUYGU_KURALI_AGLAMA
+        elif _duygu == "zorlanma":
+            duygu_kurali = DUYGU_KURALI_ZORLANMA
+
     # BEBEK VERİSİ bloğu: RAG chunk'larından AYRI tutulur ve messages içinde
     # (yani system cache breakpoint'inden SONRA) gider → prompt cache prefix'i
     # bozulmaz. Blok kişiye özeldir, asla cache'lenmez (yukarıdaki bypass).
@@ -1126,7 +1335,7 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
 İLGİLİ BİLGİ PARÇALARI (Tavşan Uykusu içeriği):
 {context}
 
-CEVAP KURALLARI:
+CEVAP KURALLARI:{duygu_kurali}
 - Sadece yukarıdaki bilgi parçalarından cevapla, başka kaynak ya da genel internet bilgisi kullanma.
 - Ders/kayıt/dosya adı asla geçmesin.
 - Sıcak ama profesyonel Türkçe ile cevap ver.
