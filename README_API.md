@@ -78,6 +78,60 @@ MP3 (`audio/mpeg`) servis eder. Dosya adı yalnız hash kalıbıdır (path-trave
 
 ## Railway deploy
 
+### `/health` — sürüm damgası ve deploy doğrulaması
+
+```jsonc
+GET /health
+{
+  "status": "ok", "db": "ok", "rag_mode": "semantic", "model": "claude-haiku-4-5",
+  "version": "faz-e2",                     // KISA etiket — SHA DEĞİL
+  "build_time": "2026-08-07T17:58:17+00:00",
+  "corpus_units": 610                      // yüklü korpus birim sayısı
+}
+```
+
+**Neden:** sağlığın 200 dönmesi **yeni kodun canlı olduğunu kanıtlamaz** — hiç
+yeniden başlamamış eski bir konteyner de kesintisiz 200 döner. `version` +
+`build_time` + `corpus_units` üçlüsü deploy'un gerçekten indiğini gösterir
+(korpus büyüdüyse `corpus_units` artar).
+
+**Tam SHA public'te VERİLMEZ** (altyapı parmak izi). Ayrıntı için:
+
+```bash
+curl -H "X-API-Key: $DEMO_API_KEY" "https://.../health?detail=1"
+# → detail: { git_sha, git_sha_short, process_start, corpus_breakdown, embedding_model }
+```
+
+Anahtar yoksa/yanlışsa **401 dönmez, detay sessizce atlanır** — Railway
+healthcheck'i anahtarsız çağırdığı için kırılmamalı.
+
+Railway Variables: `APP_VERSION` (örn. `faz-e2`), `BUILD_TIME` (ISO-8601;
+verilmezse süreç başlangıcına düşer), `GIT_SHA` (Railway `RAILWAY_GIT_COMMIT_SHA`
+da okunur).
+
+---
+
+## Marka kuralı — üretilen cevaplarda kişi adı geçmez
+
+Ürün **"Tavşan Uykusu"** adıyla konuşur. Üretilen hiçbir cevapta danışmanın ya
+da bir eğitmenin adı geçmez. Savunma **iki katmanlı**:
+
+1. **Kaynak:** `chatbot.marka_temizle()` korpus kurulurken her metni/etiketi
+   temizler — ad modele HİÇ gitmez. Ham transkriptlerde anneler danışmana adıyla
+   sesleniyor ("… Hanım, ben gündüz yirmi dakika bekleyemiyorum"); bu hitaplar
+   düşer, iyelik ekleri "Tavşan Uykusu yönteminin …" olur.
+2. **Talimat:** `SYSTEM_PROMPT` ayrıca kişi adı yasağını söyler (başka bir yol
+   kalırsa diye).
+
+`chunks.json` **değiştirilmez** — temizlik okuma anında yapılır, transkript
+arşivi bozulmaz ve kural tek yerden değişir. KB anahtarları da isimsizdir çünkü
+`chunk_id` `ChatResp.sources` ile **istemciye döner**.
+
+Test: `tests/test_marka_ve_surum.py` — 20 çeşitli canlı soruda ihlal aranır
+(yaş, ortam, gece, yöntem, ağlama/motivasyon, tıbbi sınır, kapsam dışı, kriz).
+
+---
+
 1. Repo'yu Railway'e bağla (New Project → Deploy from GitHub).
 2. Başlatma komutu `railway.json` / `Procfile` ile tanımlı:
    `uvicorn api.main:app --host 0.0.0.0 --port $PORT` (healthcheck: `/health`).

@@ -15,8 +15,11 @@ import time
 import logging
 from contextlib import asynccontextmanager
 
+import secrets
+from datetime import datetime, timezone
+
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -168,11 +171,37 @@ class AskReq(BaseModel):
     yas_bandi: str | None = None
 
 
+# --- Sürüm damgası -----------------------------------------------------------
+# NEDEN: sağlık kontrolünün 200 dönmesi YENİ KODUN CANLI OLDUĞUNU KANITLAMAZ —
+# hiç yeniden başlamamış eski bir konteyner de kesintisiz 200 döner. Deploy'un
+# gerçekten indiğini doğrulayabilmek için sürüm + korpus boyutu yayınlanır.
+#
+# GİZLİLİK: public /health'te TAM SHA verilmez (altyapı parmak izi). Yalnız kısa
+# sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
+APP_VERSION = os.getenv("APP_VERSION", "faz-e2")
+# BUILD_TIME derleme/deploy anında env ile verilir (Railway Variables). Yoksa
+# sürecin başlama anına düşülür — bu da "bu instance ne zaman ayağa kalktı"
+# sorusunu cevaplar ve yeniden başlamayan konteyneri ele verir.
+_SUREC_BASLANGIC = datetime.now(timezone.utc).isoformat(timespec="seconds")
+BUILD_TIME = os.getenv("BUILD_TIME") or _SUREC_BASLANGIC
+# Tam SHA yalnız detay modunda; Railway bunu otomatik enjekte eder.
+_GIT_SHA = (os.getenv("GIT_SHA") or os.getenv("RAILWAY_GIT_COMMIT_SHA") or "")
+
+
 @app.get("/health")
-def health():
-    """Altyapı sağlığı: DB bağlantısı + RAG index yüklü mü.
+def health(detail: int = 0, x_api_key: str | None = Header(default=None,
+                                                           alias="X-API-Key")):
+    """Altyapı sağlığı: DB bağlantısı + RAG index yüklü mü + hangi sürüm çalışıyor.
 
     rag_mode: "semantic" (embedding), "tfidf" (fallback) veya null (kurulamadı).
+    corpus_units: yüklü korpus birim sayısı — deploy'un doğru veriyi aldığının
+      kanıtı (korpus büyüdüyse bu sayı artar).
+    version/build_time: çalışan sürüm damgası.
+
+    detail=1 + geçerli X-API-Key → tam commit SHA ve ek ayrıntı. Anahtar yoksa
+    veya yanlışsa DETAY SESSİZCE ATLANIR (401 dönmez): healthcheck'i kırmamak
+    için — Railway bu endpoint'i anahtarsız çağırır.
+
     Railway healthcheck bu endpoint'i kullanır (railway.json)."""
     rt = chatbot.active_retrieval()
     if rt is None:                     # startup atlanmışsa tembel kur
@@ -184,13 +213,30 @@ def health():
 
     db_ok = db_healthy()
     status = "ok" if (db_ok and rt is not None) else "degraded"
-    return {
+    out = {
         "status": status,
         "db": "ok" if db_ok else "down",
         "rag_mode": rt,                # "semantic" | "tfidf" | null
         "retrieval": rt,               # geriye dönük uyumluluk (eski alan adı)
         "model": chatbot.CHATBOT_MODEL,
+        "version": APP_VERSION,        # kısa etiket (SHA DEĞİL)
+        "build_time": BUILD_TIME,      # ISO-8601
+        "corpus_units": chatbot.yuklu_birim_sayisi(),
     }
+
+    if detail:
+        settings = get_settings()
+        yetkili = bool(settings.demo_api_key and x_api_key
+                       and secrets.compare_digest(x_api_key, settings.demo_api_key))
+        if yetkili:
+            out["detail"] = {
+                "git_sha": _GIT_SHA or None,
+                "git_sha_short": (_GIT_SHA[:7] or None) if _GIT_SHA else None,
+                "process_start": _SUREC_BASLANGIC,
+                "corpus_breakdown": chatbot.yuklu_birim_dagilimi(),
+                "embedding_model": chatbot.EMB_MODEL_NAME,
+            }
+    return out
 
 
 @app.post("/ask", dependencies=[Depends(require_demo_key)])

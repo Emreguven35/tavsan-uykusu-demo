@@ -1,9 +1,9 @@
 {
   "version": "1.1",
   "guncelleme": "2026-08-07",
-  "kaynak": "İlayda — RESMİ yaş bandı tablosu (Faz Y). Plan motorunun TEK sayısal kaynağıdır.",
+  "kaynak": "RESMİ yaş bandı tablosu (Faz Y). Plan motorunun TEK sayısal kaynağıdır.",
   "surum_notlari": {
-    "1.1": "İlayda'nın resmi tablosu: 3-5 ay gündüz 4-5 saat (üst sınır eklendi), 9-12 ay gündüz 2-3 saat (üst sınır eklendi), 18-24 ay uyanıklık penceresi 5-6 saat (artık devralınmıyor, tabloda verildi), her banda toplam_gunluk_uyku_dk (gündüz+gece) eklendi.",
+    "1.1": "Tavşan Uykusu yönteminin resmi tablosu: 3-5 ay gündüz 4-5 saat (üst sınır eklendi), 9-12 ay gündüz 2-3 saat (üst sınır eklendi), 18-24 ay uyanıklık penceresi 5-6 saat (artık devralınmıyor, tabloda verildi), her banda toplam_gunluk_uyku_dk (gündüz+gece) eklendi.",
     "1.0": "İlk sürüm."
   },
   "aciklama": "Bu dosya RAG metni DEĞİL, yapılandırılmış motor verisidir. build_schedule ve parametre_uret buradan okur. Metin formu bu sayılardan DETERMİNİSTİK üretilir (engine/yas_bantlari.py), böylece tek kaynak korunur.",
@@ -13,7 +13,7 @@
     "aralik": "[alt, ust] — ust null ise 'en az alt' (üst sınır belirtilmemiş)"
   },
   "okuma_kurallari": {
-    "gunduz_uyku_toplam_dk": "ALT SINIR kestirme tetikleyicisidir (İlayda teyidi): gündüz toplam uyku bu değerin altında kalırsa evrensel 30 dk kestirme kuralı devreye girer. Üst sınır hedefin tavanıdır, tetikleyici DEĞİLDİR.",
+    "gunduz_uyku_toplam_dk": "ALT SINIR kestirme tetikleyicisidir (yöntem teyidi): gündüz toplam uyku bu değerin altında kalırsa evrensel 30 dk kestirme kuralı devreye girer. Üst sınır hedefin tavanıdır, tetikleyici DEĞİLDİR.",
     "toplam_gunluk_uyku_dk": "24 saatlik toplam uyku ihtiyacı (gündüz + gece). 'Bebeğim yeterince uyuyor mu?' sorusunun ölçütüdür. Çizelge kimliği gereği toplam = 1440 - (uyku_sayisi + 1) × uyaniklik_penceresi olduğundan bu alan çizelge çözücüsünü de KISITLAR."
   },
   "kapsam": {

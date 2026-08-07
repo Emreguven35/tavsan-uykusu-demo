@@ -115,6 +115,58 @@ def _humanize(key: str) -> str:
     return key[:1].upper() + key[1:] if key else key
 
 
+# ---------------------------------------------------------------------------
+# MARKA KURALI — üretilen hiçbir cevapta KİŞİ ADI geçmez
+# ---------------------------------------------------------------------------
+# Ürün "Tavşan Uykusu" markasıyla konuşur. Ham transkriptlerde anneler danışmana
+# adıyla sesleniyor ("İlayda Hanım, ben gündüz yirmi dakika bekleyemiyorum") ve
+# bu parçalar retrieval ile modele gidip cevaba sızabiliyor.
+#
+# Savunma İKİ katmanlı:
+#   1. KAYNAK: korpus kurulurken metin temizlenir (burası) — modele adın GİTMEZ.
+#   2. TALİMAT: SYSTEM_PROMPT ayrıca kişi adı yasağını söyler (modele ulaşan
+#      başka bir yol kalırsa diye).
+# Kaynak dosyalar (chunks.json) DEĞİŞTİRİLMEZ; temizlik okuma anında yapılır,
+# böylece transkript arşivi bozulmaz ve kural tek yerden değiştirilebilir.
+_MARKA = "Tavşan Uykusu"
+_MARKA_KURALLARI: tuple[tuple[str, str], ...] = (
+    # Hitap biçimleri önce (en uzun eşleşme kazanır) — hitap tamamen düşer.
+    (r"\bİlayda\s+Hanım['’]?\w*\s*,\s*", ""),
+    (r"\bİlayda\s+Hanım['’]?\w*\s*", ""),
+    (r"\bİlayda\s+Akın['’]?\w*", _MARKA),
+    # İyelik/hâl ekleri
+    (r"\bİlayda['’]nın\b", f"{_MARKA} yönteminin"),
+    (r"\bİlayda['’]nin\b", f"{_MARKA} yönteminin"),
+    (r"\bİlayda['’]dan\b", f"{_MARKA} yönteminden"),
+    (r"\bİlayda['’]den\b", f"{_MARKA} yönteminden"),
+    (r"\bİlayda['’]ya\b", f"{_MARKA} ekibine"),
+    (r"\bİlayda['’]ye\b", f"{_MARKA} ekibine"),
+    (r"\bİlayda['’]yı\b", _MARKA),
+    # Çıplak ad
+    (r"\bİlayda\b", _MARKA),
+)
+_MARKA_DESENLERI = tuple((re.compile(d, re.IGNORECASE), y)
+                         for d, y in _MARKA_KURALLARI)
+
+# Cevapta kişi adı kaldı mı? (test ve savunma amaçlı)
+KISI_ADI_DESENI = re.compile(r"ilayda", re.IGNORECASE)
+
+
+def marka_temizle(metin: str) -> str:
+    """Metindeki kişi adını marka adına çevir (modele/kullanıcıya gitmeden).
+
+    Örn: "İlayda Hanım, ben bekleyemiyorum" → "ben bekleyemiyorum"
+         "İlayda'nın çerçevesi"             → "Tavşan Uykusu yönteminin çerçevesi"
+    """
+    if not metin:
+        return metin
+    for desen, yerine in _MARKA_DESENLERI:
+        metin = desen.sub(yerine, metin)
+    # Hitap düşünce oluşabilen çift boşluk/boşluklu noktalama düzelt.
+    metin = re.sub(r"[ \t]{2,}", " ", metin)
+    return re.sub(r"\s+([,.;:!?])", r"\1", metin)
+
+
 def _is_descriptive_text(value: Any) -> bool:
     """Açıklayıcı metin mi (embed edilmeli), yoksa sayısal/kısa parametre mi?"""
     if not isinstance(value, str):
@@ -532,6 +584,14 @@ def build_corpus() -> list[dict]:
     except Exception as e:                       # tablo yoksa korpus yine çalışır
         logger.warning("Yaş bandı tablosu korpusa eklenemedi: %s", e)
 
+    # MARKA KURALI: korpusa giren her metinden kişi adı temizlenir. Tek çıkış
+    # noktası burasıdır — retrieval, bağlam ve doc2query hepsi bu listeyi kullanır,
+    # dolayısıyla ad hiçbir yoldan modele ulaşamaz.
+    for u in units:
+        u["text"] = marka_temizle(u["text"])
+        if u.get("label"):
+            u["label"] = marka_temizle(u["label"])
+
     return units
 
 
@@ -747,6 +807,21 @@ def active_retrieval() -> str | None:
     return _state["active"]
 
 
+def yuklu_birim_sayisi() -> int:
+    """Bellekte YÜKLÜ korpus birim sayısı (/health).
+
+    Deploy doğrulaması: sağlık 200 dönmesi yeni kodun canlı olduğunu kanıtlamaz,
+    ama korpus büyüdüğünde bu sayı değişir — eski konteyner eski sayıyı verir.
+    Index kurulmamışsa 0 döner (yeniden kurmaya ÇALIŞMAZ: /health hızlı kalmalı)."""
+    return len(_state.get("units") or [])
+
+
+def yuklu_birim_dagilimi() -> dict:
+    """Korpus birimlerinin kaynağa göre dağılımı (/health?detail=1)."""
+    from collections import Counter
+    return dict(Counter(u.get("source", "?") for u in (_state.get("units") or [])))
+
+
 def retrieve(query: str, top_k: int = SEM_TOP_K, min_score: float | None = None) -> list[dict]:
     """En alakalı birimleri döndür. Dönen her birimde 'chunk_id', 'text',
     'source', 'lesson_id', '_score' bulunur (test uyumlu)."""
@@ -810,6 +885,10 @@ MOTIVASYON_TERIMLERI = (
     "yapamıyorum", "yapamayacağ", "beceremiyor", "becerem", "başaramıyor",
     "başaramad", "olmuyor", "olmadı", "işe yaramıyor", "işe yaramad", "boşuna",
     "hiç düzelmedi", "düzelmiyor", "değişen bir şey yok", "fark etmiyor",
+    # "hiçbir şey değişmedi" gibi cümleler retrieval'a güvenerek geçiyordu;
+    # marka temizliği korpus metnini değiştirince skor 0.43 → 0.18'e düştü ve
+    # cümle K4'e kaydı. Sözlük eşleşmesi retrieval skorundan BAĞIMSIZ olmalı.
+    "değişmedi", "değişiklik yok", "aynı devam", "geriye gitti",
     "denedim", "denedik", "yürümüyor", "işe yaramaz", "sonuç alamı",
     "umudum", "umutsuz", "moral", "motivasyon",
     # Ebeveynin duygu durumu
@@ -966,7 +1045,7 @@ KATMAN_KURALLARI = {
     "k3_5": ("\n- Bu soru bebek uykusu/ebeveynlik alanında ama bilgi "
              "tabanında BU SORUYA ÖZEL net bir kayıt yok. Cevabına bunu "
              "dürüstçe söyleyerek başla — şu forma yakın: 'Bu konuda "
-             "İlayda'nın yönteminde net bir kayıt yok, ama şu ilkeler "
+             "Tavşan Uykusu yönteminde net bir kayıt yok, ama şu ilkeler "
              "geçerli...'. 'Kapsam dışı' ifadesini ASLA kullanma, kullanıcıyı "
              "geri çevirme."
              "\n- Ardından yukarıdaki GENEL İLKELERDEN yararlanarak "
@@ -996,6 +1075,9 @@ SYSTEM_PROMPT = """Sen Tavşan Uykusu uyku eğitimi programının bilgi botusun.
 Annelere kısa, profesyonel, sıcak Türkçe cevap verirsin. \
 SADECE sana sunulan bilgi parçalarını kullanırsın; dışına çıkmazsın. \
 Ders ya da kayıt adı asla geçmez (anneye 'kayıt36'da bahsedildiği gibi' deme). \
+MARKA KURALI: Yöntem "Tavşan Uykusu" adıyla anılır. Cevapta KİŞİ ADI GEÇMEZ — ne danışmanın, ne bir eğitmenin, \
+ne de bilgi parçalarında geçen herhangi bir kişinin adı. Yönteme atıf gerekiyorsa "Tavşan Uykusu yönteminde" de. \
+Bilgi parçalarında bir kişi adı ya da o kişiye hitap geçiyorsa cevabına TAŞIMA. \
 Kullanıcıyı hiçbir koşulda danışmanlık hizmetine, danışmana veya birebir görüşmeye yönlendirme. \
 Cevabı bilgi tabanındaki bilgiyle tam ve kendine yeter biçimde ver. \
 Kaynak metinlerde danışmanlık yönlendirmesi geçse bile bunu cevabına taşıma. \
@@ -1009,16 +1091,16 @@ BEBEK VERİSİ KURALI: Bebek verisi mevcutsa cevabını bu veriyle ilişkilendir
 veriyle metodolojiyi birleştir. Veride olmayan şeyi UYDURMA. \
 Bebeğin yaşını BEBEK VERİSİ'nde yazıldığı gibi kullan, yuvarlama/yorumlama yapma.
 
-DUYGUSAL TON (Faz E — İlayda'nın annelerle konuşma tarzı):
+DUYGUSAL TON (Faz E — Tavşan Uykusu yönteminin annelerle konuşma tarzı):
 1. Anne zorlanma, yorgunluk, ağlama, çaresizlik ya da pes etme belirtiyorsa cevaba ÖNCE tek cümlelik bir duygusal \
 tanıma ile başla; sonra DOĞRUDAN somut yönlendirmeye geç. Bu cümle kalıp olmasın — annenin yazdığı duruma değsin \
 ("Çok yorulmuşsunuz" gibi genel geçer bir teselli değil, onun anlattığı şeye dokunan bir cümle). \
 Teselli cevabın önüne GEÇMESİN: anne gece 3'te ne yapacağını arıyor, cevabın ağırlığı somut adımda olmalı. \
 Duygusal ifade YOKSA doğrudan bilgiye gir — her cevaba duygusal giriş yapma.
-2. Uygun bağlamda İlayda'nın kendi dilinden şu ifadeler kullanılabilir (hepsini birden değil, cevap başına en fazla \
+2. Uygun bağlamda Tavşan Uykusu yönteminin kendi dilinden şu ifadeler kullanılabilir (hepsini birden değil, cevap başına en fazla \
 biri, her cevapta değil): "Bu bir süreç ve bunun bir sonu var", "Yolun sonu ışık", "Elim omzunuzda", \
 "Yanınızdayım, geçecek".
-3. Bilgi parçalarında geçen İlayda benzetmeleri (oto koltuğu, ilaç, anaokulu, diyetisyen) YALNIZCA ağlama endişesi \
+3. Bilgi parçalarında geçen yöntem benzetmeleri (oto koltuğu, ilaç, anaokulu, diyetisyen) YALNIZCA ağlama endişesi \
 ya da güven bağı kaygısı konuşulduğunda kullanılır; cevap başına en fazla bir benzetme. Diğer konularda kullanma.
 4. Anne ağlamadan endişeliyse ya da ağlamanın ne kadar süreceğini soruyorsa, şu somut veriyi cevabında MUTLAKA \
 ve SAYILARIYLA ver: ilk gün 45 dakika ağlayan bir çocuk iki hafta sonra 5 dakikada uykuya geçebiliyor — ağlama \
@@ -1028,7 +1110,7 @@ atacağı bir adım. Anne gece 3'te ne yapacağını arıyor.
 5. Anneyi rahatlatmak için "çocuklar 5 yaşından önceki bu dönemi hatırlamaz" bilgisi kullanılabilir.
 
 SINIRLAR — DUYGUSAL TON BUNLARI GEVŞETMEZ (mutlak öncelikli):
-A. "Ağlama zarar vermez" cümlesini MUTLAK bir iddia olarak ASLA kurma. Bu bilgi yalnızca İlayda'nın kendi \
+A. "Ağlama zarar vermez" cümlesini MUTLAK bir iddia olarak ASLA kurma. Bu bilgi yalnızca yöntemin kendi \
 şartlarıyla verilir: "tıbbi bir problem ve duygu regülasyon bozukluğu yoksa genel olarak zarar oluşturmuyor" \
 ve "teknik olarak kesin bir ifade kullanılamaz". Bu iki kaydı da cümleye taşı. \
 "Kesinlikle zararsızdır", "bilimsel olarak kanıtlanmıştır", "hiçbir zararı yoktur" gibi ifadeler YASAK.
@@ -1261,7 +1343,7 @@ _RE_ZORLANMA = re.compile(
 DUYGU_KURALI_AGLAMA = (
     "\n- DUYGUSAL ÇERÇEVE (ağlama endişesi): Cevabına annenin bu korkusunu gören "
     "TEK cümlelik bir tanımayla başla (klişe teselli değil). Ağlamanın zararından "
-    "söz ederken İlayda'nın ŞARTLARINI mutlaka birlikte ver: 'tıbbi bir problem ve "
+    "söz ederken yöntemin ŞARTLARINI mutlaka birlikte ver: 'tıbbi bir problem ve "
     "duygu regülasyon bozukluğu yoksa genel olarak zarar oluşturmuyor' VE 'teknik "
     "olarak kesin bir ifade kullanılamaz'. Mutlak ifade KURMA. Cevabında somut umut "
     "verisini SAYILARIYLA ver: ilk gün 45 dakika ağlayan bir çocuk iki hafta sonra "
@@ -1273,7 +1355,7 @@ DUYGU_KURALI_ZORLANMA = (
     "CÜMLESİ annenin ne yaşadığını gören bir tanıma olsun — onun yazdığı duruma "
     "değsin, genel geçer teselli olmasın. Hemen ardından somut yönlendirmeye geç ve "
     "cevapta anneye elle tutulur en az bir şey bırak: bir süre, bir sayı ya da "
-    "atacağı bir adım. Uygunsa İlayda'nın cümlelerinden birini kullanabilirsin "
+    "atacağı bir adım. Uygunsa yöntemin cümlelerinden birini kullanabilirsin "
     "('Bu bir süreç ve bunun bir sonu var', 'Yolun sonu ışık', 'Elim omzunuzda')."
 )
 
