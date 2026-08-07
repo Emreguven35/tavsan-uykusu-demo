@@ -122,12 +122,18 @@ Plan içeriği artık markdown'a **ek olarak** yapısal alanlar taşır:
     "uyaniklik_penceresi_dk": [180, 240],
     "uyaniklik_penceresi_kaynak": null,   // devralındıysa kaynak bant yolu
     "gunduz_uyku_sayisi": [2, 2], "gunduz_uyku_sayisi_sabit": true,
-    "gunduz_uyku_toplam_dk": [120, null], // ust null → "en az 120 dk"
-    "gece_uykusu_dk": [600, 720], "notlar": ["..."]
+    "gunduz_uyku_toplam_dk": [120, 180],  // ALT sınır = kestirme tetikleyicisi
+    "gece_uykusu_dk": [600, 720],
+    "toplam_gunluk_uyku_dk": [840, 840],  // 24s toplam ihtiyaç (gündüz + gece)
+    "notlar": ["..."]
   },
   "kestirme_degerlendirme": {         // FAZ Y — yalnız adaptasyon sonrası dolar
     "gerekli": true, "eksik_dk": 60, "min_gunduz_dk": 180,
     "gerceklesen_dk": 120, "sure_dk": 30, "gece_uykusuna_gecis_dk": 60
+  },
+  "toplam_uyku_degerlendirme": {      // "bebeğim yeterince uyuyor mu?" (v1.1)
+    "yeterli": false, "gerceklesen_dk": 780, "hedef_dk": [840, 840],
+    "eksik_dk": 60, "fazla_dk": 0, "durum": "az"
   },
   "adapted": true, "base_plan_id": "<uuid>", "adaptation": { ... }
 }
@@ -141,19 +147,30 @@ uyanıklık penceresi, gündüz uyku sayısı, gündüz toplam uyku, gece uykusu
 Faz Y öncesi saklanmış planlar için geriye uyumluluk yolu korunur).
 **0-36 ay arasındaki her ay bir banda düşer** — ara yaş yoktur.
 
-| Bant | Uyanıklık penceresi | Gündüz uyku | Gündüz toplam | Gece |
-|---|---|---|---|---|
-| 0-2 ay | 40 dk – 1 s 20 dk | 4-5 | 5-7 saat | 8-10 saat |
-| 3-5 ay | 1 s 30 dk – 2 s 15 dk | 3-4 | en az 4 saat | 10-11 saat |
-| 6-8 ay | 2-3 saat | **3 (SABİT)** | 3-4 saat | 10-11 saat |
-| 9-12 ay | 3-4 saat | 2 | en az 2 saat | 10-12 saat |
-| 12-18 ay (2 uyku) | 3-4 saat | 2 | en az 2 saat | 11-12 saat |
-| 12-18 ay (tek uyku) | 4-6 saat | 1 | en az 2 saat | 11-12 saat |
-| 18-24 ay | 4-6 saat¹ | 1 | en az 2 saat | 10-11 saat |
-| 24-36 ay | 5 s 30 dk – 7 saat | 1 | en az 1 saat | 10-11 saat |
+İlayda'nın **resmi** tablosu (`yas_bantlari.json` v1.1):
 
-¹ Tabloda ayrıca verilmemiştir; komşu **tek uyku** bandından devralınır ve
-`uyaniklik_penceresi_kaynak` alanında **açıkça raporlanır**.
+| Bant | Uyanıklık penceresi | Gündüz uyku | Gündüz toplam | Gece | **24s TOPLAM** |
+|---|---|---|---|---|---|
+| 0-2 ay | 40 dk – 1 s 20 dk | 4-5 | 5-7 saat | 8-10 saat | 15-18 saat |
+| 3-5 ay | 1 s 30 dk – 2 s 15 dk | 3-4 | 4-5 saat | 10-11 saat | 14-16 saat |
+| 6-8 ay | 2-3 saat | **3 (SABİT)** | 3-4 saat | 10-11 saat | 14 saat |
+| 9-12 ay | 3-4 saat | 2 | 2-3 saat | 10-12 saat | 14 saat |
+| 12-18 ay (2 uyku) | 3-4 saat | 2 | en az 2 saat | 11-12 saat | 13-14 saat |
+| 12-18 ay (tek uyku) | 4-6 saat | 1 | en az 2 saat | 11-12 saat | 13-14 saat |
+| 18-24 ay | 5-6 saat | 1 | en az 2 saat | 10-11 saat | 12-13 saat |
+| 24-36 ay | 5 s 30 dk – 7 saat | 1 | en az 1 saat | 10-11 saat | 11-12,5 saat |
+
+**Tablo okuma kuralı (İlayda teyidi):** gündüz aralığının **ALT SINIRI** kestirme
+tetikleyicisidir. Üst sınır hedefin tavanıdır, tetikleyici değildir — ör. 9-12 ay
+bandında 2 saatin altı kestirme üretir, 3 saatin üstü üretmez.
+
+**24 saatlik toplam** (`toplam_gunluk_uyku_dk`) "bebeğim yeterince uyuyor mu?"
+ölçütüdür ve **çizelge çözücüsünü de kısıtlar**: çizelge kimliği gereği
+`toplam = 1440 − (uyku_sayısı + 1) × pencere` olduğundan bu alan doğrudan bir
+pencere kısıtıdır. Adaptasyon çıktısında `content.toplam_uyku_degerlendirme`
+olarak raporlanır (`durum`: `yeterli` | `az` | `fazla` | `veri_yok`); gündüz
+**veya** gece verisi eksikse değerlendirme yapılmaz (yarım veriden yanlış alarm
+üretilmez).
 
 - **6-8 ay:** uyku sayısı sabittir; **8. ayda 2'ye düşürülmez.**
 - **12-18 ay tek uykuya geçiş** (ÜÇÜ BİRDEN gerekir): ① öğlen uykusuna 12:00'den
@@ -285,9 +302,9 @@ SELECT content, top_score, created_at
   "schedule": [
     {"time": "07:00", "end": "07:00", "type": "wake",  "title": "Sabah uyanışı",
      "key": "wake", "start_minute": 420, "end_minute": 420},
-    {"time": "10:30", "end": "11:45", "type": "nap",   "title": "1. gündüz uykusu",
-     "note": "Uyanıklık penceresi ~210 dk sonra", "key": "nap_1", ...},
-    {"time": "15:15", "end": "16:30", "type": "nap",   "title": "2. gündüz uykusu", ...},
+    {"time": "10:20", "end": "11:50", "type": "nap",   "title": "1. gündüz uykusu",
+     "note": "Uyanıklık penceresi ~200 dk sonra", "key": "nap_1", ...},
+    {"time": "15:10", "end": "16:40", "type": "nap",   "title": "2. gündüz uykusu", ...},
     {"time": "20:00", "end": "07:00", "type": "sleep", "title": "Gece uykusu", ...}
   ],
   "night_wake_protocol": {"resist_minutes": 45, "routine_minutes": 15, "repeat": true, "aciklama": "..."},
@@ -300,8 +317,9 @@ SELECT content, top_score, created_at
 ```
 
 > **Faz Y:** çizelgedeki saatler `data/yas_bantlari.json`'dan türetilir. 9-12 ay
-> bandı 3-4 saat uyanıklık penceresi öngördüğü için ilk uyku 07:00 + 3,5 saat =
-> **10:30**'dur (Faz Y öncesi KB metninden 10:00 çıkıyordu).
+> bandında pencere 3-4 saat aralığındadır; 24 saatlik toplam uyku 14 saat olmak
+> zorunda olduğundan (`toplam = 1440 − 3 × pencere`) pencere **200 dk**'ya oturur
+> ve ilk uyku **10:20** olur. Faz Y öncesi KB metninden 10:00 çıkıyordu.
 
 `schedule` **hem** `/plans/generate` **hem** `/plans/adapt` yanıtında doludur.
 `type` enum'u: `wake | nap | sleep | feed | routine` — v1'de yalnız `wake/nap/sleep`

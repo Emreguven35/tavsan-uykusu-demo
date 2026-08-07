@@ -1,19 +1,26 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "guncelleme": "2026-08-07",
-  "kaynak": "İlayda — yaş bandı tablosu (Faz Y). Plan motorunun TEK sayısal kaynağıdır.",
+  "kaynak": "İlayda — RESMİ yaş bandı tablosu (Faz Y). Plan motorunun TEK sayısal kaynağıdır.",
+  "surum_notlari": {
+    "1.1": "İlayda'nın resmi tablosu: 3-5 ay gündüz 4-5 saat (üst sınır eklendi), 9-12 ay gündüz 2-3 saat (üst sınır eklendi), 18-24 ay uyanıklık penceresi 5-6 saat (artık devralınmıyor, tabloda verildi), her banda toplam_gunluk_uyku_dk (gündüz+gece) eklendi.",
+    "1.0": "İlk sürüm."
+  },
   "aciklama": "Bu dosya RAG metni DEĞİL, yapılandırılmış motor verisidir. build_schedule ve parametre_uret buradan okur. Metin formu bu sayılardan DETERMİNİSTİK üretilir (engine/yas_bantlari.py), böylece tek kaynak korunur.",
   "birimler": {
     "ay": "düzeltilmiş yaş (ay)",
     "dk": "dakika",
     "aralik": "[alt, ust] — ust null ise 'en az alt' (üst sınır belirtilmemiş)"
   },
+  "okuma_kurallari": {
+    "gunduz_uyku_toplam_dk": "ALT SINIR kestirme tetikleyicisidir (İlayda teyidi): gündüz toplam uyku bu değerin altında kalırsa evrensel 30 dk kestirme kuralı devreye girer. Üst sınır hedefin tavanıdır, tetikleyici DEĞİLDİR.",
+    "toplam_gunluk_uyku_dk": "24 saatlik toplam uyku ihtiyacı (gündüz + gece). 'Bebeğim yeterince uyuyor mu?' sorusunun ölçütüdür. Çizelge kimliği gereği toplam = 1440 - (uyku_sayisi + 1) × uyaniklik_penceresi olduğundan bu alan çizelge çözücüsünü de KISITLAR."
+  },
   "kapsam": {
     "ay_min": 0,
     "ay_max": 36,
     "not": "Bantlar yarı açık aralıktır: [ay_min, ay_max). 0-36 ay arasındaki HER ay tam olarak bir banda düşer; ara yaş bırakılmaz. 36 ay ve üzeri son banda (24-36 ay) düşer."
   },
-
   "evrensel_kurallar": {
     "kestirme_protokolu": {
       "tetik": "gündüz min süre tamamlanmadı",
@@ -24,7 +31,6 @@
       "aciklama": "Bebek yaşına uygun gündüz toplam uyku MİNİMUMUNU tamamlayamazsa ilave 30 dakikalık bir kestirme uykusu yaptırılır. 30 dakika dolunca bebek uyandırılır. Bu kestirmeden uyandıktan 1 SAAT sonra bile gece uykusuna geçilebilir — gece uykusu gecikse dahi minimum gündüz uykusu önceliklidir."
     }
   },
-
   "bantlar": [
     {
       "id": "0-2_ay",
@@ -36,6 +42,7 @@
       "gunduz_uyku_sayisi_sabit": false,
       "gunduz_uyku_toplam_dk": [300, 420],
       "gece_uykusu_dk": [480, 600],
+      "toplam_gunluk_uyku_dk": [900, 1080],
       "notlar": [
         "Uyanıklık penceresi 40 dakika ile 1 saat 20 dakika arasındadır."
       ]
@@ -48,11 +55,12 @@
       "uyaniklik_penceresi_dk": [90, 135],
       "gunduz_uyku_sayisi": [3, 4],
       "gunduz_uyku_sayisi_sabit": false,
-      "gunduz_uyku_toplam_dk": [240, null],
+      "gunduz_uyku_toplam_dk": [240, 300],
       "gece_uykusu_dk": [600, 660],
+      "toplam_gunluk_uyku_dk": [840, 960],
       "notlar": [
         "Uyanıklık penceresi 1 saat 30 dakika ile 2 saat 15 dakika arasındadır.",
-        "Gündüz toplam uyku EN AZ 4 saat olmalıdır."
+        "Gündüz toplam uyku 4-5 saat olmalıdır (en az 4 saat)."
       ]
     },
     {
@@ -65,6 +73,7 @@
       "gunduz_uyku_sayisi_sabit": true,
       "gunduz_uyku_toplam_dk": [180, 240],
       "gece_uykusu_dk": [600, 660],
+      "toplam_gunluk_uyku_dk": [840, 840],
       "notlar": [
         "Gündüz uyku sayısı bu bantta SABİT 3'tür.",
         "8. ayda gündüz uyku sayısı 2'ye DÜŞÜRÜLMEZ — 3 uyku korunur."
@@ -78,10 +87,11 @@
       "uyaniklik_penceresi_dk": [180, 240],
       "gunduz_uyku_sayisi": [2, 2],
       "gunduz_uyku_sayisi_sabit": true,
-      "gunduz_uyku_toplam_dk": [120, null],
+      "gunduz_uyku_toplam_dk": [120, 180],
       "gece_uykusu_dk": [600, 720],
+      "toplam_gunluk_uyku_dk": [840, 840],
       "notlar": [
-        "Gündüz toplam uyku EN AZ 2 saat olmalıdır."
+        "Gündüz toplam uyku 2-3 saat olmalıdır (en az 2 saat)."
       ]
     },
     {
@@ -107,6 +117,7 @@
         }
       },
       "gece_uykusu_dk": [660, 720],
+      "toplam_gunluk_uyku_dk": [780, 840],
       "tek_uykuya_gecis_sartlari": {
         "hepsi_gerekli": true,
         "sartlar": [
@@ -142,15 +153,15 @@
       "ad": "18-24 ay",
       "ay_min": 18,
       "ay_max": 24,
-      "uyaniklik_penceresi_dk": null,
-      "uyaniklik_penceresi_devir": "12-18_ay.tek_uyku",
+      "uyaniklik_penceresi_dk": [300, 360],
       "gunduz_uyku_sayisi": [1, 1],
       "gunduz_uyku_sayisi_sabit": true,
       "gunduz_uyku_toplam_dk": [120, null],
       "gece_uykusu_dk": [600, 660],
+      "toplam_gunluk_uyku_dk": [720, 780],
       "notlar": [
-        "Tek uyku, gündüz en az 2 saat.",
-        "Uyanıklık penceresi tabloda ayrıca verilmemiştir; komşu TEK UYKU bandından (12-18 ay tek uyku: 4-6 saat) devralınır. Devralma çıktıda açıkça raporlanır."
+        "Uyanıklık penceresi 5 saat ile 6 saat arasındadır.",
+        "Tek uyku, gündüz en az 2 saat."
       ]
     },
     {
@@ -164,6 +175,7 @@
       "gunduz_uyku_sayisi_sabit": true,
       "gunduz_uyku_toplam_dk": [60, null],
       "gece_uykusu_dk": [600, 660],
+      "toplam_gunluk_uyku_dk": [660, 750],
       "ogle_uykusu_reddi_protokolu": {
         "aciklama": "Çocuk öğlen uykusunu reddediyorsa güne başlama saati kademeli olarak öne çekilir.",
         "adimlar": [

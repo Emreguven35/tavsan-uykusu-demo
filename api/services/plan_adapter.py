@@ -375,11 +375,14 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
     """Son `lookback_days` günün kayıtlarından gerçek davranış ortalamaları.
 
     Dönen: {
-      days_with_data, avg_wake_minute, avg_bedtime_minute,
-      avg_nap_count, avg_nap_minutes, avg_day_sleep_minutes, avg_night_wakes
+      days_with_data, avg_wake_minute, avg_bedtime_minute, avg_nap_count,
+      avg_nap_minutes, avg_day_sleep_minutes, avg_night_sleep_minutes,
+      avg_night_wakes
     }
     avg_day_sleep_minutes: GÜN BAŞINA gündüz uyku toplamı (kestirme kuralının
     girdisi) — avg_nap_minutes ise uyku BAŞINA ortalamadır; karıştırılmamalıdır.
+    avg_night_sleep_minutes: gece yatışından ertesi sabah uyanışına süre; gündüz
+    toplamıyla birlikte "24 saatte yeterince uyuyor mu?" ölçütünü besler.
     Değer hesaplanamıyorsa ilgili alan None (çağıran karar verir)."""
     today = today or datetime.now(timezone.utc).date()
     start = today - timedelta(days=lookback_days - 1)
@@ -446,15 +449,23 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
     # sayılır (ended_at'i olmayan kayıtlar günü 0 dk göstermesin).
     day_totals = [sum(v) for v in naps_by_day.values() if any(d > 0 for d in v)]
 
+    _wake_avg = (int(round(sum(wake_by_day.values()) / len(wake_by_day)))
+                 if wake_by_day else None)
+    _bed_avg = (int(round(sum(bed_by_day.values()) / len(bed_by_day)))
+                if bed_by_day else None)
+    # Gece uykusu = yatıştan ERTESİ sabah uyanışına. _bed_avg gece yarısını
+    # aşan yatışlarda zaten +24s kaydırılmış olduğundan burada tekrar eklenmez.
+    _night_sleep = (float(_wake_avg + 24 * 60 - _bed_avg)
+                    if (_wake_avg is not None and _bed_avg is not None) else None)
+
     return {
         "days_with_data": len(days_seen),
-        "avg_wake_minute": (int(round(sum(wake_by_day.values()) / len(wake_by_day)))
-                            if wake_by_day else None),
-        "avg_bedtime_minute": (int(round(sum(bed_by_day.values()) / len(bed_by_day)))
-                               if bed_by_day else None),
+        "avg_wake_minute": _wake_avg,
+        "avg_bedtime_minute": _bed_avg,
         "avg_nap_count": _avg(nap_counts),
         "avg_nap_minutes": _avg(nap_durs),
         "avg_day_sleep_minutes": _avg(day_totals),
+        "avg_night_sleep_minutes": _night_sleep,
         # Gece uyanma: kaydı olan günler üzerinden ortalama (0 kayıtlı gün 0 sayılır
         # ancak hiç veri yoksa None).
         "avg_night_wakes": (round(sum(night_wakes_by_day.get(d, 0) for d in days_seen)
@@ -577,6 +588,7 @@ def adapt(plan_content: dict, bucket_params: dict, log_summary: dict,
       regression_detected: bool,         # İlayda protokolü (eğitim sonrası geri gidiş)
       restart_program_suggested: bool,   # kullanıcıya sorulacak ÖNERİ — otomatik üretim YOK
       kestirme: {...} | None,            # evrensel 30dk kestirme kuralı değerlendirmesi
+      toplam_uyku: {...} | None,         # "24 saatte yeterince uyuyor mu?" (v1.1)
       reasons: [str],
       schedule: [...]                    # sonuç çizelge (kaydırılmış veya orijinal)
     }
@@ -607,6 +619,7 @@ def adapt(plan_content: dict, bucket_params: dict, log_summary: dict,
         "regression_detected": False,
         "restart_program_suggested": False,
         "kestirme": None,
+        "toplam_uyku": None,
         "reasons": reasons,
         "schedule": schedule,
     }
@@ -623,6 +636,19 @@ def adapt(plan_content: dict, bucket_params: dict, log_summary: dict,
                 f"{bant['ad']} bandının minimumu {kestirme['min_gunduz_dk']} dk "
                 f"({kestirme['eksik_dk']} dk eksik) — {kestirme['sure_dk']} dk'lık "
                 "ilave kestirme uykusu yaptırılmalı")
+
+        # --- "Bebeğim yeterince uyuyor mu?" — 24 saatlik toplam (v1.1) -------
+        toplam = yas_bantlari.toplam_uyku_degerlendir(
+            bant, log_summary.get("avg_day_sleep_minutes"),
+            log_summary.get("avg_night_sleep_minutes"))
+        result["toplam_uyku"] = toplam
+        if toplam["durum"] == "az":
+            hedef_lo, hedef_hi = toplam["hedef_dk"]
+            reasons.append(
+                f"24 saatlik toplam uyku {toplam['gerceklesen_dk']} dk; "
+                f"{bant['ad']} bandının ihtiyacı "
+                f"{hedef_lo}{'' if hedef_lo == hedef_hi else '–' + str(hedef_hi)} dk "
+                f"({toplam['eksik_dk']} dk eksik)")
 
     # --- Regresyon katmanı: kaydırmadan BAĞIMSIZ, yalnız BAYRAK -------------
     # Otomatik hiçbir şey üretilmez; mobil kullanıcıya "Programı baştan başlatmak

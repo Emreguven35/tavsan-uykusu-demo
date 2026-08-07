@@ -479,6 +479,9 @@ def _bant_parametreleri(bant: dict) -> dict:
                                                  bant["gunduz_uyku_sayisi_sabit"]),
         "gunduz_uyku_total": yas_bantlari._aralik(bant["gunduz_uyku_toplam_dk"]),
         "gece_uyku": yas_bantlari._aralik(bant["gece_uykusu_dk"]),
+        # KB'nin toplam_uyku_24h değeri (ör. 6 ay için "12-15 Saat") tabloyla
+        # çelişiyor (İlayda: 14 saat) — tablo üstüne yazar.
+        "toplam_uyku_24h": yas_bantlari._aralik(bant["toplam_gunluk_uyku_dk"]),
         "kestirme_protokolu": (
             f"Gündüz toplam uyku minimumu ({yas_bantlari._aralik(bant['gunduz_uyku_toplam_dk'])}) "
             f"tamamlanamazsa ilave {proto['sure_dk']} dakikalık kestirme uykusu "

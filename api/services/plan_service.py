@@ -252,6 +252,8 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
             "kestirme_protokolu": (base_content.get("kestirme_protokolu")
                                    or yas_bantlari.kestirme_protokolu()),
             "kestirme_degerlendirme": result["kestirme"],
+            # "Bebeğim yeterince uyuyor mu?" — 24 saatlik toplam değerlendirmesi.
+            "toplam_uyku_degerlendirme": result["toplam_uyku"],
             # Çizelge kaydıysa başlıktaki yatış saati de güncellenmeli.
             "headline": plan_adapter.headline(
                 baby.name, base_content.get("bucket"), result["schedule"]),

@@ -165,6 +165,9 @@ def yas_bandi_getir(ay: float, tek_uyku: bool | None = None) -> dict:
         "gunduz_uyku_sayisi_sabit": bool(al("gunduz_uyku_sayisi_sabit", False)),
         "gunduz_uyku_toplam_dk": list(al("gunduz_uyku_toplam_dk") or [0, None]),
         "gece_uykusu_dk": list(al("gece_uykusu_dk") or [600, 660]),
+        # 24 saatlik toplam uyku ihtiyacı (gündüz + gece) — "bebeğim yeterince
+        # uyuyor mu?" ölçütü. Çizelge çözücüsünü de kısıtlar (bkz. cizelge_parametreleri).
+        "toplam_gunluk_uyku_dk": list(al("toplam_gunluk_uyku_dk") or [0, None]),
         "notlar": list(b.get("notlar") or []),
         "kestirme_protokolu": kestirme_protokolu(),
     }
@@ -191,11 +194,18 @@ def bant_mi(bant: Any) -> bool:
 # Bant, pencere/uyku sayısı/gündüz toplamı için ARALIK verir; bu denklemi
 # sağlayan (n, pencere) ikilisi aranır. Böylece çizelge tablonun TÜM sayılarıyla
 # tutarlı olur ve gece yatışı kendiliğinden gece uykusu aralığına oturur.
+#
+# TOPLAM UYKU KİMLİĞİ (v1.1): toplam = gunduz_toplam + gece
+#                                    = (D - (n+1)*pencere) + gece
+#                                    = 1440 - (n+1) * pencere
+# Yani 24 saatlik toplam uyku YALNIZCA (n+1)*pencere'ye bağlıdır ve tablodaki
+# toplam_gunluk_uyku_dk doğrudan bir PENCERE KISITIDIR. Bu kısıt olmadan 9-12 ay
+# bandı 13,5 saatlik bir çizelge üretiyordu — İlayda'nın tablosu 14 saat diyor.
 def cizelge_parametreleri(bant: dict) -> dict:
     """Bir bant için çizelge kurucu parametreleri.
 
     Dönen: {uyku_sayisi, uyaniklik_penceresi_dk, uyku_suresi_dk,
-            gunduz_toplam_dk, gun_uzunlugu_dk, cozuldu, not}
+            gunduz_toplam_dk, toplam_uyku_dk, gun_uzunlugu_dk, cozuldu, not}
     cozuldu False ise denklem bant aralıklarıyla kapanmamıştır; en yakın değerler
     kullanılır ve `not` alanı sebebi açıklar (sessiz sapma olmasın)."""
     gece_lo, gece_hi = bant["gece_uykusu_dk"]
@@ -203,6 +213,7 @@ def cizelge_parametreleri(bant: dict) -> dict:
     ww_lo, ww_hi = bant["uyaniklik_penceresi_dk"]
     g_lo, g_hi = bant["gunduz_uyku_toplam_dk"]
     n_lo, n_hi = bant["gunduz_uyku_sayisi"]
+    t_lo, t_hi = (bant.get("toplam_gunluk_uyku_dk") or [0, None])
 
     secim: tuple[int, int] | None = None
     for n in range(int(n_lo), int(n_hi) + 1):
@@ -213,6 +224,11 @@ def cizelge_parametreleri(bant: dict) -> dict:
         # gunduz_toplam <= g_hi  →  pencere >= (D - g_hi) / (n+1)   (g_hi None → sınırsız)
         alt = (D - g_hi) / (n + 1) if g_hi else float(ww_lo)
         lo, hi = max(float(ww_lo), alt), min(float(ww_hi), ust)
+        # toplam uyku kısıtı: t_lo <= 1440 - (n+1)*pencere <= t_hi
+        if t_lo:
+            hi = min(hi, (1440 - t_lo) / (n + 1))
+        if t_hi:
+            lo = max(lo, (1440 - t_hi) / (n + 1))
         if lo <= hi:
             secim = (n, _yuvarla_araliga(lo, hi))
             break                                       # en AZ uyku sayısı tercih edilir
@@ -238,6 +254,8 @@ def cizelge_parametreleri(bant: dict) -> dict:
         "uyaniklik_penceresi_dk": int(ww),
         "uyku_suresi_dk": int(uyku_suresi),
         "gunduz_toplam_dk": int(uyku_suresi * n),
+        # 24 saatlik toplam: gündüz + gece (çizelge kimliği, yukarıdaki nota bak).
+        "toplam_uyku_dk": int(1440 - (n + 1) * ww),
         "gun_uzunlugu_dk": int(D),
         "cozuldu": cozuldu,
         "not": aciklama,
@@ -293,6 +311,41 @@ def kestirme_degerlendir(bant: dict, gunduz_uyku_dk: float | None) -> dict:
     if eksik > 0:
         sonuc["gerekli"] = True
         sonuc["eksik_dk"] = eksik
+    return sonuc
+
+
+# =============================================================================
+# "Bebeğim yeterince uyuyor mu?" — 24 saatlik toplam uyku değerlendirmesi
+# =============================================================================
+def toplam_uyku_degerlendir(bant: dict, gunduz_uyku_dk: float | None,
+                            gece_uyku_dk: float | None) -> dict:
+    """Bebeğin 24 saatlik toplam uykusu yaş bandının ihtiyacını karşılıyor mu?
+
+    Dönen: {yeterli, gerceklesen_dk, hedef_dk, eksik_dk, fazla_dk, durum}
+    durum: 'yeterli' | 'az' | 'fazla' | 'veri_yok'
+    Gündüz VEYA gece verisi eksikse değerlendirme YAPILMAZ (yarım veriden
+    "yetersiz uyuyor" sonucu çıkarmak yanlış alarm üretir)."""
+    hedef = bant.get("toplam_gunluk_uyku_dk") or [0, None]
+    lo, hi = hedef[0], hedef[1] if hedef[1] is not None else hedef[0]
+    sonuc = {
+        "yeterli": None,
+        "gerceklesen_dk": None,
+        "hedef_dk": [lo, hi] if lo else None,
+        "eksik_dk": 0,
+        "fazla_dk": 0,
+        "durum": "veri_yok",
+    }
+    if not lo or gunduz_uyku_dk is None or gece_uyku_dk is None:
+        return sonuc
+
+    toplam = int(gunduz_uyku_dk) + int(gece_uyku_dk)
+    sonuc["gerceklesen_dk"] = toplam
+    if toplam < lo:
+        sonuc.update({"yeterli": False, "eksik_dk": lo - toplam, "durum": "az"})
+    elif toplam > hi:
+        sonuc.update({"yeterli": True, "fazla_dk": toplam - hi, "durum": "fazla"})
+    else:
+        sonuc.update({"yeterli": True, "durum": "yeterli"})
     return sonuc
 
 
@@ -396,6 +449,10 @@ def bant_ozet_satirlari(bant: dict) -> list[str]:
         f"- Gündüz toplam uyku: {_aralik(bant['gunduz_uyku_toplam_dk'])}",
         f"- Gece uykusu: {_aralik(bant['gece_uykusu_dk'])}",
     ]
+    toplam = bant.get("toplam_gunluk_uyku_dk") or [0, None]
+    if toplam[0]:
+        satirlar.append(
+            f"- 24 saatlik TOPLAM uyku ihtiyacı (gündüz + gece): {_aralik(toplam)}")
     satirlar += [f"- {n}" for n in bant.get("notlar", [])]
     return satirlar
 

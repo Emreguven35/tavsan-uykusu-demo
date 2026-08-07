@@ -83,25 +83,55 @@ check("1e) Bant alt sınırları kendi bandına düşer (çakışma yok)",
 # =============================================================================
 # 2) İLAYDA TABLOSU — bant bant birebir doğrulama
 # =============================================================================
-# (ay, ww, uyku_sayisi, gunduz_toplam, gece)
+# İlayda'nın RESMİ tablosu (v1.1). (ay, ww, uyku_sayisi, gunduz_toplam, gece, toplam)
 BEKLENEN = [
-    (1,  [40, 80],    [4, 5], [300, 420],  [480, 600]),   # 0-2 ay
-    (4,  [90, 135],   [3, 4], [240, None], [600, 660]),   # 3-5 ay
-    (7,  [120, 180],  [3, 3], [180, 240],  [600, 660]),   # 6-8 ay
-    (10, [180, 240],  [2, 2], [120, None], [600, 720]),   # 9-12 ay
-    (14, [180, 240],  [2, 2], [120, None], [660, 720]),   # 12-18 ay (2 uyku)
-    (20, [240, 360],  [1, 1], [120, None], [600, 660]),   # 18-24 ay
-    (30, [330, 420],  [1, 1], [60, None],  [600, 660]),   # 24-36 ay
+    (1,  [40, 80],    [4, 5], [300, 420],  [480, 600], [900, 1080]),  # 0-2 ay  15-18s
+    (4,  [90, 135],   [3, 4], [240, 300],  [600, 660], [840, 960]),   # 3-5 ay  14-16s
+    (7,  [120, 180],  [3, 3], [180, 240],  [600, 660], [840, 840]),   # 6-8 ay  14s
+    (10, [180, 240],  [2, 2], [120, 180],  [600, 720], [840, 840]),   # 9-12 ay 14s
+    (14, [180, 240],  [2, 2], [120, None], [660, 720], [780, 840]),   # 12-18   13-14s
+    (20, [300, 360],  [1, 1], [120, None], [600, 660], [720, 780]),   # 18-24   12-13s
+    (30, [330, 420],  [1, 1], [60, None],  [600, 660], [660, 750]),   # 24-36   11-12,5s
 ]
 _hatalar = []
-for ay, ww, n, gunduz, gece in BEKLENEN:
+for ay, ww, n, gunduz, gece, toplam in BEKLENEN:
     b = yb.yas_bandi_getir(ay)
     got = (b["uyaniklik_penceresi_dk"], b["gunduz_uyku_sayisi"],
-           b["gunduz_uyku_toplam_dk"], b["gece_uykusu_dk"])
-    if got != (ww, n, gunduz, gece):
-        _hatalar.append(f"{ay} ay ({b['id']}): {got} != {(ww, n, gunduz, gece)}")
-check("2) Tüm bantların değerleri İlayda tablosuyla birebir aynı",
+           b["gunduz_uyku_toplam_dk"], b["gece_uykusu_dk"],
+           b["toplam_gunluk_uyku_dk"])
+    if got != (ww, n, gunduz, gece, toplam):
+        _hatalar.append(f"{ay} ay ({b['id']}): {got} != {(ww, n, gunduz, gece, toplam)}")
+check("2) Tüm bantların değerleri İlayda RESMİ tablosuyla birebir aynı",
       not _hatalar, str(_hatalar))
+
+# v1.1 düzeltmeleri tek tek (regresyon olursa hangisi bozuldu görülsün).
+check("2a1) 3-5 ay gündüz uykusu ARALIK: 4-5 saat (eskiden 'min 4 saat')",
+      yb.yas_bandi_getir(4)["gunduz_uyku_toplam_dk"] == [240, 300],
+      str(yb.yas_bandi_getir(4)["gunduz_uyku_toplam_dk"]))
+check("2a2) 9-12 ay gündüz uykusu ARALIK: 2-3 saat (eskiden 'min 2 saat')",
+      yb.yas_bandi_getir(10)["gunduz_uyku_toplam_dk"] == [120, 180],
+      str(yb.yas_bandi_getir(10)["gunduz_uyku_toplam_dk"]))
+check("2a3) 18-24 ay penceresi TABLODA verildi (5-6 saat), artık devralınmıyor",
+      yb.yas_bandi_getir(20)["uyaniklik_penceresi_dk"] == [300, 360]
+      and yb.yas_bandi_getir(20)["uyaniklik_penceresi_kaynak"] is None,
+      f"ww={yb.yas_bandi_getir(20)['uyaniklik_penceresi_dk']} "
+      f"kaynak={yb.yas_bandi_getir(20)['uyaniklik_penceresi_kaynak']}")
+
+# Tablo iç tutarlılığı: gündüz + gece aralıkları, bildirilen toplamla ÖRTÜŞMELİ.
+# İleride tabloya yazım hatası girerse bu kontrol yakalar.
+_tutarsiz = []
+for ay, *_ in BEKLENEN:
+    b = yb.yas_bandi_getir(ay)
+    g_lo, g_hi = b["gunduz_uyku_toplam_dk"]
+    n_lo, n_hi = b["gece_uykusu_dk"]
+    t_lo, t_hi = b["toplam_gunluk_uyku_dk"]
+    # gündüz üst sınırı yoksa toplamdan türet (üstten sınırsız sayılır)
+    kaba_lo, kaba_hi = g_lo + n_lo, (g_hi + n_hi) if g_hi else t_hi
+    if kaba_hi < t_lo or kaba_lo > t_hi:
+        _tutarsiz.append(f"{b['id']}: gündüz+gece {kaba_lo}-{kaba_hi} ∩ "
+                         f"toplam {t_lo}-{t_hi} = BOŞ")
+check("2a4) Tablo iç tutarlı: gündüz+gece aralığı bildirilen toplamla örtüşüyor",
+      not _tutarsiz, str(_tutarsiz))
 
 # 8. ayda uyku sayısı 2'ye DÜŞÜRÜLMEZ — 6-8 ay bandında 3 SABİT.
 _b8 = yb.yas_bandi_getir(8)
@@ -111,13 +141,14 @@ check("2b) 8. ay: gündüz uyku sayısı SABİT 3 (2'ye düşürülmez)",
       f"sayi={_b8['gunduz_uyku_sayisi']} cizelge="
       f"{yb.cizelge_parametreleri(_b8)['uyku_sayisi']}")
 
-# 18-24 ay penceresi tabloda YOK → komşu tek uyku bandından devralınır ve
-# bu durum AÇIKÇA raporlanır (sessiz varsayılana düşme yok).
-_b20 = yb.yas_bandi_getir(20)
-check("2c) 18-24 ay penceresi devralınır ve kaynağı raporlanır",
-      _b20["uyaniklik_penceresi_kaynak"] == "12-18_ay.tek_uyku"
-      and _b20["uyaniklik_penceresi_dk"] == [240, 360],
-      f"kaynak={_b20['uyaniklik_penceresi_kaynak']} ww={_b20['uyaniklik_penceresi_dk']}")
+# Devralma MEKANİZMASI hâlâ çalışıyor mu? (v1.1'de 18-24 ay tabloya girdi, ama
+# gelecekte bir bandın alanı eksik kalırsa sessiz varsayılana düşülmemeli.)
+_sahte = {"id": "test", "ad": "test", "ay_min": 0, "ay_max": 1,
+          "uyaniklik_penceresi_devir": "12-18_ay.tek_uyku"}
+_devir, _kaynak = yb._pencere_devral(_sahte)
+check("2c) Devralma mekanizması korunuyor (eksik pencere → komşu bant + kaynak)",
+      _devir == [240, 360] and _kaynak == "12-18_ay.tek_uyku",
+      f"devir={_devir} kaynak={_kaynak}")
 
 
 # =============================================================================
@@ -157,16 +188,22 @@ for ay in range(0, 37):
     # f) tablo aralıkları 24 saatlik döngüyü kapatabildi mi
     if not cp["cozuldu"]:
         _sorunlar.append(f"{ay} ay: {cp['not']}")
+    # g) 24 saatlik TOPLAM uyku bandın ihtiyacına oturuyor mu (v1.1)
+    t_lo, t_hi = b["toplam_gunluk_uyku_dk"]
+    if t_lo and not (t_lo <= cp["toplam_uyku_dk"] <= (t_hi or t_lo)):
+        _sorunlar.append(f"{ay} ay: toplam {cp['toplam_uyku_dk']} ∉ [{t_lo},{t_hi}]")
 
 check("3) Her yaş için çizelge bant aralıklarını sağlıyor (uyku sayısı, "
       "pencere, gündüz min, gece süresi)", not _sorunlar, str(_sorunlar[:6]))
 
-# 9 aylık somut çizelge — KB'de bu bandın çizelgesi türetilebiliyordu ama
-# 12-17 ay aralığında varsayılana düşülüyordu; artık ikisi de tablodan gelir.
+# 9 aylık somut çizelge. v1.1'de pencere 210 → 200 dk'ya indi: 9-12 ay toplam
+# uyku ihtiyacı 14 saat ve toplam = 1440 - (n+1)×pencere kimliği gereği 210 dk
+# yalnız 13,5 saat veriyordu. İlk uyku 07:00 + 3 saat 20 dk = 10:20.
 _s9 = pa.build_schedule({}, 7 * S, yas_ay=9)
-check("3b) 9 aylık: 2 gündüz uykusu, ilk uyku 10:30 (07:00 + 3.5 saat pencere)",
+check("3b) 9 aylık: 2 gündüz uykusu, ilk uyku 10:20 (toplam 14 saate oturur)",
       len([x for x in _s9 if x["type"] == "nap"]) == 2
-      and _s9[1]["time"] == "10:30",
+      and _s9[1]["time"] == "10:20"
+      and yb.cizelge_parametreleri(yb.yas_bandi_getir(9))["toplam_uyku_dk"] == 840,
       str([(x["key"], x["time"], x["end"]) for x in _s9]))
 
 # 15 aylık: KB'de uyaniklik_penceresi HİÇ YOKTU → eskiden varsayılan (2-3 saat)
@@ -290,6 +327,56 @@ check("5g) 24-36 ay: 45 dk → tetiklenir, 70 dk → tetiklenmez (min 1 saat)",
 # Bant çıktısında da bulunmalı (plan içeriğine buradan taşınır).
 check("5h) Her çözülmüş bant kestirme protokolünü taşır",
       all("kestirme_protokolu" in yb.yas_bandi_getir(a) for a in range(0, 37)), "")
+
+
+# --- Kestirme tetikleyicisi ALT SINIRDIR (İlayda teyidi) --------------------
+# v1.1'de gündüz aralıklarına ÜST sınır eklendi; tetikleyici DEĞİŞMEMELİ.
+_b4 = yb.yas_bandi_getir(4)            # 3-5 ay: gündüz 4-5 saat (240-300)
+check("5i) 3-5 ay: tetikleyici ALT sınır (240). 239 dk → tetiklenir",
+      yb.kestirme_degerlendir(_b4, 239)["gerekli"] is True
+      and yb.kestirme_degerlendir(_b4, 239)["eksik_dk"] == 1
+      and yb.kestirme_degerlendir(_b4, 240)["gerekli"] is False,
+      f"min={_b4['gunduz_uyku_toplam_dk']}")
+check("5j) ÜST sınır tetikleyici DEĞİL: 3-5 ay 300+ dk uyku kestirme üretmez",
+      yb.kestirme_degerlendir(_b4, 320)["gerekli"] is False,
+      str(yb.kestirme_degerlendir(_b4, 320)))
+_b10 = yb.yas_bandi_getir(10)          # 9-12 ay: gündüz 2-3 saat (120-180)
+check("5k) 9-12 ay: 119 dk → tetiklenir, 120 ve 200 dk → tetiklenmez",
+      yb.kestirme_degerlendir(_b10, 119)["gerekli"] is True
+      and yb.kestirme_degerlendir(_b10, 120)["gerekli"] is False
+      and yb.kestirme_degerlendir(_b10, 200)["gerekli"] is False,
+      f"min={_b10['gunduz_uyku_toplam_dk']}")
+
+
+# =============================================================================
+# 5-B) 24 SAATLİK TOPLAM UYKU — "bebeğim yeterince uyuyor mu?" (v1.1)
+# =============================================================================
+_b7t = yb.yas_bandi_getir(7)                       # 6-8 ay: toplam 14 saat (840)
+_az = yb.toplam_uyku_degerlendir(_b7t, 180, 600)   # 780 → 60 dk eksik
+_tam = yb.toplam_uyku_degerlendir(_b7t, 210, 630)  # 840 → tam
+_cok = yb.toplam_uyku_degerlendir(_b7t, 240, 660)  # 900 → fazla
+check("5B) Toplam 780 dk (<840) → yeterli DEĞİL, 60 dk eksik",
+      _az["yeterli"] is False and _az["eksik_dk"] == 60 and _az["durum"] == "az",
+      str(_az))
+check("5B-b) Toplam 840 dk → yeterli",
+      _tam["yeterli"] is True and _tam["durum"] == "yeterli", str(_tam))
+check("5B-c) Toplam 900 dk → yeterli (fazla olarak işaretlenir)",
+      _cok["yeterli"] is True and _cok["durum"] == "fazla"
+      and _cok["fazla_dk"] == 60, str(_cok))
+
+# Yarım veriden "yetersiz uyuyor" sonucu ÇIKARILMAZ (yanlış alarm olmasın).
+check("5B-d) Gündüz VEYA gece verisi eksikse değerlendirme yapılmaz",
+      yb.toplam_uyku_degerlendir(_b7t, 180, None)["durum"] == "veri_yok"
+      and yb.toplam_uyku_degerlendir(_b7t, None, 600)["durum"] == "veri_yok"
+      and yb.toplam_uyku_degerlendir(_b7t, None, None)["yeterli"] is None, "")
+
+# Aralıklı hedefte (24-36 ay: 11-12,5 saat) alt/üst sınırlar
+_b30t = yb.yas_bandi_getir(30)
+check("5B-e) 24-36 ay hedefi aralık (660-750): 650→az, 700→yeterli, 800→fazla",
+      yb.toplam_uyku_degerlendir(_b30t, 60, 590)["durum"] == "az"
+      and yb.toplam_uyku_degerlendir(_b30t, 60, 640)["durum"] == "yeterli"
+      and yb.toplam_uyku_degerlendir(_b30t, 90, 710)["durum"] == "fazla",
+      f"hedef={_b30t['toplam_gunluk_uyku_dk']}")
 
 
 # =============================================================================
@@ -419,6 +506,21 @@ check("7f) Gündüz toplam 200 dk (>180) → kestirme gerekmez",
       f"gunduz={_sum_yeterli['avg_day_sleep_minutes']} "
       f"kestirme={_r_yeterli['kestirme']['gerekli']}")
 
+# 7e2) 24 saatlik toplam uyku değerlendirmesi adapt() çıktısına yansır (v1.1).
+#      Gece 20:00 yatış → 07:00 uyanış = 660 dk; gündüz 120 dk → toplam 780.
+#      6-8 ay ihtiyacı 840 dk → 60 dk eksik.
+_gece_loglar = [FakeLog("sleep", _utc(d + 1, 20), _utc(d, 7)) for d in range(3)]
+_sum_toplam = pa.summarize_logs(_naps_az + _gece_loglar, today=TODAY)
+_r_toplam = pa.adapt(_plan8, {}, _sum_toplam, today=TODAY, yas_ay=7)
+check("7e2) adapt: 24 saatlik toplam uyku eksikse raporlanır",
+      _sum_toplam["avg_night_sleep_minutes"] == 660.0
+      and _r_toplam["toplam_uyku"]["gerceklesen_dk"] == 780
+      and _r_toplam["toplam_uyku"]["eksik_dk"] == 60
+      and _r_toplam["toplam_uyku"]["durum"] == "az"
+      and any("24 saatlik toplam" in s for s in _r_toplam["reasons"]),
+      f"gece={_sum_toplam['avg_night_sleep_minutes']} "
+      f"toplam={_r_toplam['toplam_uyku']}")
+
 # 7g) avg_day_sleep_minutes (gün başına toplam) ile avg_nap_minutes (uyku başına)
 #     karıştırılmamalı.
 check("7g) avg_day_sleep_minutes gün TOPLAMI, avg_nap_minutes uyku ORTALAMASI",
@@ -445,12 +547,17 @@ check("8) parametre_uret yapılandırılmış bandı ve kestirme kuralını taş
       _param["yas_bandi"]["id"] == "9-12_ay"
       and _param["kestirme_protokolu"]["sure_dk"] == 30,
       f"bant={_param['yas_bandi']['id']}")
-check("8b) Plan parametrelerindeki sayılar tablodan geliyor (9-12 ay: 3-4 saat)",
+check("8b) Plan parametrelerindeki sayılar tablodan geliyor (9-12 ay)",
       _param["parametreler"]["uyaniklik_penceresi"] == "3 saat - 4 saat"
       and _param["parametreler"]["uyku_sayisi"] == "2 uyku (SABİT)"
-      and _param["parametreler"]["gunduz_uyku_total"] == "en az 2 saat",
+      and _param["parametreler"]["gunduz_uyku_total"] == "2 saat - 3 saat",
       f"{_param['parametreler']['uyaniklik_penceresi']} / "
-      f"{_param['parametreler']['uyku_sayisi']}")
+      f"{_param['parametreler']['uyku_sayisi']} / "
+      f"{_param['parametreler']['gunduz_uyku_total']}")
+# KB'nin toplam_uyku_24h değeri ("12-15 Saat") tabloyla çelişiyor → tablo kazanır.
+check("8b2) toplam_uyku_24h KB'den DEĞİL tablodan (9-12 ay = 14 saat)",
+      _param["parametreler"]["toplam_uyku_24h"] == "14 saat",
+      str(_param["parametreler"]["toplam_uyku_24h"]))
 
 # "9 aylık" sorusu artık boşluğa düşmez.
 _bantlar, _ay = chatbot.bant_coz("9 aylık bebeğim gece çok uyanıyor")
@@ -491,8 +598,19 @@ check("8g) Korpusta yaş bandı metin birimleri var (her bant + evrensel kuralla
 # Metin formu ile motor sayıları AYNI kaynaktan mı? (ayrışma testi)
 _metin_9 = next(u for u in _yb_units if u["chunk_id"] == "yas_bandi:9-12_ay")
 check("8h) Metin formu motorla ayrışmıyor (aynı sayılar)",
-      "3 saat - 4 saat" in _metin_9["text"] and "en az 2 saat" in _metin_9["text"],
+      "3 saat - 4 saat" in _metin_9["text"] and "2 saat - 3 saat" in _metin_9["text"],
       _metin_9["text"][:120].replace("\n", " | "))
+
+# 24 saatlik toplam hem korpus metnine hem chat bağlamına girmeli (v1.1).
+check("8i) 24 saatlik toplam korpus metninde var (9-12 ay = 14 saat)",
+      "TOPLAM uyku ihtiyacı" in _metin_9["text"] and "14 saat" in _metin_9["text"],
+      _metin_9["text"].replace("\n", " | "))
+check("8j) 24 saatlik toplam chat bağlamına giriyor",
+      "TOPLAM uyku ihtiyacı" in _blok and "14 saat" in _blok,
+      [s for s in _blok.split("\n") if "TOPLAM" in s])
+# KB'nin çelişen "12-15 Saat" değeri bağlama SIZMAMALI.
+check("8k) KB'nin çelişen toplam değeri ('12-15 Saat') bağlama sızmıyor",
+      "12-15 Saat" not in _blok, [s for s in _blok.split("\n") if "12-15" in s])
 
 
 # --- Özet --------------------------------------------------------------------

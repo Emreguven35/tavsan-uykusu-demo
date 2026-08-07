@@ -97,6 +97,8 @@ H) SON GÜNDÜZ UYKUSU BİTİŞ SAATİ ESNEKTİR: Günlük programda son gündü
 
 I) EVRENSEL KESTİRME KURALI (HER YAŞTA GEÇERLİ — MUTLAKA YAZ): Bebek yaşına uygun GÜNDÜZ TOPLAM UYKU MİNİMUMUNU tamamlayamazsa, ilave bir kestirme uykusu yaptırılır. Bu kestirme {param.get('kestirme_protokolu', {}).get('sure_dk', 30)} DAKİKADIR ve süre dolunca bebek UYANDIRILIR. Bu kestirmeden uyandıktan {param.get('kestirme_protokolu', {}).get('gece_uykusuna_gecis_dk', 60)} dakika (1 saat) sonra bile gece uykusuna geçilebilir — yani gece uykusu bir miktar gecikse dahi minimum gündüz uykusunu tamamlamak önceliklidir. Bu kuralı "Günlük Program" bölümünün altında ayrı bir not olarak yaz; süreyi ve 1 saat kuralını AÇIKÇA belirt. Minimum gündüz uyku süresini YAŞ PARAMETRELERİ'ndeki gunduz_uyku_total değerinden al, uydurma.
 
+J) 24 SAATLİK TOPLAM UYKU İHTİYACI (MUTLAKA YAZ): YAŞ PARAMETRELERİ'ndeki toplam_uyku_24h değeri, bebeğin gündüz + gece toplam uyku ihtiyacıdır. "Günlük Program" bölümünde bu değeri AÇIKÇA belirt ve anneye şunu anlat: bebeğin yeterince uyuyup uymadığının ölçütü tek tek uyku süreleri değil, 24 saatteki TOPLAMDIR. Gündüz ve gece toplamı bu değerin altında kalıyorsa önce gündüz uykularını (kestirme kuralıyla), sonra gece yatış saatini öne çekerek tamamlayın. Bu sayıyı YAŞ PARAMETRELERİ'nden aynen al, uydurma veya yuvarlama yapma.
+
 PROFIL:
 {_format_dict(param['profile_summary'])}
 
@@ -266,6 +268,13 @@ def _fallback_plan(param: dict) -> str:
             for k, v in uy.items():
                 lines.append(f"- **{k}**: {v}")
     lines.append("")
+
+    # 24 saatlik toplam uyku ihtiyacı (Faz Y v1.1) — "yeterince uyuyor mu?" ölçütü.
+    if p.get("toplam_uyku_24h"):
+        lines.append(f"**24 saatlik toplam uyku ihtiyacı:** {p['toplam_uyku_24h']} "
+                     "(gündüz + gece). Bebeğinizin yeterince uyuyup uyumadığının "
+                     "ölçütü tek tek uyku süreleri değil, 24 saatteki toplamdır.")
+        lines.append("")
 
     # Evrensel kestirme kuralı (Faz Y) — her yaşta geçerli, plandan düşmemeli.
     kestirme = param.get("kestirme_protokolu") or {}

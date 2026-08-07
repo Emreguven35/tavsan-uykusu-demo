@@ -258,6 +258,9 @@ def _param_deger(buckets: dict, band: str, alan: str) -> tuple[Any, str] | None:
 # Tablodan gelen (birincil) değerlerin tekrar KB'den yazılmasını önle.
 _TABLO_KAPSAMINDAKI_ALANLAR = {
     "uyaniklik_penceresi", "uyku_sayisi", "gunduz_uyku_total", "gece_uyku",
+    # toplam_uyku_24h: KB "12-15 Saat" gibi geniş aralıklar veriyor, İlayda'nın
+    # resmi tablosu bant başına net değer (ör. 6-8 ay = 14 saat). Tablo kazanır.
+    "toplam_uyku_24h",
 }
 
 
