@@ -178,7 +178,7 @@ class AskReq(BaseModel):
 #
 # GİZLİLİK: public /health'te TAM SHA verilmez (altyapı parmak izi). Yalnız kısa
 # sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
-APP_VERSION = os.getenv("APP_VERSION", "faz-o3")
+APP_VERSION = os.getenv("APP_VERSION", "faz-o4")
 # BUILD_TIME derleme/deploy anında env ile verilir (Railway Variables). Yoksa
 # sürecin başlama anına düşülür — bu da "bu instance ne zaman ayağa kalktı"
 # sorusunu cevaplar ve yeniden başlamayan konteyneri ele verir.
