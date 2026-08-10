@@ -78,6 +78,16 @@ GERCEK_CUMLELER = [
     "gece boyu ağlıyor",
     "her şeyi denedim hiçbiri olmadı",
     "bu iş bende yürümüyor",
+    # ÖZGÜVEN/ÇARESİZLİK (Faz O4) — O3 ölçümünde K4'e düştüğü görülen aile.
+    # Anne "bırakıyorum" demeden ÖNCE bu cümleyi kuruyor; burada karşılanmazsa
+    # müdahale edilecek an kaçırılıyor.
+    "Yanlış mı yapıyorum acaba, hiçbir şey yolunda gitmiyor",
+    "doğru mu yapıyorum bilmiyorum",
+    "hata mı ediyorum acaba",
+    "kafam karıştı ne yapacağımı bilmiyorum",
+    "kendimi yetersiz hissediyorum",
+    "emin değilim doğru gidiyor muyuz",
+    "hiçbir şey yolunda gitmiyor",
 ]
 
 _k4_dusenler = []
@@ -101,6 +111,50 @@ _alan_disi = [c for c in _METODOLOJISIZ if not (
     chatbot._alan_sinyali(c, None) or chatbot._ebeveynlik_sinyali(c))]
 check("1c) Metodoloji terimi içermeyen duygusal cümleler alan içi sayılıyor",
       not _alan_disi, str(_alan_disi))
+
+# --- Özgüven/çaresizlik ailesi (Faz O4) --------------------------------------
+# "Yanlış mı yapıyorum" tipi cümlelerde ne metodoloji terimi ne de klasik pes
+# etme ifadesi geçiyor. O3 ölçümünde K4'e düşüyorlardı. Üç şey birlikte sabitlenir:
+# alan içi sayılmaları, K4'e düşmemeleri ve TON kuralının tetiklenmesi.
+OZGUVEN_CUMLELERI = [
+    "Yanlış mı yapıyorum acaba, hiçbir şey yolunda gitmiyor",
+    "doğru mu yapıyorum bilmiyorum",
+    "hata mı ediyorum acaba",
+    "bu yöntem işe yaramıyor sanki",
+    "kafam karıştı ne yapacağımı bilmiyorum",
+    "kendimi yetersiz hissediyorum",
+    "her şey yolunda gitmedi bugün",
+    "emin değilim doğru gidiyor muyuz",
+    "beceriksiz bir anneyim galiba",
+    "yeterince iyi değilim",
+]
+_ozguven_k4 = [f"{c!r} → k4" for c in OZGUVEN_CUMLELERI if katman_of(c)[0] == "k4"]
+check("1d) Özgüven/çaresizlik cümlelerinin hiçbiri K4'e düşmüyor",
+      not _ozguven_k4, "\n       ".join(_ozguven_k4))
+
+_ozguven_alan_disi = [c for c in OZGUVEN_CUMLELERI
+                      if not chatbot._alan_sinyali(c, None)]
+check("1e) Özgüven cümleleri alan içi sayılıyor (sözlük tuttu)",
+      not _ozguven_alan_disi, str(_ozguven_alan_disi))
+
+# Ton kuralı ayrı bir iştir: katman soruyu içeri alır, duygu sinyali cevabın
+# ÖNCE anneyi görmesini zorunlu kılar. İkisi birden olmalı.
+_ton_yok = [c for c in OZGUVEN_CUMLELERI if chatbot.duygu_sinyali(c) != "zorlanma"]
+check("1f) Özgüven cümleleri 'zorlanma' duygu sinyali veriyor (ton kuralı tetikleniyor)",
+      not _ton_yok, str(_ton_yok))
+
+# AŞIRI GENİŞLEME KORUMASI: aynı kalıp başka bir konuda geçerse K4 kalmalı.
+# Sözlük genişledikçe kapı gevşemesin — 'kek', 'vergi' gibi açık kapsam dışı
+# işaretleri _katman_belirle'de sözlükten ÖNCE değerlendirilir.
+OZGUVEN_KAPSAM_DISI = [
+    "Kek yaparken yanlış mı yapıyorum",
+    "Vergi beyannamesinde hata mı ediyorum",
+    "Kod yazarken yanlış mı yapıyorum",
+]
+_sizanlar = [f"{c!r} → {katman_of(c)[0]}" for c in OZGUVEN_KAPSAM_DISI
+             if katman_of(c)[0] != "k4"]
+check("1g) Aynı kalıp BAŞKA konuda geçerse hâlâ K4 (kapı gevşemedi)",
+      not _sizanlar, "\n       ".join(_sizanlar))
 
 
 # =============================================================================
@@ -217,6 +271,9 @@ else:
         "bu yöntem bizde işe yaramıyor",
         "3 gündür ağlıyor hiç düzelmedi",
         "ben beceremiyorum",
+        # Faz O4 — O3 ölçümünde K4'e düşen cümle, canlı olarak da doğrulanır.
+        "Yanlış mı yapıyorum acaba, hiçbir şey yolunda gitmiyor",
+        "doğru mu yapıyorum bilmiyorum",
     ]
     for _soru in CANLI:
         chatbot._cache_state["entries"] = []

@@ -426,6 +426,40 @@ daha kötüdür. Skor `≥0.55` ise sözlük eşleşmese bile soru alan içi say
 asla K4 sayılmaz, doktor yönlendirmesi kapısına düşer); Claude K3'te bile yalnız
 KB ilkelerinden konuşur, serbest bilgi eklemez.
 
+#### Özgüven/çaresizlik ailesi (Faz O4)
+
+Faz O3 ölçümünde ikinci bir aile K4'e düşerken yakalandı: **"Yanlış mı yapıyorum
+acaba, hiçbir şey yolunda gitmiyor"**. Bu cümlelerde ne metodoloji terimi ne de
+klasik pes etme ifadesi ("vazgeç", "bırakıyorum") geçiyor — sözlüğün hiçbir grubu
+tutmuyordu. Önemi zamanlamasında: anne *"bırakıyorum"* demeden **önce** bu cümleyi
+kuruyor; burada karşılanmazsa müdahale edilecek an kaçırılıyor.
+
+Düzeltme **iki ayrı mekanizmaya** birden yazıldı, çünkü ikisi ayrı iş yapıyor:
+
+| Mekanizma | Ne sağlıyor |
+|---|---|
+| `MOTIVASYON_TERIMLERI` (sözlük) | Soruyu **alan içi** yapar → K1/K2/K3, K4 değil |
+| `_RE_ZORLANMA` (duygu sinyali) | Cevabın **önce anneyi görmesini** zorunlu kılar (ton kuralı) |
+
+Kapsanan kalıplar: "yanlış mı yapıyorum", "doğru mu yapıyorum", "hata mı ediyorum",
+"yolunda gitmiyor", "kafam karıştı", "emin değilim", "ne yapacağımı bilmiyorum",
+"yetersiz hissediyorum", "beceriksiz", "yeterince iyi değil".
+
+> **Türkçe tuzağı — soru eki cümlenin ortasına giriyor.** `"yanlış yapıyor"` kökü
+> `"yanlış MI yapıyorum"`u YAKALAMAZ. Sözlük tarafında ekli ve eksiz biçim ayrı
+> ayrı yazılır; regex tarafında `yanlış\s*(mı|mi)?\s*yap` kullanılır.
+
+**Sonuç:** bu cümleler artık **K3**'te cevaplanıyor — yani istenen K3.5 tabanının
+bir üstünde, aynı "genel ilkelerden cevapla + netleştirme sorusu sor" davranışıyla.
+Retrieval iyi eşleşme bulursa K2/K1'e de çıkabiliyorlar.
+
+**Aşırı genişleme koruması:** aynı kalıp başka bir konuda geçerse K4 kalır
+("Kek yaparken yanlış mı yapıyorum" → K4). `_katman_belirle` açık kapsam-dışı
+işaretini sözlükten **önce** değerlendiriyor; bu sıralama testle sabitlendi.
+
+Golden-set: `tests/test_kapsama.py` — 10 özgüven cümlesi + 3 aşırı-genişleme
+tuzağı, ikisi canlı cevapla doğrulanıyor.
+
 ## 6.7 Faz E — duygusal ton ve annenin ruhsal durumu
 
 `/chat` cevapları bilgi verirken İlayda'nın sıcaklığını da taşır. Ton kuralları

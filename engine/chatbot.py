@@ -1020,6 +1020,20 @@ MOTIVASYON_TERIMLERI = (
     "yorgun", "bitkin", "tükendi", "çaresiz", "kötü anne", "suçluluk", "pişman",
     # Ağlama/bağlanma kaygısı
     "güven bağ", "bağlanma", "travma", "zarar ver",
+    # ÖZGÜVEN / ÇARESİZLİK (Faz O4) — "doğru mu yapıyorum" tipi cümleler.
+    # Ölçümde yakalandı: "Yanlış mı yapıyorum acaba, hiçbir şey yolunda
+    # gitmiyor" K4'e düşüyordu. Bu cümlelerde ne metodoloji terimi ne de
+    # klasik pes etme ifadesi geçiyor — yukarıdaki grupların hiçbiri tutmuyor.
+    # Anne "bırakıyorum" demeden çok önce bu cümleyi kuruyor; K4'te karşılanması
+    # tam da müdahale edilmesi gereken anı kaçırmak demek.
+    # Soru eki cümlenin ortasına giriyor ("yanlış MI yapıyorum") — bu yüzden
+    # hem ekli hem eksiz biçim ayrı ayrı yazılır, kök eşleşmesi yetmiyor.
+    "yanlış mı yapıyor", "yanlış yapıyor", "yanlış mı yaptı", "yanlış yaptı",
+    "doğru mu yapıyor", "doğru yapıyor", "doğru mu gidiyor", "doğru gidiyor",
+    "hata mı ediyor", "hata mı yapıyor", "hata ediyor", "hatalı mı",
+    "yolunda gitmiyor", "yolunda gitmedi", "yolunda değil",
+    "kafam karış", "emin değilim", "ne yapacağımı bilmiyor",
+    "beceriksiz", "yetersiz hissed", "yeterince iyi değil",
 )
 
 
@@ -1473,7 +1487,15 @@ _RE_AGLAMA_ENDISESI = re.compile(
 _RE_ZORLANMA = re.compile(
     r"yorgun|bitkin|yoruldum|uykusuz|zorlanıyor|zor geliyor|dayanamıyor"
     r"|vazgeç|pes et|bırakmak istiyor|bıraksam|devam edemiyor|umudum"
-    r"|moralim|ağlıyorum|işe yaramıyor|başaramıyor|kötü bir anne", re.IGNORECASE)
+    r"|moralim|ağlıyorum|işe yaramıyor|başaramıyor|kötü\s*(bir\s*)?anne"
+    # ÖZGÜVEN/ÇARESİZLİK (Faz O4): "yanlış mı yapıyorum", "hiçbir şey yolunda
+    # gitmiyor". Bunlar da zorlanma kademesidir — cevabın önce anneyi görmesi,
+    # sonra yönlendirmesi gerekir. Sözlük tarafı (_alan_sinyali) soruyu alan
+    # içine alır, burası TONU zorunlu kılar; ikisi ayrı iştir.
+    r"|yanlış\s*(mı|mi)?\s*yap|doğru\s*(mu|mı)?\s*yap|doğru\s*(mu|mı)?\s*gidiyor"
+    r"|hata\s*(mı|mi)?\s*(ed|yap)|yolunda\s*(gitmiyor|gitmedi|değil)"
+    r"|kafam karış|emin değilim|ne yapacağımı bilmiyor"
+    r"|beceriksiz|yetersiz hissed|yeterince iyi değil", re.IGNORECASE)
 
 DUYGU_KURALI_AGLAMA = (
     "\n- DUYGUSAL ÇERÇEVE (ağlama endişesi): Cevabına annenin bu korkusunu gören "
