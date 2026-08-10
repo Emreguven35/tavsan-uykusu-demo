@@ -130,6 +130,45 @@ arşivi bozulmaz ve kural tek yerden değişir. KB anahtarları da isimsizdir ç
 Test: `tests/test_marka_ve_surum.py` — 20 çeşitli canlı soruda ihlal aranır
 (yaş, ortam, gece, yöntem, ağlama/motivasyon, tıbbi sınır, kapsam dışı, kriz).
 
+## Korpus filtreleri — eski numaralandırma ve danışmanlık lojistiği (Faz O3)
+
+Marka kuralıyla **aynı desen**: `chunks.json` değiştirilmez, filtre okuma anında
+uygulanır. İki sessiz sızıntı ölçümle yakalanıp kapatıldı.
+
+**1. Eski 5 günlük numaralandırma.** Ham kayıtlar İlayda'nın ESKİ 5 günlük
+programını anlatıyor ("üçüncü gün oda ortası", "beşinci gün yatır-çık") — **18 ayrı
+kayıtta**. Uygulanan program 13 günlük. Retrieval bu cümleleri getirdiği için model
+"3. gündeyim" sorusuna *oda ortası*, "6. gün" sorusuna *yatır-çık* diyordu.
+
+- `chatbot.gun_asama_temizle()` gün numarasını bir merdiven aşamasına **bağlayan
+  cümleleri** düşürür (75 cümle, korpusun %1,7'si). Teknik anlatım — bekleme
+  süreleri, 45 dakika kuralı, kucak aralıkları — olduğu gibi kalır.
+- Curated `kural_*` birimleri **muaftır** (gözden geçirilmiş içerik; cümle düşürmek
+  anlamlarını bozuyor).
+- Merdivenin **gün gün açık listesi** ayrı bir aranabilir birim olarak eklendi
+  (`…kademeli_uzaklasma_13_gun_dirençli.gun_gun_liste`). KB'deki aralık
+  anahtarlarından (`day_1_3`, `day_4_6`) **türetilir** — merdiven değişirse birim de
+  değişir, ayrışamaz. Aralık gösterimi sınır günlerinde yanlış okunduğu için 13 gün
+  tek tek yazılır (aynı ders `SYSTEM_PROMPT`'ta da alınmıştı).
+
+Ölçüm: 1–13. gün sorusu → **11/13 → 13/13**.
+
+**2. Danışmanlık lojistiği.** Rapor/video/tablo gönderme, iletişim saatleri, paket,
+ücret iadesi metodolojiyle aynı kayıtta. "Ben beceremiyorum" gibi sorular
+"danışmanınıza yazın" cevabına kayıyordu — **uygulama danışman değil, üründür.**
+
+- `data/chunk_konulari.json` arşiv listesini **gerekçeleriyle** tutar; oradaki
+  chunk'lar korpusa girmez (506 → 477 chunk birimi).
+- Arşivde: `kayıt28` (ücret iadesi/erteleme kaydının tamamı), `kayıt19` (paket ve
+  iletişim kuralları), `kayıt36`'nın lojistik kuyruğu (070–084, 086–087).
+  `kayıt36_chunk_085` metodoloji olduğu için **arşivlenmedi**.
+
+Ölçüm: 6 gerçek anne cümlesi × 2 örnek → **1/12 → 0/12** lojistik sapması.
+
+Test: `tests/test_korpus_filtreleri.py` (29 kontrol) — filtre davranışı, aşırı
+temizlik olmaması, kaynak dosyanın bozulmamış olması ve merdiven biriminin
+KB'den türetildiği.
+
 ---
 
 1. Repo'yu Railway'e bağla (New Project → Deploy from GitHub).
@@ -148,6 +187,41 @@ Test: `tests/test_marka_ve_surum.py` — 20 çeşitli canlı soruda ihlal aranı
 # Faz 6 — Adaptif plan, bildirim, e-posta
 
 Canlı: `https://tavsan-api-production.up.railway.app` · Mobil taban: `.../api/v1`
+
+## 6.0 Plan üretimi — eşzamanlılık ve kuyruk (Faz O2)
+
+Plan üretimi **~135 saniye** sürüyor. Süre neredeyse tamamen çıktı token sayısına
+bağlı: Sonnet 4.6 ~53 token/sn üretiyor, plan ~7.200 token. Ölçüldü ve doğrulandı:
+
+| Kurulum | Süre | Çıktı | Maliyet |
+|---|---|---|---|
+| Sonnet 4.6, tek çağrı (**üretimdeki**) | 137 sn | 7.167 tok | $0,133 |
+| Haiku 4.5, tek çağrı | 107 sn | 10.450 tok | $0,060 |
+| Sonnet, 3 parça paralel | 83 sn | 10.614 tok | $0,237 |
+| Sonnet, 4 parça paralel | 80 sn | 15.124 tok | $0,279 |
+
+**Model Sonnet 4.6'da kalıyor.** Haiku aynı prompt'la iki içerik kuralını ihlal etti
+("temas yok", "hiç yaklaşmayın" — metodolojiye aykırı) ve prompt caching'i sessizce
+devre dışı bıraktı (sabit ön-ek 3.707 token, Haiku 4.5'in cache eşiği 4.096).
+
+**Paralelleştirme kapalı.** Her parça tek başına daha uzun yazdığı için toplam çıktı
+şişiyor, duvar saati ~80 sn'de tıkanıyor ve maliyet ikiye katlanıyor.
+
+**Eşzamanlılık:** üretim uvicorn threadpool'unda değil, **adanmış 3 kişilik havuzda**
+koşar (`plan_jobs.MAX_ESZAMANLI`). Yığılma `/health` dahil hiçbir ucu etkilemez.
+
+`POST /plans/generate` (202) ve `GET /plans/generate/{job_id}` yanıtları
+**`queue_position`** taşır: `0` = üretim başladı (ya da bitti), `>0` = havuz dolu,
+önünde kaç iş var. Alan varsayılan `0`'dır — eski istemciler etkilenmez.
+
+> **Beta sonrasına not — streaming.** Toplam süreyi kısaltmadan algılanan gecikmeyi
+> çözen tek seçenek planı akış olarak göndermek: ilk metin 2–3 saniyede ekrana düşer,
+> anne planın yazılışını izler. İş/polling mimarisinin SSE'ye taşınmasını ve mobil
+> tarafında karşılık gelen değişikliği gerektirir. Beta çıkışından sonra ele alınacak.
+>
+> **İlayda onayı bekliyor — plan kısaltma.** 60 sn'nin altına inmek ~950 kelime
+> gerektiriyor (bugün 2.175). Kesilebilecek yer: her eğitim gününün altına yazılan
+> "kısa gündüz uykusu" ve "B Planı" blokları aşama başına bir kez yazılabilir.
 
 ## 6.1 Adaptif plan
 

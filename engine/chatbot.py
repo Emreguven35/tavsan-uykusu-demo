@@ -167,6 +167,76 @@ def marka_temizle(metin: str) -> str:
     return re.sub(r"\s+([,.;:!?])", r"\1", metin)
 
 
+# ---------------------------------------------------------------------------
+# GÜN↔AŞAMA TEMİZLİĞİ — eski 5 günlük numaralandırma korpustan çıkar (Faz O3)
+# ---------------------------------------------------------------------------
+# SORUN: ham transkriptler İlayda'nın ESKİ 5 günlük programını anlatıyor —
+# "üçüncü gün oda ortası", "beşinci gün yatır-çık". Uygulanan program artık
+# 13 GÜNLÜK (1-3 beşik yanı · 4-6 oda ortası · 7-9 kapı · 10-12 kapı eşiği ·
+# 13 yatır-çık). Korpusta 18 ayrı kayıtta bu eski eşleme geçiyor ve retrieval
+# onları getirdiği için model "3. gündeyim" sorusuna "oda ortası", "6. gün"
+# sorusuna "yatır-çık" diyordu (ölçüm: 13 günün 2'si yanlış).
+#
+# ÇÖZÜM: gün numarasını bir merdiven aşamasına BAĞLAYAN cümleler korpustan
+# düşürülür. Teknik anlatım (bekleme süreleri, 45 dakika kuralı, kucak
+# aralıkları) olduğu gibi kalır — yalnızca "kaçıncı günde neredeyiz" iddiası
+# çıkar. Gün↔aşama eşlemesinin TEK yetkili kaynağı KB'deki 13 günlük merdiven
+# ve SYSTEM_PROMPT'taki gün gün listedir; transkriptin ikinci bir eşleme
+# önermesine gerek yok.
+#
+# Kapsam: yalnız ham transkript chunk'ları. 'kural_' ile başlayan CURATED
+# birimler muaftır — onlar gözden geçirilmiş içeriktir ve cümle düşürmek
+# anlamlarını bozar (örn. aşı sonrası kuralı "ikinci-üçüncü gün gibi davran"
+# derken 13 günlük merdivende de doğru olan beşik yanı evresini kastediyor).
+_GUN_DESENI = re.compile(
+    r"(birinci|ikinci|üçüncü|dördüncü|beşinci|altıncı|yedinci|sekizinci|dokuzuncu"
+    r"|onuncu|on\s*bir(inci)?|on\s*iki(nci)?|on\s*üç(üncü)?)\s*gün"
+    r"|\b\d{1,2}\s*\.\s*gün", re.IGNORECASE)
+# 'oda\w*\s+ortas': odanın / odasının / odamızın ortası — transkriptte üçü de geçiyor.
+# 'uzaklaş': "üçüncü gün uzaklaşmayacağız, dördüncü gün uzaklaşacağız" da bir
+# gün↔aşama iddiasıdır (uzaklaşma = merdivende bir basamak ilerlemek).
+_ASAMA_DESENI = re.compile(
+    r"beşik yan|beşiğin yan|yatak yan|oda\w*\s+ortas|kapı(nın)? eşiğ|kapıya geç"
+    r"|kapıda|yatır.?\s?çık|yatırıp çık|yatırcık|yatır cık|yatırma ve çıkma"
+    r"|yatırmak ve çıkmak|uzaklaş", re.IGNORECASE)
+# "beş günde yatır çık yaparız" gibi SÜRE iddiaları (gün numarası geçmese de).
+_KAC_GUNDE_DESENI = re.compile(
+    r"(beş|5|on üç|13)\s*gün(de|ün)?\s*(sonra)?[^.!?]{0,30}(yatır|yatırcık)",
+    re.IGNORECASE)
+
+
+def gun_asama_temizle(metin: str) -> str:
+    """Gün numarasını merdiven aşamasına bağlayan cümleleri metinden çıkar.
+
+    "Birinci gün, ikinci gün beşik yanı, üçüncü gün oda ortasındaydık." → düşer
+    "Otuz saniye bekledik, sonra kucağa aldık."                        → kalır
+    """
+    if not metin:
+        return metin
+    kalan = [c for c in re.split(r"(?<=[.!?])\s+", metin)
+             if not ((_GUN_DESENI.search(c) and _ASAMA_DESENI.search(c))
+                     or _KAC_GUNDE_DESENI.search(c))]
+    return re.sub(r"\s{2,}", " ", " ".join(kalan)).strip()
+
+
+# ---------------------------------------------------------------------------
+# KONU FİLTRESİ — danışmanlık lojistiği korpusa girmez (Faz O3)
+# ---------------------------------------------------------------------------
+# Ham kayıtlarda metodoloji ile danışmanlık lojistiği (iletişim saatleri,
+# rapor/video/tablo iletme, paket, ücret iadesi) iç içe. Retrieval bunları
+# ayırt edemediği için "ben beceremiyorum" gibi sorular "rapor gönderin /
+# danışmanınıza yazın" cevabına kayıyordu — oysa uygulama danışman değil, ürün.
+# Liste data/chunk_konulari.json'da gerekçeleriyle durur; chunks.json'a
+# DOKUNULMAZ (transkript arşivi bozulmasın) — marka temizliğiyle aynı desen.
+def _arsiv_chunk_idleri() -> set[str]:
+    yol = DATA_DIR / "chunk_konulari.json"
+    if not yol.exists():
+        return set()
+    with open(yol, "r", encoding="utf-8") as f:
+        veri = json.load(f)
+    return {x["chunk_id"] for x in veri.get("arsiv", [])}
+
+
 def _is_descriptive_text(value: Any) -> bool:
     """Açıklayıcı metin mi (embed edilmeli), yoksa sayısal/kısa parametre mi?"""
     if not isinstance(value, str):
@@ -524,11 +594,22 @@ def build_corpus() -> list[dict]:
     """
     units: list[dict] = []
 
-    # 1) chunks.json — metni AYNEN korunur (mevcut davranış değişmesin)
+    # 1) chunks.json — iki filtre uygulanır (Faz O3), kaynak dosya değişmez:
+    #    a) konu: danışmanlık lojistiği chunk'ları hiç alınmaz,
+    #    b) gün↔aşama: eski 5 günlük numaralandırma cümleleri düşürülür.
+    #    Curated 'kural_' birimleri (b)'den muaftır — gerekçe gun_asama_temizle'de.
+    arsiv = _arsiv_chunk_idleri()
     for c in load_chunks():
+        if c["chunk_id"] in arsiv:
+            continue
+        metin = c["text"]
+        if not c["chunk_id"].startswith("kural_"):
+            metin = gun_asama_temizle(metin)
+        if not metin.strip():                    # tamamı düşerse birim açma
+            continue
         units.append({
             "chunk_id": c["chunk_id"],
-            "text": c["text"],
+            "text": metin,
             "source": "chunk",
             "lesson_id": c.get("lesson_id"),
             "label": c.get("lesson_title") or "İçerik",
@@ -562,6 +643,40 @@ def build_corpus() -> list[dict]:
                 "lesson_id": None,
                 "label": label,
             })
+
+    # 2b) 13 GÜNLÜK MERDİVENİN GÜN GÜN AÇIK LİSTESİ (Faz O3)
+    #
+    # SORUN: KB'deki merdiven 'day_1_3', 'day_4_6' gibi ARALIK anahtarlarında
+    # duruyor ve _flatten_texts her anahtarı ayrı bir birime çeviriyor. "Eğitimin
+    # 3. gününde neredeyim" sorusuyla "Day 1 3: Beşik yanı" metni arasındaki
+    # benzerlik zayıf — ölçümde bu birim ilk 6 sonuca hiç girmiyordu, transkriptin
+    # eski 5 günlük anlatımı ise giriyordu. Model doğru cevabı retrieval'dan değil
+    # SYSTEM_PROMPT'tan veriyordu; retrieval gürültüsü onu 3. ve 4. günde saptırdı.
+    #
+    # ÇÖZÜM: aynı KB verisinden TEK ve gün gün açık bir birim üret. Aralık yerine
+    # her gün ayrı yazılır (aralık gösterimi sınır günlerinde yanlış okunuyordu —
+    # aynı ders SYSTEM_PROMPT'ta da alınmıştı). Metin KB'den türetildiği için
+    # merdiven değişirse bu birim kendiliğinden değişir, ayrışamaz.
+    merdiven = kb.get("global_rules", {}).get("kademeli_uzaklasma_13_gun_dirençli", {})
+    gun_konum: dict[int, str] = {}
+    for anahtar, konum in merdiven.items():
+        sayilar = [int(s) for s in re.findall(r"\d+", anahtar)]
+        if not anahtar.startswith("day_") or not sayilar:
+            continue
+        for g in range(sayilar[0], sayilar[-1] + 1):
+            gun_konum[g] = konum
+    if gun_konum:
+        satirlar = " ".join(f"{g}. gün: {gun_konum[g]}." for g in sorted(gun_konum))
+        units.append({
+            "chunk_id": "global_rule:kademeli_uzaklasma_13_gun_dirençli.gun_gun_liste",
+            "text": ("Eğitimin kaçıncı gününde nerede duracağım — 13 günlük kademeli "
+                     f"uzaklaşma merdiveni, gün gün: {satirlar} Eğitimin belirli bir "
+                     "gününde annenin nerede duracağı sorulduğunda geçerli cevap "
+                     "budur. Eski 5 günlük numaralandırma artık uygulanmıyor."),
+            "source": "global_rule",
+            "lesson_id": None,
+            "label": "13 günlük kademeli uzaklaşma — gün gün konum",
+        })
 
     # 3) yaş bucket'ları — yalnızca AÇIKLAYICI metin alanları (sayısal tablolar HARİÇ)
     for band, bucket in kb.get("yas_buckets", {}).items():

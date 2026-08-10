@@ -1,0 +1,122 @@
+{
+  "_aciklama": "Chunk konu sınıflandırması (Faz O3). Ham transkriptlerde uyku eğitimi METODOLOJİSİ ile danışmanlık LOJİSTİĞİ (iletişim saatleri, rapor/video gönderme, paket, ücret iadesi) aynı kayıtta iç içe geçiyor. Retrieval bunları ayırt edemediği için 'ben beceremiyorum' gibi sorular 'rapor gönderin / danışmanınıza yazın' cevabına kayıyordu — oysa uygulama danışman değil, ürün.\nBuradaki chunk'lar korpusa GİRMEZ. chunks.json'a DOKUNULMAZ (transkript arşivi bozulmasın); filtre okuma anında uygulanır — marka temizliğiyle aynı desen.",
+  "_kural": "durum='arsiv' olan chunk_id korpusa alınmaz (engine/chatbot.py build_corpus).",
+  "arsiv": [
+    {
+      "chunk_id": "kayıt19_chunk_001",
+      "gerekce": "paket kuralları — eğitim takvimi (Pazartesi-Perşembe) ve anlık destek saatleri"
+    },
+    {
+      "chunk_id": "kayıt19_chunk_002",
+      "gerekce": "paket kuralları — takvim örneği ve destek süresi hesabı"
+    },
+    {
+      "chunk_id": "kayıt19_chunk_003",
+      "gerekce": "günlük uyku güncesi tablosunu doldurup danışmana iletme talimatı"
+    },
+    {
+      "chunk_id": "kayıt19_chunk_004",
+      "gerekce": "paket kuralları — soru yanıtlama saatleri ve iletişim çerçevesi"
+    },
+    {
+      "chunk_id": "kayıt28_chunk_001",
+      "gerekce": "ücret iadesi ve eğitim ertelemesi politikası — kayıtta metodoloji yok"
+    },
+    {
+      "chunk_id": "kayıt28_chunk_002",
+      "gerekce": "ücret iadesi ve eğitim ertelemesi politikası — kayıtta metodoloji yok"
+    },
+    {
+      "chunk_id": "kayıt28_chunk_003",
+      "gerekce": "ücret iadesi ve eğitim ertelemesi politikası — kayıtta metodoloji yok"
+    },
+    {
+      "chunk_id": "kayıt28_chunk_004",
+      "gerekce": "ücret iadesi ve eğitim ertelemesi politikası — kayıtta metodoloji yok"
+    },
+    {
+      "chunk_id": "kayıt28_chunk_005",
+      "gerekce": "ücret iadesi ve eğitim ertelemesi politikası — kayıtta metodoloji yok"
+    },
+    {
+      "chunk_id": "kayıt28_chunk_006",
+      "gerekce": "ücret iadesi ve eğitim ertelemesi politikası — kayıtta metodoloji yok"
+    },
+    {
+      "chunk_id": "kayıt28_chunk_007",
+      "gerekce": "ücret iadesi ve eğitim ertelemesi politikası — kayıtta metodoloji yok"
+    },
+    {
+      "chunk_id": "kayıt28_chunk_008",
+      "gerekce": "ücret iadesi ve eğitim ertelemesi politikası — kayıtta metodoloji yok"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_070",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_071",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_072",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_073",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_074",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_075",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_076",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_077",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_078",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_079",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_080",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_081",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_082",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_083",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_084",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_086",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    },
+    {
+      "chunk_id": "kayıt36_chunk_087",
+      "gerekce": "danışmanlık lojistiği (iletişim saatleri, rapor/video/tablo iletme, paket, ücret iadesi)"
+    }
+  ]
+}
