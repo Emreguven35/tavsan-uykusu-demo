@@ -282,89 +282,88 @@ def on_hazirlik_belirle(profile: dict, yas: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Plan seçimi — 5 günlük standart mı 13 günlük dirençli mi
+# Plan seçimi — KARAR KB'DEN OKUNUR (İlayda kararı, 2026-08-10)
 # ---------------------------------------------------------------------------
-def _otomatik_yontem_sec(mizac: str, dayanma: str) -> dict:
-    """Mizaç + dayanma sınırına göre 5 mi 13 günlük yöntem mi (1 aylık programın 3-4. haftası için)."""
-    inatci = any(k in mizac for k in ["inatçı", "huysuz", "zor", "kararlı"])
-    hassas = any(k in mizac for k in ["hassas", "duyarlı"])
-    dusuk_dayanma = any(d in dayanma for d in ["10", "15 dakika", "20 dakika", "hiç", "az"])
-    if (inatci and dusuk_dayanma) or hassas:
-        return {
-            "tip": "13_gun_dirençli",
-            "gunler": 13,
-            "aciklama": "13 günlük kademeli yöntem: yatak yanı 1-3 gün, oda ortası 4-6, kapı 7-9, eşik 10-12, yatır-çık 13.",
-        }
-    return {
-        "tip": "5_gun_standart",
-        "gunler": 5,
-        "aciklama": "5 günlük standart yöntem: yatak yanı 1-2, oda ortası 3, kapı eşiği 4, yatır-çık 5.",
-    }
+# TÜM bebekler 13 günlük kademeli programa tabidir. Yaklaşım tercihi, mizaç ve
+# ağlamaya dayanma sınırı plan SÜRESİNİ ARTIK ETKİLEMEZ.
+#
+# Kural kodda SABİT DEĞİL: master_knowledge_base.json > global_rules >
+# egitim_plani_secimi'den okunur. Böylece karar İlayda'nın onayına açık bir
+# veri kaydı olur; değiştirmek için kod dağıtmak gerekmez.
+#
+# Kaldırılan mantık (önceki sürüm): mizaç ("hassas"/"inatçı") + dayanma sınırı
+# eşiğine göre 5 vs 13 seçimi ve tercih alanının bunu ezmesi. Bu mantığın
+# tamamı KB'de belgelenmemişti, yalnız kodda yaşıyordu (keşif raporu, madde 4).
+# Beraberinde alt-dize eşleşme hatası da gitti: "biraz" içindeki "az" ve
+# "60-100 dakika" içindeki "10" düşük tolerans sayılıyordu; dayanma_siniri'nin
+# başka bir karar noktasında kullanımı YOK (tarandı), dolayısıyla hata bu
+# kodun kaldırılmasıyla tamamen kapandı.
+
+# 1 aylık program bayrağı. Tercih alanı kalktığı için tetiklenemez hâle geldi;
+# kod SİLİNMEDİ, ileride geri açılabilsin diye bayrakla kapatıldı.
+BIR_AY_PROGRAM_AKTIF = False
+
+# Kural okunamazsa kullanılacak son çare (KB bozuksa plan üretimi durmasın).
+_VARSAYILAN_PLAN = {
+    "tip": "13_gun_dirençli",
+    "gunler": 13,
+    "aciklama": ("13 günlük kademeli plan: yatak yanı 1-3 gün, oda ortası 4-6, "
+                 "kapı 7-9, eşik 10-12, yatır-çık 13."),
+}
 
 
-def egitim_plani_secimi(profile: dict, yas: dict) -> dict:
-    """5_gun_standart / 13_gun_dirençli / 6_gun_buyuk_cocuk / 1_ay_program."""
-    # Büyük çocuk (24+ ay)
-    if yas["duzeltilmis_ay"] >= 24:
-        return {
-            "tip": "6_gun_buyuk_cocuk",
-            "gunler": 6,
-            "aciklama": "Büyük çocuk planı: 6 günlük (motivasyon panosu + 5 oyuncak + pozitif teşvik dahil).",
-        }
+def _plan_kurali(kb: dict | None = None) -> dict:
+    """KB'deki plan seçimi kaydını getir (yoksa güvenli varsayılan)."""
+    try:
+        kural = (kb or load_kb()).get("global_rules", {}).get("egitim_plani_secimi")
+        if isinstance(kural, dict) and kural.get("varsayilan_plan"):
+            return kural
+    except Exception:                       # KB okunamadı → plan üretimi durmasın
+        pass
+    return {"varsayilan_plan": dict(_VARSAYILAN_PLAN), "istisnalar": []}
 
-    tercih = _lowstr(profile.get("yaklasim_tercihi"))
-    mizac = _lowstr(profile.get("mizac"))
-    dayanma = _lowstr(profile.get("dayanma_siniri"))
 
-    # 1 aylık yumuşak geçiş programı: ilk 2 hafta destekle uyku (sadece düzen), 3-4. hafta eğitim.
-    if "1 ay" in tercih or "aylık program" in tercih:
-        alt = _otomatik_yontem_sec(mizac, dayanma)
-        return {
-            "tip": "1_ay_program",
-            "gunler": 28,
-            "alt_yontem_tip": alt["tip"],
-            "alt_yontem_gunler": alt["gunler"],
-            "alt_yontem_aciklama": alt["aciklama"],
-            "aciklama": (
-                "1 aylık yumuşak geçiş programı. Hafta 1-2 'Düzen Oturtma Dönemi': "
-                "destekle uyku devam eder, yalnızca uyku/beslenme saatleri ve rutinler "
-                "uygulanır (uyku eğitimi tekniği YOK, biyolojik saat oturtulur). "
-                "Hafta 3-4 'Eğitim Dönemi': bebeğe uygun yöntem devreye girer — "
-                f"{alt['aciklama']}"
-            ),
-        }
+def egitim_plani_secimi(profile: dict, yas: dict, kb: dict | None = None) -> dict:
+    """Eğitim planını seç. Dönen: 13_gun_dirençli (varsayılan) /
+    6_gun_buyuk_cocuk (24+ ay istisnası) / 1_ay_program (bayrak açıksa).
 
-    # Kullanıcı net istek belirttiyse
-    if "13" in tercih or "yumuşak" in tercih or "kademeli" in tercih or "uzun" in tercih:
-        return {
-            "tip": "13_gun_dirençli",
-            "gunler": 13,
-            "aciklama": "13 günlük kademeli plan: yatak yanı 1-3 gün, oda ortası 4-6, kapı 7-9, eşik 10-12, yatır-çık 13.",
-        }
-    if "5" in tercih or "hızlı" in tercih or "standart" in tercih:
-        return {
-            "tip": "5_gun_standart",
-            "gunler": 5,
-            "aciklama": "5 günlük standart plan: yatak yanı 1-2, oda ortası 3, kapı eşiği 4, yatır-çık 5.",
-        }
+    profile artık plan SÜRESİNİ etkilemez; yalnız 1 aylık program bayrağı
+    açıkken tercih alanına bakılır."""
+    kural = _plan_kurali(kb)
 
-    # Otomatik karar: mizaç + dayanma sınırı
-    inatci = any(k in mizac for k in ["inatçı", "huysuz", "zor", "kararlı"])
-    hassas = any(k in mizac for k in ["hassas", "duyarlı"])
-    dusuk_dayanma = any(d in dayanma for d in ["10", "15 dakika", "20 dakika", "hiç", "az"])
+    # --- İstisnalar (şimdilik tek: 24+ ay büyük çocuk) ----------------------
+    # TODO(İlayda onayı bekliyor): Büyük çocuk planı kendine özel içerik taşıyor
+    # (motivasyon panosu, 5 oyuncak, pozitif teşvik). 24+ ay da 13 güne çekilecek
+    # mi soruldu; cevaba göre bu istisna KB'den kaldırılabilir — kod değişikliği
+    # gerekmez, global_rules.egitim_plani_secimi.istisnalar boşaltmak yeterli.
+    for istisna in kural.get("istisnalar") or []:
+        if istisna.get("kosul") == "duzeltilmis_ay >= 24" and yas["duzeltilmis_ay"] >= 24:
+            return dict(istisna["plan"])
 
-    if (inatci and dusuk_dayanma) or hassas:
-        return {
-            "tip": "13_gun_dirençli",
-            "gunler": 13,
-            "aciklama": "Mizaç + dayanma sınırı dikkate alınarak 13 günlük kademeli plan önerildi.",
-        }
+    varsayilan = dict(kural["varsayilan_plan"])
 
-    return {
-        "tip": "5_gun_standart",
-        "gunler": 5,
-        "aciklama": "Standart 5 günlük plan önerildi. Direnç görülürse 13 güne uzatılır.",
-    }
+    # --- 1 aylık program (DEVRE DIŞI) ---------------------------------------
+    # Tercih alanı kaldırıldığı için normalde buraya girilmez. Bayrak açılırsa
+    # 3-4. haftanın alt yöntemi ARTIK SABİT 13 günlüktür (mizaç bakılmaz).
+    if BIR_AY_PROGRAM_AKTIF:
+        tercih = _lowstr(profile.get("yaklasim_tercihi"))
+        if "1 ay" in tercih or "aylık program" in tercih:
+            return {
+                "tip": "1_ay_program",
+                "gunler": 28,
+                "alt_yontem_tip": varsayilan["tip"],
+                "alt_yontem_gunler": varsayilan["gunler"],
+                "alt_yontem_aciklama": varsayilan["aciklama"],
+                "aciklama": (
+                    "1 aylık yumuşak geçiş programı. Hafta 1-2 'Düzen Oturtma Dönemi': "
+                    "destekle uyku devam eder, yalnızca uyku/beslenme saatleri ve rutinler "
+                    "uygulanır (uyku eğitimi tekniği YOK, biyolojik saat oturtulur). "
+                    "Hafta 3-4 'Eğitim Dönemi': " + varsayilan["aciklama"]
+                ),
+            }
+
+    # --- Varsayılan: HERKES 13 günlük --------------------------------------
+    return varsayilan
 
 
 # ---------------------------------------------------------------------------
@@ -519,7 +518,8 @@ def parametre_uret(profile: dict) -> dict:
 
     uygun, uyarilar = egitim_uygunlugu_kontrol(profile, yas)
     on_hazirlik = on_hazirlik_belirle(profile, yas)
-    plan_secimi = egitim_plani_secimi(profile, yas)
+    # kb zaten yüklü — tekrar okumasın diye geçilir (plan kuralı buradan gelir).
+    plan_secimi = egitim_plani_secimi(profile, yas, kb)
     gece_beslenme = gece_beslenme_planla(profile, yas)
     # 1 aylık programda eğitim (3-4. hafta) alt yöntemin bekleme sürelerini kullanır.
     bekleme_tip = plan_secimi.get("alt_yontem_tip", plan_secimi["tip"])

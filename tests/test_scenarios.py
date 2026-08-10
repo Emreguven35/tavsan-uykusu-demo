@@ -62,7 +62,7 @@ TEST_PROFILES = [
             "en_zor_zaman": "Gece uyanmaları",
             "beklenti": "Gece kesintisiz 6+ saat uyku",
         },
-        "beklenen": "5 günlük standart plan. Ön hazırlık: emerek uyuma → sallanma, paravan, karartma perdesi.",
+        "beklenen": "13 günlük kademeli plan (artık HERKES 13 gün). Ön hazırlık: emerek uyuma → sallanma, paravan, karartma perdesi.",
     },
     {
         "ad": "Test 2 — 8 aylık, sık gece uyanma, ek gıdaya başlamış",
@@ -96,7 +96,7 @@ TEST_PROFILES = [
             "en_zor_zaman": "Gece uyanmaları",
             "beklenti": "Düzeni yeniden kurmak",
         },
-        "beklenen": "13 günlük dirençli plan (huysuz mizaç + düşük dayanma). 4+ uyanma → emerek değiştirme hatırlatması.",
+        "beklenen": "13 günlük kademeli plan (mizaç/dayanma artık ETKİSİZ). 4+ uyanma → emerek değiştirme hatırlatması.",
     },
     {
         "ad": "Test 3 — 14 aylık, 2 nap'tan tek uyku geçişi",
@@ -129,7 +129,7 @@ TEST_PROFILES = [
             "en_zor_zaman": "Gündüz uykuları (kısa uyku, uzatma)",
             "beklenti": "Tek uykuya geçiş zamanlaması",
         },
-        "beklenen": "5 günlük plan. Tek uyku geçiş yaşına gelmiş (15-18 ay önerisi, henüz erken).",
+        "beklenen": "13 günlük kademeli plan. Tek uyku geçiş yaşına gelmiş (15-18 ay önerisi, henüz erken).",
     },
     {
         "ad": "Test 4 — 3 aylık, eğitim alamayacak yaşta",
@@ -162,7 +162,7 @@ TEST_PROFILES = [
             "en_zor_zaman": "Gece uyanmaları",
             "beklenti": "Gece düzenli uyku",
         },
-        "beklenen": "Eğitim UYGUN DEĞİL. 5 ay alt sınır. Sadece saat planlaması yapılabilir.",
+        "beklenen": "Eğitim UYGUN DEĞİL. 5 ay alt sınır. Sadece saat planlaması yapılabilir. (Plan tipi yine 13 günlük döner ama uygun_mu=False.)",
     },
     {
         "ad": "Test 5 — Prematüre düzeltme: 7 ay (36 hf doğum → düzeltilmiş 6 ay)",

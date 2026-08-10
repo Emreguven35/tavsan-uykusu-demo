@@ -480,13 +480,8 @@
     "yas_alt_siniri (kayıt37)": "Eğitim 5. ayın dolmasıyla verilir; kademeli kavram bu yaşta gelişir.",
     "yas_giris_ve_ust_sinir (ek 2026-06-09)": "4. ayın dolmasıyla yalnızca HAZIRLIK/GİRİŞ dönemi başlayabilir (destek değiştirme vb.); asıl eğitim 5. ayın dolmasıyla başlar — min 5 ay kuralı (yas_alt_siniri) DEĞİŞMEZ. Üst sınır ~6 yaş; 2-3 yaş için geç değildir. Asistanın 9-10 ayı işaret etmesi YANLIŞTIR.",
     "prematüre_düzeltme (kayıt40)": "Her 4 hafta erkenlik = 1 ay geriden değerlendirme (örn. 36 hf doğum → 6 ayda 5 ay gibi).",
-    "kademeli_uzaklasma_5_gun": {
-      "day_1_2": "Beşik yanı (sandalye veya ayakta)",
-      "day_3": "Oda ortası (temas ihtiyacını kademeli azaltma; gerekirse temas edip sandalyeye geri dönülür)",
-      "day_4": "Kapı eşiği (içerden, anneye tam görünür, ses desteği azaltılır)",
-      "day_5": "Yatır-çık (odadan tamamen çıkış)"
-    },
     "kademeli_uzaklasma_13_gun_dirençli": {
+      "_durum": "GEÇERLİ MERDİVEN — tüm bebekler bu programa tabidir. Gün numarasına göre konum sorulduğunda bu eşleme kullanılır.",
       "day_1_3": "Beşik yanı",
       "day_4_6": "Oda ortası",
       "day_7_9": "Kapı (içerden, anneye tam görünür)",
@@ -556,6 +551,38 @@
       "egitimi_birakmak_cozum_degil": "Anne pes etmek üzereyse: eğitimi bırakmak sorunu çözmez. Çocuk memeyi ya da sallanmayı bıraktığında kendiliğinden uyumayı öğrenmez; yalnızca yanlış uyku alışkanlığı şekil değiştirir. Elli altı aylık hâlâ sallanarak uyuyan çocuklar vardır. Desteği kademeli çekmeden çocuk uykuyu öğrenmiyor.",
       "babalara_ve_cevreye": "Babalara ve çevreye seslenmek: Uyutma sorumluluğu tek başına anneye bırakılmamalıdır. Ağlamaya dayanamayan baba evden çıkabilir ama eşine destek olmalıdır; psikolojik destek en önemli unsurdur. Anneanne ve babaannelerin yaklaşımları farklı olabilir; uyutma yöntemleri de tıp gibi zamanla gelişir.",
       "anne_ruhsal_zorlanma_siniri": "Anne derin çaresizlik, tükenmişlik ya da kendine veya bebeğine zarar verme ima ediyorsa: bu bir uyku sorunu olarak ele alınmaz. Anneye duygusal destek verilir ve bir uzmandan (kendi doktoru, psikolog ya da psikiyatri uzmanı) yardım alması önerilir. Bu durumda uyku eğitimi tekniği anlatılmaz. Doğum sonrası dönemde bu duygular yaygındır ve destekle geçer."
+    },
+    "egitim_plani_secimi": {
+      "kural": "Tüm bebekler 13 günlük kademeli programa tabidir. Yaklaşım tercihi, mizaç ve ebeveynin ağlamaya dayanma sınırı plan SÜRESİNİ ETKİLEMEZ. Tek istisna 24 ay ve üzeri çocuklardır (büyük çocuk planı).",
+      "varsayilan_plan": {
+        "tip": "13_gun_dirençli",
+        "gunler": 13,
+        "aciklama": "13 günlük kademeli plan: yatak yanı 1-3 gün, oda ortası 4-6, kapı 7-9, eşik 10-12, yatır-çık 13."
+      },
+      "istisnalar": [
+        {
+          "kosul": "duzeltilmis_ay >= 24",
+          "plan": {
+            "tip": "6_gun_buyuk_cocuk",
+            "gunler": 6,
+            "aciklama": "Büyük çocuk planı: 6 günlük (motivasyon panosu + 5 oyuncak + pozitif teşvik dahil)."
+          },
+          "durum": "ONAY BEKLİYOR — bu planın kendine özel içeriği olduğu için şimdilik korunuyor; 13 güne çekilip çekilmeyeceği sorulacak."
+        }
+      ],
+      "etkilemeyen_alanlar": "yaklasim_tercihi, mizac, dayanma_siniri (crying_tolerance), deneyim, gece_uyanma, destek. Bu alanlar ön hazırlık ve uyarıları etkilemeye devam eder; yalnız plan SÜRESİNİ belirlemezler.",
+      "devre_disi_planlar": {
+        "1_ay_program": "Yaklaşım tercihiyle tetikleniyordu; tercih kaldırıldığı için erişilemez. Kod silinmedi, bayrakla (BIR_AY_PROGRAM_AKTIF) kapatıldı; ileride geri açılabilir. Açılırsa 3-4. hafta alt yöntemi 13 güne sabittir.",
+        "5_gun_standart": "Artık otomatik seçilmiyor. Merdiven tanımı (kademeli_uzaklasma_5_gun) referans olarak korunuyor."
+      },
+      "karar_tarihi": "2026-08-10"
+    },
+    "kademeli_uzaklasma_5_gun_ARSIV_ARTIK_UYGULANMIYOR": {
+      "_durum": "ARŞİV — BU MERDİVEN ARTIK UYGULANMIYOR. Tüm bebekler 13 günlük kademeli programa tabidir (bkz. egitim_plani_secimi). Gün numaralarına göre konum sorulduğunda kademeli_uzaklasma_13_gun_dirençli kullanılır: 1-3 beşik yanı, 4-6 oda ortası, 7-9 kapı, 10-12 eşik, 13 yatır-çık. Bu kayıt yalnız tarihsel referanstır; anneye 5 günlük gün eşlemesi ANLATILMAZ.",
+      "day_1_2": "Beşik yanı (sandalye veya ayakta)",
+      "day_3": "Oda ortası (temas ihtiyacını kademeli azaltma; gerekirse temas edip sandalyeye geri dönülür)",
+      "day_4": "Kapı eşiği (içerden, anneye tam görünür, ses desteği azaltılır)",
+      "day_5": "Yatır-çık (odadan tamamen çıkış)"
     }
   },
   "tutarsizlik_raporu": [

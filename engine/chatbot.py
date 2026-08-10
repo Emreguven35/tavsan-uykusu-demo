@@ -538,7 +538,17 @@ def build_corpus() -> list[dict]:
         kb = json.load(f)
 
     # 2) global_rules — her metinsel kuralı ayrı aranabilir birim yap
+    #
+    # ARŞİV KURALI: anahtarında "ARSIV" geçen kayıtlar korpusa GİRMEZ. Bunlar
+    # KB'de tarihsel referans olarak durur ama artık uygulanmadığı için anneye
+    # anlatılmamalıdır. Somut vaka: 5 günlük kademeli merdiven arşive alındığında
+    # (herkes 13 günlük programa geçti) yalnız etikete uyarı koymak YETMEDİ —
+    # retrieval onları hâlâ en üste taşıyıp model "5. gün yatır-çık" diyordu,
+    # oysa 13 günlük planda 5. gün oda ortasıdır. Uygulanmayan kayıt aranabilir
+    # olmamalı.
     for key, val in kb.get("global_rules", {}).items():
+        if "ARSIV" in key.upper():
+            continue
         label_root = _humanize(key)
         flat: list[tuple] = []
         _flatten_texts(key, val, flat)
@@ -1075,6 +1085,16 @@ SYSTEM_PROMPT = """Sen Tavşan Uykusu uyku eğitimi programının bilgi botusun.
 Annelere kısa, profesyonel, sıcak Türkçe cevap verirsin. \
 SADECE sana sunulan bilgi parçalarını kullanırsın; dışına çıkmazsın. \
 Ders ya da kayıt adı asla geçmez (anneye 'kayıt36'da bahsedildiği gibi' deme). \
+GÜN EŞLEMESİ (13 GÜNLÜK PROGRAM — TEK GEÇERLİ EŞLEME): Tüm bebekler 13 günlük kademeli programa tabidir. \
+Kullanıcı "X. günde ne yapmalıyım / nerede durmalıyım" diye sorarsa ŞU eşlemeyi kullan, başka hiçbir gün \
+numaralandırmasını kullanma. Aralık uçları DAHİLDİR; gün gün açık liste: \
+1. gün beşik yanı · 2. gün beşik yanı · 3. gün beşik yanı · 4. gün oda ortası · 5. gün oda ortası · \
+6. gün oda ortası · 7. gün kapı · 8. gün kapı · 9. gün kapı · 10. gün kapı eşiği · 11. gün kapı eşiği · \
+12. gün kapı eşiği · 13. gün yatır-çık. \
+Cevabında önce bu listeden o günün konumunu bul, sonra yaz; aralık sınırlarını kendin yorumlama. \
+Bilgi parçalarında 5 günlük bir gün numaralandırması geçiyorsa (ör. "3. gün oda ortası", "5. gün yatır-çık") \
+bu ESKİ programa aittir; cevabına TAŞIMA ve yukarıdaki 13 günlük eşlemeye çevir. \
+24 ay üstü büyük çocuk planı 6 günlüktür; yalnız yaş açıkça 24 ay üstüyse o plandan söz et. \
 MARKA KURALI: Yöntem "Tavşan Uykusu" adıyla anılır. Cevapta KİŞİ ADI GEÇMEZ — ne danışmanın, ne bir eğitmenin, \
 ne de bilgi parçalarında geçen herhangi bir kişinin adı. Yönteme atıf gerekiyorsa "Tavşan Uykusu yönteminde" de. \
 Bilgi parçalarında bir kişi adı ya da o kişiye hitap geçiyorsa cevabına TAŞIMA. \

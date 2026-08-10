@@ -190,6 +190,10 @@ def bolum_A():
 # BÖLÜM B — CANLI PLAN ÜRETİMİ
 # ===========================================================================
 PROFILLER = [
+    # FAZ: plan sabitleme (2026-08-10). Tüm bebekler 13 günlük kademeli programa
+    # tabidir; yaklasim_tercihi alanı profillerde BİLEREK duruyor — motorun onu
+    # artık YOK SAYDIĞINI doğrulamak için (geriye uyumluluk). Üç profil de
+    # 13_gun_dirençli üretir; 1 aylık program bayrakla kapalıdır.
     {
         "etiket": "1_Emir_8ay_13gun",
         "profile": {
@@ -203,7 +207,7 @@ PROFILLER = [
         },
     },
     {
-        "etiket": "2_Emir_8ay_1aylik",
+        "etiket": "2_Emir_8ay_13gun_eski1aylik",
         "profile": {
             "bebek_ad": "Emir", "dogum_tarihi": "2025-10-08", "dogum_haftasi": 40,
             "beslenme": "anne sütü (emerek)", "destek": "emerek uyuma",
@@ -215,7 +219,7 @@ PROFILLER = [
         },
     },
     {
-        "etiket": "3_Defne_11ay_5gun",
+        "etiket": "3_Defne_11ay_13gun",
         "profile": {
             "bebek_ad": "Defne", "dogum_tarihi": "2025-07-08", "dogum_haftasi": 40,
             "beslenme": "mama", "destek": "sallanarak", "emzik": "hayır",
