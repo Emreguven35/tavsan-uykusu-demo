@@ -14,7 +14,7 @@ import logging
 import uuid
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from api.db import get_db
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/plans", tags=["plans"])
 @router.post("/generate", status_code=status.HTTP_202_ACCEPTED,
              response_model=None,
              responses={202: {"model": PlanJobResp}, 201: {"model": PlanResp}})
-def generate_plan(req: PlanGenerateReq, background: BackgroundTasks,
+def generate_plan(req: PlanGenerateReq,
                   sync: bool = Query(default=False,
                                      description="true → senkron 201+PlanResp "
                                                  "(geriye uyum/test); default async 202"),
@@ -69,12 +69,15 @@ def generate_plan(req: PlanGenerateReq, background: BackgroundTasks,
         return JSONResponse(status_code=status.HTTP_201_CREATED,
                             content=jsonable_encoder(PlanResp.model_validate(plan)))
 
-    # Async: iş kaydet + arka planda üret. baby.id'yi geçiriyoruz (Session kapanacak).
+    # Async: iş kaydet + ADANMIŞ havuzda üret (Faz O2 — uvicorn threadpool'u
+    # değil; havuz doluysa iş kuyrukta bekler, istemci 202'yi yine hemen alır).
+    # baby.id'yi geçiriyoruz (Session yanıttan sonra kapanacak).
     job_id = plan_jobs.create_job(user.id, baby.id)
-    background.add_task(plan_jobs.run_generation, job_id, baby.id,
-                        req.profile_overrides, req.dogum_haftasi)
-    logger.info("Plan job kuyruğa alındı: job=%s baby=%s", job_id, baby.id)
-    return PlanJobResp(job_id=job_id, status=plan_jobs.STATUS_PROCESSING)
+    plan_jobs.submit(job_id, baby.id, req.profile_overrides, req.dogum_haftasi)
+    sira = plan_jobs.get_job(job_id, user.id)["queue_position"]
+    logger.info("Plan job kuyruğa alındı: job=%s baby=%s sıra=%s", job_id, baby.id, sira)
+    return PlanJobResp(job_id=job_id, status=plan_jobs.STATUS_PROCESSING,
+                       queue_position=sira)
 
 
 @router.get("/generate/{job_id}", response_model=PlanJobStatusResp)
@@ -87,7 +90,9 @@ def generate_status(job_id: str, db: Session = Depends(get_db),
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="İş bulunamadı")
-    resp = PlanJobStatusResp(job_id=job_id, status=job["status"], error=job.get("error"))
+    resp = PlanJobStatusResp(job_id=job_id, status=job["status"],
+                             queue_position=job["queue_position"],
+                             error=job.get("error"))
     if job["status"] == plan_jobs.STATUS_DONE and job.get("plan_id"):
         plan = db.get(SleepPlan, uuid.UUID(job["plan_id"]))
         if plan is not None:

@@ -15,9 +15,12 @@ except ImportError:
     HAS_ANTHROPIC = False
 
 from engine.config import PLAN_MODEL  # plan üretici modeli (sonnet — merkezi)
-# 16384: 1 aylık program (4 haftalık + 13 eğitim günü × gün-altı B-Planı protokolleri)
-# 4096 ve 8192'de yarıda kesiliyordu; bu sınır en uzun planın bile tamamlanmasını sağlar.
-MAX_TOKENS = 16384
+# 16384 eski 1 aylık program (28 gün) içindi; o yol artık kapalı (BIR_AY_PROGRAM_AKTIF)
+# ve herkes 13 günlük plan alıyor. Faz O2 ölçümü: gerçek çıktı 7167-7474 token.
+# 12288 = ~%64 pay. Süreyi ETKİLEMEZ (max_tokens rezervasyon değil, tavandır);
+# amacı kaçak üretimde maliyeti sınırlamak ve stop_reason='max_tokens'i anlamlı
+# bir uyarı sinyaline çevirmek.
+MAX_TOKENS = 12288
 
 
 def _format_dict(d: dict, indent: int = 0) -> str:

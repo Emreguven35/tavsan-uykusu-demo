@@ -30,12 +30,17 @@ class PlanJobResp(BaseModel):
     İstemci job_id ile GET /plans/generate/{job_id}'yi yoklar (polling)."""
     job_id: str
     status: str                  # processing
+    # Faz O2: 0 = üretim başladı; >0 = havuz dolu, önünde kaç iş var.
+    queue_position: int = 0
 
 
 class PlanJobStatusResp(BaseModel):
     """GET /plans/generate/{job_id} yanıtı. status='done' ise plan doludur."""
     job_id: str
     status: str                  # processing | done | failed
+    # Faz O2: kuyrukta bekleyen iş sayısı (0 = sırası geldi / bitti). İstemci
+    # bunu "sıradasınız, N kişi önünüzde" diye gösterebilir.
+    queue_position: int = 0
     plan: PlanResp | None = None
     error: str | None = None
 
