@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 from api.models import Baby, SleepLog, SleepPlan, User
 from api.services import plan_adapter
+from api.services import usage
 from engine import plan_generator, yas_bantlari
 from engine.parameter_engine import hesapla_yas_ay, load_kb, parametre_uret, yas_bucket_sec
 
@@ -166,14 +168,29 @@ def ensure_current_schema(db: Session, plan: SleepPlan | None) -> SleepPlan | No
 # Üretim + adaptasyon
 # =============================================================================
 def generate_content(baby: Baby, req_overrides: dict | None,
-                     dogum_haftasi: int | None) -> dict:
-    """parameter_engine + plan_generator ile plan içeriği üret (+ yapısal çizelge)."""
+                     dogum_haftasi: int | None,
+                     operation: str = usage.OP_PLAN_GENERATE) -> dict:
+    """parameter_engine + plan_generator ile plan içeriği üret (+ yapısal çizelge).
+
+    operation: maliyet defterinde bu üretimin hangi başlığa yazılacağı —
+    plan_generate (yeni plan) ya da plan_adapt (yaş bandı ihlali sonrası yeniden
+    üretim). İkisi ayrı tutulur çünkü adaptasyon çok daha seyrek ama aynı pahalı
+    Sonnet çağrısını yapıyor; tek başlıkta toplanırsa hangisinin maliyeti şişirdiği
+    görünmez."""
     profile = profile_from_baby(baby, req_overrides, dogum_haftasi)
+    _kullanim: dict = {}
+    _t0 = time.perf_counter()
     try:
         param = parametre_uret(profile)                 # deterministik parametreler
-        markdown = plan_generator.plan_uret(param)      # Claude (varsa) / fallback
+        markdown = plan_generator.plan_uret(param, usage_sink=_kullanim)
     except Exception as e:
         raise PlanError(str(e)) from e
+    # _kullanim yalnız GERÇEK Claude çağrısında dolar; fallback yolunda boş kalır.
+    if _kullanim.get("usage"):
+        usage.kaydet(usage.SERVIS_ANTHROPIC, operation,
+                     model=_kullanim.get("model"), usage=_kullanim["usage"],
+                     user_id=baby.user_id,
+                     duration_ms=int((time.perf_counter() - _t0) * 1000))
     used_claude = bool(os.getenv("ANTHROPIC_API_KEY")) and plan_generator.HAS_ANTHROPIC
 
     # Faz Y: çizelge YAŞ BANDI TABLOSUNDAN kurulur (düzeltilmiş ay üzerinden).
@@ -235,7 +252,8 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         yas_ay=yas_ay, tek_uyku=tek_uyku)
 
     if result["regenerate_required"]:
-        content = generate_content(baby, None, dogum_haftasi)     # PlanError yükselebilir
+        content = generate_content(baby, None, dogum_haftasi,
+                                   operation=usage.OP_PLAN_ADAPT)  # PlanError yükselebilir
         content.update({
             "adapted": True,
             "regenerated": True,

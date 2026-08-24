@@ -27,6 +27,8 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from api.services import usage
+
 logger = logging.getLogger("tavsan.moderation")
 
 # moderation.py api/services/ altında → proje kökü .parent.parent.parent (voice.py ile aynı)
@@ -206,7 +208,11 @@ _SYSTEM_PROMPT = (
 
 def classify(text: str) -> dict | None:
     """Haiku ile sınıflandır. {izin,sebep,guven} döner; hata/timeout/anahtarsız → None
-    (fail-open: çağıran içeriği yayında bırakır)."""
+    (fail-open: çağıran içeriği yayında bırakır).
+
+    Başarılı çağrı api_usage'a kaydedilir (GERÇEK usage bloğuyla). Moderasyon
+    sistem işidir; user_id yazılmaz — hangi annenin gönderisinin incelendiği
+    maliyet defterine düşmesin (KVKK)."""
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         return None
@@ -216,6 +222,7 @@ def classify(text: str) -> dict | None:
         return None
     try:
         client = Anthropic(api_key=api_key, timeout=HAIKU_TIMEOUT_S, max_retries=0)
+        _t0 = time.perf_counter()
         resp = client.messages.create(
             model=MODEL,
             max_tokens=100,
@@ -223,6 +230,9 @@ def classify(text: str) -> dict | None:
                      "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": text[:2000]}],
         )
+        usage.kaydet(usage.SERVIS_ANTHROPIC, usage.OP_MODERATION, model=MODEL,
+                     usage=usage.anthropic_usage(resp),
+                     duration_ms=int((time.perf_counter() - _t0) * 1000))
         raw = resp.content[0].text
         return _parse_verdict(raw)
     except Exception as e:                # timeout/ağ/kota/parse → fail-open

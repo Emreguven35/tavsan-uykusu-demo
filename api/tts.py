@@ -80,7 +80,12 @@ MASAL_PROFILI = "masal"
 # Profil değerleri değişince ESKİ cache'lenmiş MP3'ler yanlıştır (hızlı okunmuş
 # masal sunulmaya devam eder). Bu damga voice cache anahtarına girer; kalibrasyon
 # sonrası ayar değiştirilirse BURASI DA artırılmalı.
-SES_AYAR_SURUMU = "masal-v1"
+#
+# masal-v2 (2026-08-25): kalibrasyon dinlemesinde "B" onaylandı — yani yukarıdaki
+# değerler DEĞİŞMEDİ. Damga yine de artırıldı: üretimde bu profilden önce üretilmiş
+# ne varsa kesin olarak tazelensin (anahtar biçimi zaten değiştiği için eski
+# kayıtlar erişilemez durumdaydı; bu ikinci emniyet kemeri).
+SES_AYAR_SURUMU = "masal-v2"
 
 AUDIO_MAX_FILES = 500
 AUDIO_MAX_BYTES = 100 * 1024 * 1024             # 100 MB
@@ -126,16 +131,22 @@ def profil_ayarlari(profil: str | None) -> dict:
 
 def synthesize(text: str, model: str | None = None,
                voice_id: str | None = None,
-               profil: str = VARSAYILAN_PROFIL) -> bytes | None:
+               profil: str = VARSAYILAN_PROFIL,
+               usage_op: str | None = None,
+               user_id=None) -> bytes | None:
     """Metni MP3 byte'larına çevir. Anahtar yok / hata → None (endpoint çökmesin).
     model verilmezse merkezi TTS_MODEL (flash v2.5); voice_id verilmezse env
     ELEVENLABS_VOICE_ID (klonlanmış kullanıcı sesi için voice_id geçilir).
-    profil: 'masal' (yavaş anlatım) veya 'sohbet' (normal hız)."""
+    profil: 'masal' (yavaş anlatım) veya 'sohbet' (normal hız).
+    usage_op verilirse BAŞARILI çağrı api_usage'a kaydedilir; metnin kendisi değil
+    yalnız UZUNLUĞU yazılır (KVKK). Hata yolunda kayıt açılmaz — ücretlendirilmeyen
+    çağrıyı maliyet defterine yazmayalım."""
     key = os.getenv("ELEVENLABS_API_KEY")
     voice = voice_id or os.getenv("ELEVENLABS_VOICE_ID")
     if not key or not voice:
         logger.info("TTS atlandı: ELEVENLABS_API_KEY/VOICE_ID tanımlı değil.")
         return None
+    _t0 = time.perf_counter()
     try:
         r = requests.post(
             f"{ELEVENLABS_BASE}/{voice}",
@@ -149,6 +160,12 @@ def synthesize(text: str, model: str | None = None,
         if not r.content:
             logger.warning("TTS boş içerik döndü.")
             return None
+        if usage_op:
+            from api.services import usage as _usage    # döngüsel import önleme
+            _usage.kaydet(_usage.SERVIS_ELEVENLABS, usage_op,
+                          model=model or TTS_MODEL, characters=len(text),
+                          user_id=user_id,
+                          duration_ms=int((time.perf_counter() - _t0) * 1000))
         return r.content
     except Exception as e:                       # kota/ağ/HTTP — çökme, logla
         logger.warning("TTS hatası (ses_url=null döndürülecek): %s", e)
@@ -168,7 +185,9 @@ def ensure_audio(anahtar: str, text: str) -> dict:
     # TTS öncesi temizlik: yalnız SESE giden metin değişir. Dosya adı (anahtar)
     # cevap-cache anahtarından gelir; bu temizlik hash'i ETKİLEMEZ.
     konusma = konusma_metnine_cevir(text)
-    audio = synthesize(konusma, profil=VARSAYILAN_PROFIL)   # chat: normal hız
+    from api.services import usage as _usage                 # döngüsel import önleme
+    audio = synthesize(konusma, profil=VARSAYILAN_PROFIL,    # chat: normal hız
+                       usage_op=_usage.OP_TTS)
     if audio is None:                            # graceful: ses yok, cevap kalır
         return {"ses_url": None, "tts_usd": 0.0, "tts_called": False, "cached": False}
 
@@ -184,7 +203,7 @@ def ensure_audio(anahtar: str, text: str) -> dict:
 
 
 def voice_audio(voice_id: str, text: str,
-                profil: str = MASAL_PROFILI) -> dict:
+                profil: str = MASAL_PROFILI, user_id=None) -> dict:
     """Belirli bir (klonlanmış) voice_id ile metni seslendir + cache'le.
 
     Cache anahtarı = sha256(voice_id || profil || ayar_sürümü || hazır_metin) →
@@ -210,7 +229,9 @@ def voice_audio(voice_id: str, text: str,
     if path.exists():
         return {"audio_url": audio_url(anahtar), "cached": True, "tts_usd": 0.0}
 
-    audio = synthesize(konusma, voice_id=voice_id, profil=profil)
+    from api.services import usage as _usage                 # döngüsel import önleme
+    audio = synthesize(konusma, voice_id=voice_id, profil=profil,
+                       usage_op=_usage.OP_TTS, user_id=user_id)
     if audio is None:
         return {"audio_url": None, "cached": False, "tts_usd": 0.0}
     try:

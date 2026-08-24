@@ -60,7 +60,8 @@ def reload_settings(**env):
 TTS_CALLS = {"n": 0, "son_profil": None, "son_metin": None}
 
 
-def fake_synthesize(text, model=None, voice_id=None, profil=None):
+def fake_synthesize(text, model=None, voice_id=None, profil=None,
+                    usage_op=None, user_id=None):
     TTS_CALLS["n"] += 1
     TTS_CALLS["son_profil"] = profil
     TTS_CALLS["son_metin"] = text

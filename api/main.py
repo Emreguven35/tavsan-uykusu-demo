@@ -31,12 +31,14 @@ from api import tts          # noqa: E402 — ElevenLabs + ses cache
 from api import avatar       # noqa: E402 — LiveAvatar LITE session token (görüntü katmanı)
 from api.config import get_settings   # noqa: E402 — merkezi env config
 from api.db import db_healthy         # noqa: E402 — DB sağlık kontrolü
+from api.observability import sentry_baslat  # noqa: E402 — hata izleme (KVKK maskeli)
 from api.deps import require_demo_key # noqa: E402 — /ask + /avatar-session koruması
 from api.routers import auth          # noqa: E402 — /api/v1/auth/* (Faz 2)
 from api.routers import babies, logs, plans, subscriptions  # noqa: E402 — Faz 3
 from api.routers import chat, voice   # noqa: E402 — Faz 4 (RAG chat + ses)
 from api.routers import notifications # noqa: E402 — Faz 6.2 (push token + tercihler)
 from api.routers import community      # noqa: E402 — Faz T (anne topluluğu)
+from api.routers import admin          # noqa: E402 — maliyet raporu (moderatör)
 from api.services import notifier     # noqa: E402 — Faz 6.2 (bildirim zamanlayıcısı)
 
 # Yapılandırılmış logging: süre/durum/hata bilgisini tek biçimde ver.
@@ -46,6 +48,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("tavsan.api")
 settings = get_settings()
+
+# --- Sürüm damgası -----------------------------------------------------------
+# NEDEN: sağlık kontrolünün 200 dönmesi YENİ KODUN CANLI OLDUĞUNU KANITLAMAZ —
+# hiç yeniden başlamamış eski bir konteyner de kesintisiz 200 döner. Deploy'un
+# gerçekten indiğini doğrulayabilmek için sürüm + korpus boyutu yayınlanır.
+#
+# GİZLİLİK: public /health'te TAM SHA verilmez (altyapı parmak izi). Yalnız kısa
+# sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
+#
+# Sentry'den ÖNCE tanımlı olmak zorunda: release etiketi olarak oraya geçiyor.
+APP_VERSION = os.getenv("APP_VERSION", "faz-o6")
+
+# Hata izleme — YALNIZ production + SENTRY_DSN. Uygulama nesnesi kurulmadan ÖNCE
+# başlatılır ki Starlette/FastAPI entegrasyonları middleware zincirini sarabilsin.
+sentry_baslat(surum=APP_VERSION)
 
 # --- LLM maliyet tahmini (Haiku 4.5: $1/1M in, $5/1M out) --------------------
 # Türkçe için ~4 karakter ≈ 1 token (yaklaşık). count_tokens çağrısı eklemeden
@@ -164,6 +181,7 @@ app.include_router(chat.router, prefix=API_V1_PREFIX)
 app.include_router(voice.router, prefix=API_V1_PREFIX)
 app.include_router(notifications.router, prefix=API_V1_PREFIX)
 app.include_router(community.router, prefix=API_V1_PREFIX)
+app.include_router(admin.router, prefix=API_V1_PREFIX)
 
 
 class AskReq(BaseModel):
@@ -171,14 +189,6 @@ class AskReq(BaseModel):
     yas_bandi: str | None = None
 
 
-# --- Sürüm damgası -----------------------------------------------------------
-# NEDEN: sağlık kontrolünün 200 dönmesi YENİ KODUN CANLI OLDUĞUNU KANITLAMAZ —
-# hiç yeniden başlamamış eski bir konteyner de kesintisiz 200 döner. Deploy'un
-# gerçekten indiğini doğrulayabilmek için sürüm + korpus boyutu yayınlanır.
-#
-# GİZLİLİK: public /health'te TAM SHA verilmez (altyapı parmak izi). Yalnız kısa
-# sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
-APP_VERSION = os.getenv("APP_VERSION", "faz-o5")
 # BUILD_TIME derleme/deploy anında env ile verilir (Railway Variables). Yoksa
 # sürecin başlama anına düşülür — bu da "bu instance ne zaman ayağa kalktı"
 # sorusunu cevaplar ve yeniden başlamayan konteyneri ele verir.

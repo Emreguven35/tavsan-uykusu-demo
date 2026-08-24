@@ -10,6 +10,7 @@ Her mesaj çifti chat_messages'a yazılır. KVKK: loglara mesaj İÇERİĞİ yaz
 yalnız uzunluk + cache durumu.
 """
 import logging
+import time
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from api.deps import get_current_user, get_owned_baby
 from api.models import ChatMessage, User
 from api.schemas.chat import ChatReq, ChatResp, ChatSource
 from api.services import baby_context as baby_ctx
+from api.services import usage
 from engine import chatbot
 
 logger = logging.getLogger("tavsan.chat")
@@ -55,7 +57,17 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
 
     # Mevcut RAG + cache motoru (yeniden yazılmadı — import edildi).
     # NOT: ctx doluysa motor cevap cache'ini BYPASS eder (kişisel veri paylaşılmaz).
+    _t0 = time.perf_counter()
     r = chatbot._cevap_uret(req.message, req.yas_bandi, baby_context=ctx)
+    _sure_ms = int((time.perf_counter() - _t0) * 1000)
+
+    # Maliyet takibi: YALNIZCA gerçekten LLM'e gidildiyse kayıt açılır. Cevap
+    # cache HIT'inde Anthropic çağrısı hiç yapılmadı — oraya 0 dolarlık satır
+    # yazmak "cache hit oranı"nı da maliyeti de bulandırırdı; uygulama cache'inin
+    # isabet oranı chat_messages.cached üzerinden raporlanıyor (admin/usage).
+    if r.get("llm"):
+        usage.kaydet(usage.SERVIS_ANTHROPIC, usage.OP_CHAT, model=r.get("model"),
+                     usage=r.get("usage"), user_id=user.id, duration_ms=_sure_ms)
 
     # Her mesaj çifti kaydedilir (ürün özelliği: geçmiş). İçerik DB'de tutulur ama
     # uygulama LOGUNA yazılmaz (KVKK).

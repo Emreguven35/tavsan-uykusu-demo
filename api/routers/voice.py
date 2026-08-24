@@ -24,6 +24,7 @@ from api.models import User, VoiceProfile
 from api.schemas.voice import (
     StoriesResp, VoiceCloneResp, VoiceGenerateReq, VoiceGenerateResp, VoiceStatusResp,
 )
+from api.services import usage as usage_svc
 from api.services import voice as voice_svc
 
 logger = logging.getLogger("tavsan.voice.router")
@@ -50,9 +51,13 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
         raise HTTPException(status_code=r.get("status", 502),
                             detail=r.get("error", "Ses klonlanamadı"))
     voice_id = r["voice_id"]
+    # Klonlama karakter değil İŞLEM başına ücretlendirilir; kaç klon yapıldığı
+    # raporda görünsün diye ayrı satır açılır (tutar config'ten).
+    usage_svc.kaydet(usage_svc.SERVIS_ELEVENLABS, usage_svc.OP_VOICE_CLONE,
+                     model="voice-clone", user_id=user.id)
 
     # Kısa örnek seslendir (klonun çalıştığının kanıtı + mobil önizleme).
-    sample = tts.voice_audio(voice_id, SAMPLE_TEXT)
+    sample = tts.voice_audio(voice_id, SAMPLE_TEXT, user_id=user.id)
     sample_url = sample.get("audio_url")
 
     profile = VoiceProfile(user_id=user.id, elevenlabs_voice_id=voice_id,
@@ -110,7 +115,7 @@ def generate(req: VoiceGenerateReq, db: Session = Depends(get_db),
     # İstemci 'sohbet' göndererek normal hızı seçebilir (şema doğruluyor).
     profil = req.profile or tts.MASAL_PROFILI
 
-    result = tts.voice_audio(req.voiceId, text, profil=profil)
+    result = tts.voice_audio(req.voiceId, text, profil=profil, user_id=user.id)
     if result.get("audio_url") is None:
         # TTS anahtarı yok / upstream hata → ses üretilemedi.
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

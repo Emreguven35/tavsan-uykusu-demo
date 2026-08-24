@@ -1754,10 +1754,37 @@ CEVAP:"""
     answer = response.content[0].text
     if not kisisel:                         # kişisel cevap PAYLAŞILAN cache'e YAZILMAZ
         _cache_store(soru, yas_bandi, answer)
+    # GERÇEK kullanım sayaçları yukarı taşınır (maliyet takibi tahmin ETMEZ —
+    # bkz. api/services/usage.py). Motor DB'ye yazmaz; yazmayı API katmanı yapar,
+    # böylece Streamlit tarafı ve testler DB'ye bağımlı olmaz.
     return {"cevap": answer, "cache_hit": False, "kaynaklar": _kaynak_ozet(retrieved),
             "anahtar": h, "llm": True,
             "in_chars": len(SYSTEM_PROMPT) + len(user_prompt), "out_chars": len(answer),
-            "retrieval_layer": katman, "top_score": top_score}
+            "retrieval_layer": katman, "top_score": top_score,
+            "model": CHATBOT_MODEL, "usage": _usage_ozet(response)}
+
+
+def _usage_ozet(response) -> dict:
+    """Anthropic yanıtındaki usage bloğunu düz sözlüğe indir (None-güvenli).
+
+    NOT: api.services.usage.anthropic_usage ile aynı işi yapar. Bilerek küçük bir
+    kopya: engine/ paketi api/ paketine bağımlı DEĞİLDİR (Streamlit arayüzü de bu
+    modülü import ediyor ve orada FastAPI/DB yok).
+    """
+    u = getattr(response, "usage", None)
+    if u is None:
+        return {"input_tokens": 0, "output_tokens": 0,
+                "cached_tokens": 0, "cache_write_tokens": 0}
+
+    def _i(ad):
+        try:
+            return int(getattr(u, ad, 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    return {"input_tokens": _i("input_tokens"), "output_tokens": _i("output_tokens"),
+            "cached_tokens": _i("cache_read_input_tokens"),
+            "cache_write_tokens": _i("cache_creation_input_tokens")}
 
 
 def cevapla(soru: str, yas_bandi: str | None = None,

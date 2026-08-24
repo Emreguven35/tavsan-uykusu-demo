@@ -220,6 +220,210 @@ sabitlenir — yalnız birincisi test edilirse düzeltme değişmez kuralı yer:
 
 ---
 
+# Gözlemlenebilirlik (2026-08-25)
+
+## Sentry — hata izleme
+
+`sentry-sdk[fastapi]`. **Yalnız** `ENVIRONMENT=production` **ve** `SENTRY_DSN`
+tanımlıyken açılır; lokalde ve testlerde kapalıdır (geliştirici makinesinden
+yanlışlıkla olay göndermek de bir sızıntıdır). `traces_sample_rate=0.1`.
+Release etiketi `APP_VERSION` — hangi build'de patladığı Sentry'de görünür.
+
+> **KVKK: asıl risk `send_default_pii` DEĞİL.** O bayrak istek gövdesini ve
+> çerezleri kapatır, ama Sentry **varsayılan olarak stack frame'lerdeki yerel
+> değişkenleri** gönderir. Bu uygulamada o değişkenler `req.message` (annenin
+> gece 3'te yazdığı cümle), `text` (topluluk gönderisi), `baby.name`,
+> `user.email` tutuyor. Tek bir 500 hatası anne verisini üçüncü bir servise
+> taşıyabilirdi.
+
+Üç katman birlikte uygulanır (`api/observability.py`):
+
+| Katman | Ayar | Neyi keser |
+|---|---|---|
+| 1 | `include_local_variables=False` | Frame değişkenleri **hiç toplanmaz** |
+| 2 | `max_request_body_size="never"` | İstek gövdesi eklenmez |
+| 3 | `before_send=maskele` | Kalan her şey süzülür |
+
+Katman 3 tek başına yetmez (bilinmeyen alan adları kaçar); 1–2 tek başına
+yetmez (içerik istisna **mesajının içine** gömülü gelebilir:
+`ValueError("geçersiz mesaj: <annenin cümlesi>")`).
+
+**`maskele` ne yapar:** kullanıcıdan yalnız hash'li id bırakır; istek
+gövdesi/çerez/IP/sorgu dizesini düşürür; `Authorization`/`X-API-Key` başlıklarını
+maskeler; frame `vars` + kaynak satırlarını siler; istisna metninden
+e-posta/token/DSN kalıplarını temizler ve 200 karakterde kırpar;
+**breadcrumb'ları ve biçimlendirilmiş log mesajını tamamen düşürür.**
+
+> **Breadcrumb'lar neden tamamen düşüyor?** Ölçümde şu kırıntı görüldü:
+> `SQL INSERT chat_messages content=<annenin cümlesi>`. O cümlede ne e-posta var
+> ne token, 200 karakterin de altında — hiçbir desene takılmıyor. Serbest metni
+> süzmeye çalışmak yerine kaynağı kapatmak tek güvenli yol. Teşhis için hata
+> tipi + stack trace + endpoint zaten yeterli. `logentry.message` **kalır**:
+> o geliştiricinin yazdığı biçim dizesidir (`"chat: user=%s q_len=%d"`) — kod,
+> veri değil; `params` düşürülür.
+
+**Kullanıcı bağlamı:** `get_current_user` her istekte
+`sha256(JWT_SECRET | user_id)[:16]` yazar. Tuzlu olduğu için Sentry'deki değerden
+geri çözülemez ve başka sistemlerdeki id'lerle eşleştirilemez. E-posta gitmez.
+
+Test: `tests/test_sentry_maskeleme.py` (49 kontrol) — gerçek sızıntı adaylarıyla
+(anne mesajı, bebek adı, doğum tarihi, JWT, topluluk gönderisi) beslenip olayın
+**içinde kalmadıkları** doğrulanır; teşhis için gerekenlerin (hata tipi, dosya,
+endpoint) **kaldığı** da ayrıca kontrol edilir.
+
+## Maliyet takibi — `api_usage`
+
+Her **gerçek** Anthropic/ElevenLabs çağrısı `api_usage`'a yazılır. Sütunlar:
+`service`, `operation`, `model`, `input_tokens`, `output_tokens`, `cached_tokens`,
+`cache_write_tokens`, `characters`, `estimated_cost_usd`, `duration_ms`,
+`user_id` (nullable), `created_at`. Migration `0008`.
+
+**Tahmin yok, gerçek veri var.** Anthropic yanıtındaki `usage` bloğu olduğu gibi
+alınır. Eski `/ask` tahmini (4 karakter ≈ 1 token) prompt caching'i **hiç
+görmüyordu**: cache'ten okunan token normal fiyatın %10'u, cache'e yazılan
+%125'i. O tahminle "cache bize ne kazandırdı" sorusu cevaplanamazdı.
+
+Fiyatlar `api/config.py`'de **kod sabiti** (env değil — fiyat değişimi gözden
+geçirme istesin): Haiku 4.5 $1/$5, Sonnet 4.6 $3/$15 (1M token),
+Flash v2.5 $0.00011/karakter. Cache çarpanları: okuma ×0.10, yazma ×1.25.
+
+> **Bilinmeyen model sessizce $0 yazmaz.** Fiyat tablosunda olmayan bir model
+> gelirse maliyet **üst sınırdan** hesaplanır ve uyarı loglanır. Sıfır yazmak,
+> maliyet tablosunu "her şey bedava" gösteren en tehlikeli hata olurdu.
+
+**Yazma asenkron:** tek arka plan iş parçacığı + kuyruk; çağıran kuyruğa bırakıp
+döner. Kuyruk dolarsa kayıt **düşürülür** (ana isteği bekletmektense veri kaybı).
+Her hata sessizce yutulur — maliyet defteri bir yan defterdir, anne cevabını
+yine alır.
+
+**Cache HIT'te satır AÇILMAZ** (dış servis çağrısı yok). Uygulama cevap
+cache'inin isabet oranı `chat_messages.cached`'ten raporlanır.
+
+**Günlük eşik:** toplam `$20`'yi aşınca `CRITICAL` log düşer (günde bir kez,
+uyarı yağmuru yok). Sayaç süreç içidir ve yeniden başlatmada o günün toplamını
+DB'den okuyarak başlar.
+
+### `GET /api/v1/admin/usage`
+
+Yalnız **moderatör** (`community_profiles.is_moderator`; topluluk kapısıyla aynı
+kontrol — yetki tek yerden yönetilsin). Parametreler: `from`, `to` (varsayılan
+son 30 gün, max 366), `group_by=day|operation|service`.
+
+```jsonc
+{
+  "toplam_usd": 3.42, "cagri_sayisi": 128,
+  "servis":    [{"ad": "anthropic", "usd": 3.1, "cagri": 120}, ...],
+  "operasyon": [{"ad": "chat", "usd": 1.2, "cagri": 98}, ...],
+  "gunluk":    [{"gun": "2026-08-25", "usd": 0.4, "cagri": 12}, ...],
+  "cache": {
+    "prompt_cache": { "okunan_token": 900000, "oran": 0.33, "kazanc_usd": 0.81 },
+    "cevap_cache":  { "toplam": 200, "hit": 60, "oran": 0.3,
+                      "tahmini_kazanc_usd": 0.72 }
+  },
+  "gunluk_esik_usd": 20.0, "esigi_asan_gunler": []
+}
+```
+
+`prompt_cache` **ölçülmüş** değerdir; `cevap_cache.tahmini_kazanc_usd` ise
+tahmindir (cache HIT'te çağrı olmadığı için gerçek maliyeti yok — aynı dönemin
+ortalama sohbet maliyetiyle çarpılır).
+
+Test: `tests/test_maliyet_takibi.py` (58 kontrol).
+
+**Geriye dönük tahmin:** `railway run python scripts/gecmis_maliyet_tahmini.py`
+— `api_usage` öncesi dönem için chat/plan/voice sayaçlarından büyüklük mertebesi
+verir. Fatura değildir (karakter→token oranı; prompt cache indirimini göremez).
+
+---
+
+# Yedekleme ve alarm (operasyon notu)
+
+## Postgres yedeği — **OTOMATİK DEĞİL**
+
+Railway'de yedekleme **opt-in**'dir; açılmadıysa hiç yedek alınmaz. CLI'da
+`backup` komutu **yok** (`railway volume` yalnız list/add/delete/attach sunar),
+yani durum ancak panelden görülür.
+
+**Açma:** Railway → `tavsan-uykusu-api` → **Postgres** servisi → **Backups**
+sekmesi → zamanlama seç. Seçenekler:
+
+| Zamanlama | Sıklık | Saklama |
+|---|---|---|
+| Daily | 24 saatte bir | 6 gün |
+| Weekly | 7 günde bir | 1 ay |
+| Monthly | 30 günde bir | 3 ay |
+
+Aynı volume'a birden fazla zamanlama uygulanabilir; elle yedek de alınabilir
+(elle yedek volume kapasitesinin %50'siyle sınırlı). Ücret, yedeğin **artımlı**
+boyutu üzerinden GB/dakika. Mevcut volume: **934 MB / 50 GB** — yani yedek
+maliyeti şu ölçekte ihmal edilebilir.
+
+**Öneri:** Daily + Monthly birlikte açılsın. Daily 6 gün tutuyor; tek başına
+açılırsa bir haftadan eski bir hataya dönülemez. Monthly 3 aylık emniyet verir.
+
+**Geri yükleme:** Backups sekmesinde zaman damgasına göre yedek seçilir →
+restore. Railway volume'un zaman damgalı bir kopyasını oluşturur, orijinali
+bağlantısız saklar, değişikliği deploy öncesi onaya sunar.
+
+> ⚠️ **Geri yükleme, o yedekten SONRAKİ tüm yedekleri siler.** Yani "önce
+> deneyeyim, olmazsa bugüne dönerim" YAPILAMAZ. Restore etmeden önce elle bir
+> yedek alın.
+
+## Yedek yoksa: günlük `pg_dump` (öneri — uygulanmadı)
+
+Panelden backup açmak daha basit ve ucuz; aşağıdaki yalnız **panel yedeğine ek**
+bir kopya isteniyorsa (örn. Railway dışında da bir kopya bulunsun diye) geçerli.
+
+- Ayrı bir Railway **cron servisi** (`railway.json` → `cronSchedule: "0 3 * * *"`),
+  aynı projede, Postgres'e private network üzerinden bağlanır.
+- Komut: `pg_dump "$DATABASE_URL" | gzip > tavsan-$(date +%F).sql.gz`, ardından
+  bir nesne deposuna (Railway bucket / S3 / Backblaze B2) yükleme.
+- Saklama: 7 günlük + 4 haftalık kopya. Bugünkü boyut ~934 MB; gzip'li dump
+  bunun çok altında kalır (dump veri dosyası değil, SQL metnidir).
+- **Sırlar:** dump içinde kullanıcı e-postaları ve bcrypt hash'leri var — hedef
+  bucket **private** olmalı ve KVKK saklama süresi tanımlanmalı.
+- Doğrulama: haftada bir dump'ı boş bir DB'ye geri yükleyip
+  `alembic upgrade head` + `SELECT count(*)` ile kontrol. **Test edilmemiş yedek,
+  yedek değildir.**
+
+## Uptime / sağlık alarmı
+
+> ⚠️ **Railway healthcheck'i deploy'dan SONRA izlemez.** `/health` yalnız
+> dağıtım sırasında sorgulanır; canlı servis çökerse Railway bunu healthcheck
+> üzerinden fark etmez. Yani "healthcheck var" uptime alarmı değildir.
+
+Railway'in verdiği alarmlar (Proje → **Settings** → **Webhooks** → URL + olay
+filtresi → Save):
+
+| Olay | Ne zaman |
+|---|---|
+| Deployment status | Deploy başarılı/başarısız olduğunda |
+| Volume usage | Volume kapasiteye yaklaştığında |
+| CPU/RAM monitor | Kaynak kullanımı eşiği aştığında |
+
+Slack (`hooks.slack.com`) ve Discord URL'leri **otomatik biçimlendirilir**;
+ara katman yazmaya gerek yok. Ayrıca konteyner tekrar tekrar çökerse yeniden
+başlatma sınırına ulaşıldığında proje üyelerine e-posta + webhook gider.
+
+**Uptime için dışarıdan bir izleyici gerekiyor** (Railway'de yok): UptimeRobot /
+BetterStack / Cronitor gibi bir servis
+`https://tavsan-api-production.up.railway.app/health` adresini 1–5 dakikada bir
+çeksin, 200 dışında bir yanıtta ya da yanıt gecikmesinde bildirsin.
+
+**Bonus — sürüm damgasıyla deploy doğrulaması:** aynı izleyici yanıt gövdesinde
+`"version"` alanını da kontrol edebilir. Beklenen sürüm görünmüyorsa deploy
+inmemiş demektir (`/health`'in 200 dönmesi tek başına bunu kanıtlamaz).
+
+### Yapılacaklar listesi (panelden, elle)
+
+1. Postgres → Backups → **Daily** + **Monthly** aç.
+2. Elle bir yedek al (restore'un geri dönüşü olmadığı için taban kopya).
+3. Project Settings → Webhooks → Slack URL'i ekle, üç olayı da seç.
+4. UptimeRobot'ta `/health` için 5 dakikalık HTTP(s) monitörü kur.
+5. `SENTRY_DSN`'i Railway Variables'a ekle (backend projesinin DSN'i).
+
+---
+
 # Faz 6 — Adaptif plan, bildirim, e-posta
 
 Canlı: `https://tavsan-api-production.up.railway.app` · Mobil taban: `.../api/v1`

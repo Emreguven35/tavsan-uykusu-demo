@@ -20,6 +20,7 @@ from api.models.community_like import Like
 from api.models.community_report import Report
 from api.models.community_block import Block
 from api.models.community_moderation import ModerationLog
+from api.models.api_usage import ApiUsage
 
 __all__ = [
     "User", "Baby", "SleepLog", "SleepPlan",
@@ -28,4 +29,6 @@ __all__ = [
     "PushToken", "SentNotification",
     # Faz T — anne topluluğu
     "CommunityProfile", "Thread", "Reply", "Like", "Report", "Block", "ModerationLog",
+    # Maliyet takibi
+    "ApiUsage",
 ]

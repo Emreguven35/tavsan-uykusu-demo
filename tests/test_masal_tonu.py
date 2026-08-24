@@ -261,7 +261,8 @@ tts.AUDIO_DIR = _AUDIO
 _CAGRI = {"n": 0}
 
 
-def _sahte_synth(text, model=None, voice_id=None, profil=None):
+def _sahte_synth(text, model=None, voice_id=None, profil=None,
+                 usage_op=None, user_id=None):
     _CAGRI["n"] += 1
     return b"ID3FAKEMP3"
 

@@ -23,6 +23,46 @@ def _normalize_db_url(url: str) -> str:
     return url
 
 
+# ---------------------------------------------------------------------------
+# FİYAT TABLOSU — maliyet takibinin tek kaynağı (api_usage.estimated_cost_usd)
+# ---------------------------------------------------------------------------
+# Burası KOD SABİTİ, env değil: fiyat değişince kod değişikliği + gözden geçirme
+# olsun isteniyor (yanlışlıkla boş env ile maliyeti sıfır saymak istemiyoruz).
+#
+# Anthropic: 1M token başına USD. Cache çarpanları resmî oranlar —
+#   cache YAZMA  = girdi fiyatı × 1.25  (yazmak pahalıdır)
+#   cache OKUMA  = girdi fiyatı × 0.10  (asıl tasarruf burada)
+# Kaynak: Anthropic fiyatlandırma, 2026-08-25.
+ANTHROPIC_FIYATLARI: dict[str, dict[str, float]] = {
+    "claude-haiku-4-5":  {"in": 1.0, "out": 5.0},     # /chat + moderasyon
+    "claude-sonnet-4-6": {"in": 3.0, "out": 15.0},    # plan üretimi
+    "claude-sonnet-5":   {"in": 3.0, "out": 15.0},
+    "claude-opus-5":     {"in": 5.0, "out": 25.0},
+}
+# Tabloda olmayan bir model gelirse maliyet sıfır sayılmaz; en pahalı bilinen
+# değerle üst sınırdan hesaplanır ve uyarı loglanır. Sessizce 0 yazmak, maliyet
+# tablosunu "her şey bedava" gösteren en tehlikeli hata olurdu.
+ANTHROPIC_BILINMEYEN_FIYAT = {"in": 5.0, "out": 25.0}
+CACHE_YAZMA_CARPANI = 1.25
+CACHE_OKUMA_CARPANI = 0.10
+
+# ElevenLabs: karakter başına USD. Flash v2.5 = 0.5 kredi/karakter, Creator planı
+# $22 / 100.000 kredi → 0.5 × 0.00022 ≈ 0.00011 $/karakter (api/tts.py ile aynı
+# değer; oradaki sabit bu tablodan okunur, iki yerde ayrışmasın).
+ELEVENLABS_FIYATLARI: dict[str, float] = {
+    "eleven_flash_v2_5": 0.00011,
+    "eleven_multilingual_v2": 0.00022,
+}
+ELEVENLABS_BILINMEYEN_FIYAT = 0.00022
+# Ses klonlama karakter değil, işlem başına ücretlendirilir (plan kotasından
+# düşer). Kotadan düşen bir işlemi 0 yazmak yerine ölçülebilir bir değer
+# tutuyoruz ki "kaç klon yapıldı" raporda görünsün.
+VOICE_CLONE_USD = 0.0
+
+# Günlük harcama eşiği — aşılırsa CRITICAL log (alarm bu log satırına kurulur).
+GUNLUK_MALIYET_ESIGI_USD = 20.0
+
+
 class ConfigError(RuntimeError):
     """Zorunlu bir ayar eksik/geçersiz — uygulama BAŞLAMAMALI (sessizce güvensiz
     varsayılana düşmek yerine gürültülü şekilde dur)."""

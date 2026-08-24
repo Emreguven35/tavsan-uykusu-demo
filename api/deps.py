@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from api.config import get_settings
 from api.db import get_db
+from api.observability import kullaniciyi_isaretle
 from api.models import User
 from api.services.security import decode_access_token
 
@@ -46,6 +47,9 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None:                      # silinmiş kullanıcı → token geçersiz
         raise _UNAUTHORIZED
+    # Hata izlemede "kim etkilendi" görünsün ama KİMLİĞİ görünmesin: yalnız
+    # tuzlanmış hash gider (e-posta ASLA). Sentry kapalıysa no-op.
+    kullaniciyi_isaretle(user.id)
     return user
 
 

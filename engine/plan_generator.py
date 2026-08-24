@@ -176,9 +176,15 @@ def _build_cached_content(param: dict) -> list[dict]:
     ]
 
 
-def plan_uret(param: dict) -> str:
+def plan_uret(param: dict, usage_sink: dict | None = None) -> str:
     """
     Claude API ile plan üret. API key yoksa fallback olarak deterministik markdown çıktı verir.
+
+    usage_sink: verilirse yanıttaki GERÇEK usage sayaçları + model adı bu sözlüğe
+    yazılır (maliyet takibi tahmin etmez). Modül GLOBALİ kullanılmadı çünkü plan
+    üretimi arka plan iş parçacıklarında paralel koşuyor (api/services/plan_jobs.py)
+    ve global bir "son kullanım" değeri işler arasında yarışırdı. Çağıran taze bir
+    sözlük geçer; fallback yolunda sözlük DOLDURULMAZ (LLM çağrısı olmadı).
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
 
@@ -192,7 +198,29 @@ def plan_uret(param: dict) -> str:
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": _build_cached_content(param)}],
     )
+    if usage_sink is not None:
+        usage_sink["model"] = PLAN_MODEL
+        usage_sink["usage"] = _usage_ozet(response)
     return response.content[0].text
+
+
+def _usage_ozet(response) -> dict:
+    """Anthropic usage bloğunu düz sözlüğe indir (None-güvenli).
+    engine/ paketi api/ paketine bağımlı olmadığı için burada küçük bir kopya."""
+    u = getattr(response, "usage", None)
+    if u is None:
+        return {"input_tokens": 0, "output_tokens": 0,
+                "cached_tokens": 0, "cache_write_tokens": 0}
+
+    def _i(ad):
+        try:
+            return int(getattr(u, ad, 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    return {"input_tokens": _i("input_tokens"), "output_tokens": _i("output_tokens"),
+            "cached_tokens": _i("cache_read_input_tokens"),
+            "cache_write_tokens": _i("cache_creation_input_tokens")}
 
 
 # ---------------------------------------------------------------------------
