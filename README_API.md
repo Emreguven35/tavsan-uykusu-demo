@@ -169,6 +169,42 @@ Test: `tests/test_korpus_filtreleri.py` (29 kontrol) — filtre davranışı, a�
 temizlik olmaması, kaynak dosyanın bozulmamış olması ve merdiven biriminin
 KB'den türetildiği.
 
+## Bekleme süresi artışı — esneklik + değişmez kural (İlayda düzeltmesi, 2026-08-25)
+
+Cevaplar `5 → 10 → 15 → 20` ilerlemesini **katı bir kural** gibi sunuyordu. Doğrusu
+bir standart + bir esneklik + bir bedelden oluşur:
+
+| Parça | İçerik |
+|---|---|
+| **Standart** | Artış 5'er dakikadır (`5 → 10 → 15 → 20`) — cevap buradan başlar |
+| **Esneklik** | Çocuk çok dirençliyse artış **1 dakikaya, hatta 30 saniyeye** inebilir (`5 → 6 → 7 → 8`) |
+| **DEĞİŞMEZ KURAL** | Bekleme süresi **her gün MUTLAKA artar**: bir önceki günden düşük **de**, bir önceki günle aynı **da** olamaz — ikisi de alışkanlığa dönüşür |
+| **Bedel** | Artış ne kadar küçükse öğrenme süreci o kadar **uzar**; esneklik verilirken bu da söylenir |
+
+> **Esneklik artışın MİKTARINDADIR, artışın kendisinde değil.** Bu ayrım kaybolursa
+> düzeltme kendi zıddına döner: "esneyebilir" cevabı "aynı kalabilir"e kayar.
+
+Üç yerde birden karşılanır — biri eksik kalırsa retrieval eski katı metni tek başına
+getirip yine dayatır:
+
+- **KB:** `global_rules."bekleme_suresi_artis_esnekligi (ek 2026-08-25)"` (6 alt madde,
+  hepsi ayrı aranabilir birim). Mevcut `bekleme_sureleri` kaydı da güncellendi:
+  sayılar artık **STANDART** olarak sunulur ve yeni kurala geri referans verir.
+- **`SYSTEM_PROMPT`:** standart + esneklik + bedel zorunlu; ayrıca anne **aynı** ya da
+  **daha az** süre sorarsa cevaba "Evet" ile başlamak yasak (ölçümde cevap
+  *"Evet, ikinci gecede de 5 dakika ile başlayabilirsiniz — ama…"* diye açılıyordu;
+  gövdede düzeltmek yetmiyor, anne ilk cümleyi uyguluyor).
+- **Plan motoru:** `bekleme_sureleri_planla()` her plan tipinde `artis_esnekligi`
+  döndürür; hem LLM prompt'una hem yedek plana girer.
+
+Test: `tests/test_bekleme_esnekligi.py` (36 kontrol). İki canlı soru **birlikte**
+sabitlenir — yalnız birincisi test edilirse düzeltme değişmez kuralı yer:
+
+| Soru | Beklenen |
+|---|---|
+| "1. gece 5 dk bekledim, 2. gece **6 dk** bekleyebilir miyim?" | **Evet** + sürecin uzayacağı uyarısı |
+| "1. gece 5 dk bekledim, 2. gece **de 5 dk** bekleyebilir miyim?" | **Hayır** — açılış cümlesi bile onaylayıcı olmamalı |
+
 ---
 
 1. Repo'yu Railway'e bağla (New Project → Deploy from GitHub).

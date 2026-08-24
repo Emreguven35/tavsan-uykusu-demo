@@ -319,6 +319,8 @@ def _fallback_plan(param: dict) -> str:
         lines.append("")
     lines.append("**Yatır-çık sonrası:** " + bekleme["yatir_cik_sonrasi"])
     lines.append("")
+    lines.append("**Bekleme süresi artışı:** " + bekleme["artis_esnekligi"])
+    lines.append("")
     lines.append("**Kısa gündüz uykusu uzatma:** " + bekleme["kisa_gunduz_uykusu"])
     lines.append("")
 

@@ -490,10 +490,18 @@
     },
     "bekleme_sureleri": {
       "egitim_kucaktan_almak": "30s → 1dk → 1.5dk → 2dk artış",
-      "egitim_gece_uyanmasi": "Gün 1: 5dk → gece içinde her seferde +5. Gün 2: 5-10dk başla. Asla 5dk altı.",
+      "egitim_gece_uyanmasi": "Gün 1: 5dk → gece içinde her uyanmada artırarak devam. Gün 2 ve sonrası: bir önceki günün başlangıç süresinin ÜSTÜNDE başla (standart +5dk; çok dirençli çocukta +1dk ya da +30sn olabilir — ama asla aynı ya da daha düşük değil). Asla 5dk altı. Artış miktarı için bkz. bekleme_suresi_artis_esnekligi.",
       "egitim_kisa_gunduz_uykusu": "Gün 1: dış 5dk + iç 40dk. Gün 2: 10+35. Gün 3: 15+30. Toplam 45dk.",
-      "yatir_cik_sonrasi": "5 → 10 → 15 → 20 → max 25 dakika. 21 gün hiç dalmazsa max 45dk veya tıbbi yönlendirme.",
+      "yatir_cik_sonrasi": "STANDART ilerleme 5 → 10 → 15 → 20 → max 25 dakika. Bu katı bir kural değil, standart kademedir; artış miktarı çocuğun direncine göre esneyebilir (bkz. bekleme_suresi_artis_esnekligi). 21 gün hiç dalmazsa max 45dk veya tıbbi yönlendirme.",
       "B_plan_direnç": "45 dakika direnç → 15 dakika rutin molası → 45 dakika yeniden deneme. Çok dirençli bebekte rutin molası 30 dakikaya çıkarılabilir. Max 3 tekrar. 3 tekrar sonrası da uyumuyorsa: uyku denemesi sonlandırılır, yaşa uygun uyanıklık süresi kadar uyanık tutulur, bir sonraki uykuda eğitime devam edilir."
+    },
+    "bekleme_suresi_artis_esnekligi (ek 2026-08-25)": {
+      "kapsam": "Bekleme süresinin GÜNDEN GÜNE ne kadar artacağı sorulduğunda bu kayıt kullanılır. bekleme_sureleri kaydındaki tüm kademeler (gece uyanması, yatır-çık sonrası, kısa gündüz uykusu) için geçerlidir; oradaki sayılar STANDART ilerlemeyi gösterir, tavan ya da taban değildir.",
+      "standart_ilerleme": "Standart ilerleme 5'er dakikalık artıştır (5 → 10 → 15 → 20). Bekleme süresi artışı sorulduğunda cevaba önce bu standart ilerleme ile başlanır.",
+      "kati_kural_degil_esneklik": "5-10-15-20 KATI bir kural DEĞİLDİR. Çocuk çok dirençliyse artış daha küçük tutulabilir: 1'er dakika, hatta 30'ar saniye aralıklarla artırılabilir (5 → 6 → 7 → 8 gibi). Anne 'bir önceki geceden yalnızca 1 dakika fazla bekleyebilir miyim' diye sorarsa cevap EVET'tir; artış küçük olabilir ama vardır.",
+      "DEGISMEZ_KURAL_her_gun_artar": "Bekleme süresi her gün MUTLAKA artar. Bir önceki günün süresinden DÜŞÜK olamaz, bir önceki günle AYNI da olamaz — ikisi de çocukta alışkanlığa dönüşür ve öğrenme durur. Esneklik artışın MİKTARINDADIR; artışın kendisi tartışmaya açık değildir.",
+      "kucuk_artisin_bedeli": "Artış ne kadar küçükse çocuğun öğrenme süreci o kadar uzar. Esneklik seçeneği anneye verilirken bu bedel de MUTLAKA söylenir; anne küçük artışı bedelini bilerek seçer.",
+      "cevap_bicimi": "Bekleme süresi artışı sorulduğunda cevap üç parçalıdır: (1) standart 5'er dakikalık ilerleme, (2) çocuk çok dirençliyse 1 dakikalık ya da 30 saniyelik daha küçük artışların da geçerli olduğu, (3) küçük artışın öğrenme sürecini uzatacağı. Yalnızca '5-10-15-20' dayatan, esneklikten söz etmeyen cevap EKSİKTİR."
     },
     "red_flags_kayit36_37_40": [
       "Histerik ağlama (\"ha-ha katılma noktası\") → bekleme uygulanmaz, doğrudan müdahale",

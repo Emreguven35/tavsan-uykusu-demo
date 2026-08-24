@@ -437,9 +437,10 @@ def bekleme_sureleri_planla(plan_tipi: str) -> dict:
         "kademeli_uzaklasma": kademeli_yer,
         "kucaktan_almak": "30 saniye → 1 dakika → 1.5 dakika → 2 dakika diye artış",
         "egitim_seans_max": "45 dakika denenme + 15-30 dakika rutin molası + 45 dakika daha (uykuya kadar)",
-        "gece_uyanma_dis_bekleme": "1. uyanma 5 dk, sonra her uyanmada +5 dk. Asla 5 dk altına inme.",
+        "gece_uyanma_dis_bekleme": "1. uyanma 5 dk, sonra her uyanmada artırarak devam. Ertesi gün bir önceki günün başlangıcının ÜSTÜNDE başlanır. Asla 5 dk altına inme.",
         "kisa_gunduz_uykusu": kisa_gunduz,
-        "yatir_cik_sonrasi": "5 → 10 → 15 → 20 dk. Max 20-25 dk. 21 gün hiç dalmazsa max 45 dk veya tıbbi yönlendirme.",
+        "yatir_cik_sonrasi": "STANDART ilerleme 5 → 10 → 15 → 20 dk. Max 20-25 dk. 21 gün hiç dalmazsa max 45 dk veya tıbbi yönlendirme.",
+        "artis_esnekligi": "Bekleme süresi artışı KATI DEĞİLDİR: standart 5'er dakikadır, ancak çok dirençli çocukta 1 dakika, hatta 30 saniye aralıklarla artırılabilir (5 → 6 → 7 → 8 gibi). DEĞİŞMEZ KURAL: bekleme süresi her gün MUTLAKA artar — bir önceki günden düşük de olamaz, bir önceki günle aynı da olamaz (ikisi de alışkanlığa dönüşür). Artış ne kadar küçükse öğrenme süreci o kadar uzar; bu bedel anneye mutlaka söylenir.",
         "B_plan_direnç": "45 dakika direnç olursa → 15 dakika rutin molası → 45 dakika yeniden deneme. Çok dirençli bebeklerde rutin molası 30 dakikaya çıkarılabilir. Maksimum 3 tekrar. 3 tekrar sonrasında da uyumuyorsa: o uyku denemesi sonlandırılır, bebek yaşına uygun uyanıklık süresi kadar uyanık tutulur ve bir sonraki uyku denemesinde eğitime devam edilir.",
     }
 
