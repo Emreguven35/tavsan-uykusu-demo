@@ -14,16 +14,29 @@ BU BİR TAHMİNDİR, FATURA DEĞİLDİR. Nedeni açıkça bilinsin:
 Kesin rakam Anthropic/ElevenLabs konsolundaki fatura; bu betik büyüklük mertebesi
 verir ve bundan SONRASI için gerçek ölçüm api_usage'da tutulur.
 
-Kullanım (üretim verisiyle):
-    railway run python scripts/gecmis_maliyet_tahmini.py
+Kullanım (üretim verisiyle, geliştirici makinesinden):
+    railway run --service Postgres python scripts/gecmis_maliyet_tahmini.py
 Yerel:
     python scripts/gecmis_maliyet_tahmini.py
+
+NOT: Uygulama servisindeki DATABASE_URL `postgres.railway.internal` adresini
+gösterir; bu ad YALNIZCA Railway'in özel ağı içinden çözülür, dışarıdan
+"connection refused" alırsınız. Bu yüzden betik, varsa DATABASE_PUBLIC_URL'i
+tercih eder (Postgres servisinin değişkenlerinde bulunur). Salt-okunur bir
+rapordur; yazma yapmaz.
 """
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+# api.config import EDİLMEDEN önce ayarlanmalı (Settings env'i bir kez okur).
+_public = (os.getenv("DATABASE_PUBLIC_URL") or "").strip()
+if _public:
+    os.environ["DATABASE_URL"] = _public
+os.environ.setdefault("JWT_SECRET", "rapor-betigi-icin-yer-tutucu-otuziki-karakter")
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")

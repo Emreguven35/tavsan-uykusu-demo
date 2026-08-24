@@ -330,9 +330,21 @@ ortalama sohbet maliyetiyle çarpılır).
 
 Test: `tests/test_maliyet_takibi.py` (58 kontrol).
 
-**Geriye dönük tahmin:** `railway run python scripts/gecmis_maliyet_tahmini.py`
-— `api_usage` öncesi dönem için chat/plan/voice sayaçlarından büyüklük mertebesi
-verir. Fatura değildir (karakter→token oranı; prompt cache indirimini göremez).
+**Geriye dönük tahmin:** `scripts/gecmis_maliyet_tahmini.py` — `api_usage` öncesi
+dönem için chat/plan/voice sayaçlarından büyüklük mertebesi verir. Fatura
+değildir (karakter→token oranı; prompt cache indirimini göremez).
+
+> **Nasıl çalıştırılır:** üretim Postgres'i **dışarıya kapalıdır** — `DATABASE_URL`
+> `postgres.railway.internal` adresini gösterir ve servise TCP proxy tanımlı
+> değildir (`DATABASE_PUBLIC_URL` bu yüzden boş host/port taşır). Bu bilinçli ve
+> doğru bir duruş; delmeyin. Betiği **konteynerin içinde** çalıştırın:
+> ```
+> railway ssh python scripts/gecmis_maliyet_tahmini.py
+> ```
+> İlk kullanımda SSH anahtarı gerekir (`ssh-keygen -t ed25519` → `railway ssh keys`);
+> alternatif olarak Railway panelindeki servis terminalinden aynı komut çalışır.
+> Betik salt-okunurdur. Yerelde ya da bir TCP proxy açıksa `DATABASE_PUBLIC_URL`
+> otomatik tercih edilir.
 
 ---
 
