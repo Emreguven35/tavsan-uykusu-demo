@@ -5,8 +5,10 @@ voice router — /api/v1/voice/*
   voice_profiles'a kaydeder + kısa bir örnek seslendirir (sampleUrl).
 - GET /voice-status: kullanıcının klon durumu.
 - GET /stories: masal/ninni kataloğu (5 masal + 3 ninni).
-- POST /generate: {voiceId, text|storyId} → ElevenLabs flash v2.5 + mevcut TTS
-  metin temizliği → {audio_url}. Ses data/audio_cache'e yazılır, /audio ile sunulur.
+- POST /generate: {voiceId, text|storyId, profile?} → ElevenLabs flash v2.5 + TTS
+  metin işleme → {audio_url, cached, profile}. Ses data/audio_cache'e yazılır,
+  /audio ile sunulur. Profil varsayılanı 'masal' (yavaş, duraklamalı anlatım);
+  'sohbet' normal hızdır (bkz. tts.SES_PROFILLERI).
 
 Hepsi auth korumalı. Dış servis hatası (key yok/kota) → anlamlı JSON + uygun kod.
 """
@@ -104,11 +106,16 @@ def generate(req: VoiceGenerateReq, db: Session = Depends(get_db),
     else:
         text = req.text
 
-    result = tts.voice_audio(req.voiceId, text)
+    # Masal/ninni anlatımı varsayılan: yavaş, sakin, duraklamalı (tts.SES_PROFILLERI).
+    # İstemci 'sohbet' göndererek normal hızı seçebilir (şema doğruluyor).
+    profil = req.profile or tts.MASAL_PROFILI
+
+    result = tts.voice_audio(req.voiceId, text, profil=profil)
     if result.get("audio_url") is None:
         # TTS anahtarı yok / upstream hata → ses üretilemedi.
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail="Ses üretilemedi (TTS yapılandırması/kota)")
-    logger.info("Voice generate: user=%s voice=%s cached=%s",
-                user.id, req.voiceId, result["cached"])
-    return VoiceGenerateResp(audio_url=result["audio_url"], cached=result["cached"])
+    logger.info("Voice generate: user=%s voice=%s profil=%s cached=%s",
+                user.id, req.voiceId, profil, result["cached"])
+    return VoiceGenerateResp(audio_url=result["audio_url"],
+                             cached=result["cached"], profile=profil)

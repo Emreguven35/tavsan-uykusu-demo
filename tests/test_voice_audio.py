@@ -57,11 +57,13 @@ def reload_settings(**env):
 
 
 # --- ElevenLabs MOCK: gerçek üretim sayısını say ------------------------------
-TTS_CALLS = {"n": 0}
+TTS_CALLS = {"n": 0, "son_profil": None, "son_metin": None}
 
 
-def fake_synthesize(text, model=None, voice_id=None):
+def fake_synthesize(text, model=None, voice_id=None, profil=None):
     TTS_CALLS["n"] += 1
+    TTS_CALLS["son_profil"] = profil
+    TTS_CALLS["son_metin"] = text
     return b"ID3FAKEMP3" + text.encode("utf-8")[:32]
 
 
@@ -114,11 +116,22 @@ check("4) Farklı voice_id → ayrı dosya + yeniden üretim",
       and TTS_CALLS["n"] == 2, f"tts_calls={TTS_CALLS['n']}")
 
 # Aynı metin + aynı ses her zaman aynı hash (deterministik)
-from api.konusma_metni import konusma_metnine_cevir   # noqa: E402
+from api.konusma_metni import konusma_metnine_cevir, masal_metni_hazirla  # noqa: E402
 _beklenen = hashlib.sha256(
-    f"voice_A||{konusma_metnine_cevir(METIN)}".encode("utf-8")).hexdigest()
-check("5) Cache anahtarı deterministik (voice_id||temiz_metin)",
+    f"voice_A||{tts.MASAL_PROFILI}||{tts.SES_AYAR_SURUMU}||"
+    f"{masal_metni_hazirla(METIN)}".encode("utf-8")).hexdigest()
+check("5) Cache anahtarı deterministik (voice_id||profil||ayar_surumu||hazir_metin)",
       _beklenen in r1["audio_url"], r1["audio_url"])
+
+# Profil ve ayar sürümü anahtara GİRMELİ: kalibrasyonla ayar değişince eski
+# (hızlı okunmuş) masal sunulmaya devam ederse düzeltme kullanıcıya HİÇ ulaşmaz.
+_n0 = TTS_CALLS["n"]
+r_sohbet = tts.voice_audio("voice_A", METIN, profil="sohbet")
+check("5c) Aynı ses+metin FARKLI profil → ayrı dosya + yeniden üretim",
+      r_sohbet["audio_url"] != r1["audio_url"] and TTS_CALLS["n"] == _n0 + 1,
+      f"{r_sohbet['audio_url']} vs {r1['audio_url']}")
+check("5d) Profil synthesize'a geçiyor",
+      TTS_CALLS["son_profil"] == "sohbet", str(TTS_CALLS["son_profil"]))
 
 # Uzun masal metni de tek çağrıda üretilir (flash v2.5 limiti 40.000 karakter)
 UZUN = "Bu bir cümledir. " * 400                      # ~6.800 karakter

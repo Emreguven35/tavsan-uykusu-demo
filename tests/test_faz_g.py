@@ -199,7 +199,7 @@ def test_g2():
 # ===========================================================================
 def test_g3():
     # TTS mock (ağ yok) — env anahtarı gerektirmeden ses üretilmiş gibi
-    tts.voice_audio = lambda voice_id, text: {
+    tts.voice_audio = lambda voice_id, text, profil=tts.MASAL_PROFILI: {
         "audio_url": "/audio/deadbeefdeadbeef.mp3", "cached": False, "tts_usd": 0.0}
 
     tok = _register("g3_user@example.com")

@@ -668,6 +668,48 @@ temizleme katmanından sorunsuz geçer). Kırmızı Başlıklı Kız ve Üç Kü
 ediyor; 700 kelimelik Türkçe masal ~5.000 karakter — limitin çok altında. Kod
 değiştirilmedi. (Karşılaştırma: `eleven_multilingual_v2` 10.000, `eleven_v3` 5.000.)
 
+### Anlatım tonu — iki ses profili (2026-08-25)
+
+Masallar **çok hızlı** okunuyordu: `/voice/generate` ElevenLabs'e `voice_settings`
+**hiç göndermiyordu**, yani her şey varsayılan hızdaydı. İki profil tanımlandı
+(`tts.SES_PROFILLERI`):
+
+| Profil | speed | stability | similarity_boost | style | Nerede |
+|---|---|---|---|---|---|
+| `masal` | 0.85 | 0.70 | 0.75 | 0.05 | `/voice/generate` **varsayılanı**, `/clone` örneği |
+| `sohbet` | 1.00 | 0.50 | 0.75 | 0.00 | `/ask` TTS'i — ElevenLabs varsayılanlarıyla **aynı** |
+
+`sohbet` profilinin bilerek varsayılanlarla aynı tutulması, mevcut chat ses
+cache'inin sessizce geçersizleşmemesi içindir. İstemci `profile` alanıyla profil
+seçebilir; geçersiz ad **422** döner.
+
+**Ölçüldü, varsayılmadı** (canlı anahtar, flash v2.5): `speed` 1.0 → 0.85 aynı
+cümleyi **%20** uzattı; `<break time="2.0s" />` sesi **+2,25 sn** uzattı. Yani
+Flash v2.5 ikisini de uyguluyor, daha pahalı bir modele geçmek gerekmedi.
+
+**Duraklamalar** (`konusma_metni.masal_metni_hazirla`): paragraf araları **0,8 sn**,
+cümle araları **0,3 sn**. `konusma_metnine_cevir` paragrafları tek satıra indirdiği
+için temizlik **paragraf paragraf** yapılır; etiketler **en sonda** eklenir ki
+temizlik kuralları onları bozmasın.
+
+> **Cümle duraklaması neden her masalda yok.** ElevenLabs "tek üretimde çok fazla
+> break etiketi kararsızlık yapar (hızlı okuma, gürültü, artefakt)" diye uyarıyor.
+> Korpustaki masallar 81–109 cümle → tek istekte ~100 etiket, üstelik etiketler
+> karakter başına ücretlendirmeye girdiği için ~%50 fazla maliyet. Kural kendini
+> sınırlar: paragraf araları **her zaman**, cümle araları **yalnız** toplam etiket
+> `MASAL_MAX_BREAK`(=40) altında kalıyorsa. Pratikte ninniler (5–6 cümle) cümle
+> duraklaması alır, uzun masallar almaz; genel tempoyu zaten `speed=0.85` sağlıyor.
+> Ölçülen yük: masallarda +%7…+%15, ninnilerde +110…+132 karakter.
+
+**Cache tuzağı:** profil adı ve `SES_AYAR_SURUMU` damgası cache anahtarına
+**girer** — `sha256(voice_id || profil || ayar_sürümü || hazır_metin)`. Girmeseydi
+kalibrasyondan sonra eski **hızlı okunmuş** MP3 sunulmaya devam eder ve düzeltme
+kullanıcıya hiç ulaşmazdı. Ayar değiştirilirse `SES_AYAR_SURUMU` da artırılmalı.
+
+Test: `tests/test_masal_tonu.py` (43 kontrol) — profil değerleri, `voice_settings`in
+istek gövdesine gerçekten konduğu, duraklama kuralı, etiket/maliyet freni ve cache
+tazelenmesi.
+
 ### Mutlak ses URL'leri
 
 `PUBLIC_BASE_URL` tanımlıysa `audio_url` ve `sampleUrl` **mutlak** döner:
@@ -685,7 +727,8 @@ engelli). Beta için yeterli koruma; kamuya açık ama listelenemez.
 
 ### Ses cache (maliyet)
 
-`voice_audio()` anahtarı `sha256(voice_id || temizlenmiş_metin)`. Aynı kullanıcı
+`voice_audio()` anahtarı
+`sha256(voice_id || profil || ayar_sürümü || hazır_metin)`. Aynı kullanıcı
 aynı masalı ikinci kez dinlerken **TTS'e gidilmez** — dosya diskten servis edilir,
 `cached: true`, maliyet `0`. Farklı `voice_id` aynı metinde ayrı dosya üretir.
 
