@@ -806,10 +806,45 @@ SELECT content, top_score, created_at
   "kestirme_protokolu": {"tetik": "gündüz min süre tamamlanmadı", "sure_dk": 30,
                          "gece_uykusuna_gecis_dk": 60, "aciklama": "..."},
   "yas_bandi": {"id": "9-12_ay", "ad": "9-12 ay", "uyaniklik_penceresi_dk": [180, 240], ...},
+  "days": [                 // YENİ — eğitim programının aşamaları (yapısal)
+    {"start": 1, "end": 3, "label": "Beşik yanı",
+     "position": "Beşik yanı (sandalye veya ayakta)",
+     "markdown": "### Gün 1-3: Beşik yanı
+
+<o aşamanın tam metni>"},
+    {"start": 4, "end": 6, "label": "Oda ortası", ...},
+    {"start": 7, "end": 9, "label": "Kapı", ...},
+    {"start": 10, "end": 12, "label": "Kapı eşiği", ...},
+    {"start": 13, "end": 13, "label": "Yatır-çık", ...}
+  ],
   "markdown": "...",        // KALDI — geriye uyumluluk + detay metni
   "bucket": "9_ay", "adapted": false, ...
 }
 ```
+
+### `days` — eğitim gün bölümleri
+
+**Mobil artık markdown'ı REGEX'LEMEZ.** Gün başlıklarını LLM yazıyor ve biçimi
+sabit değildi; aynı backend sürümünden 5 ayrı kalıp ölçüldü (emoji, "Günler",
+"1. Gün", `|` ayracı, en-dash, "Gün 1 ve Gün 2") ve eğitim ekranı iki kez
+sessizce boş kaldı. Ayrıştırma artık sunucuda, üretim anında yapılır.
+
+Garantiler:
+- Aşamaların **tamamı** döner (13 günlük programda 5 aşama) ve `1..gunler`
+  arası **her gün tam bir aralığa düşer** — boşluk ya da çakışma yoktur.
+- `start`/`end` tamsayıdır ve `start <= end`; tek günlük aşamada ikisi eşittir.
+- `position` merdivenin resmî metnidir (KB'den), `label` başlıktaki kısa addır.
+- `markdown` o aşamanın kendi metnidir; `content.markdown` bütün plandır ve
+  **değişmeden** durur.
+- Ayrıştırma başarısız olursa plan KAYDEDİLMEZ: üretim reddedilip yeniden
+  ürettirilir (2 deneme, sonra **502**). Boş `days` dönmez.
+
+`days` alanı `/plans/generate`, `/plans/adapt`, `/plans/today`, `GET /plans` ve
+`GET /plans/{date}` yanıtlarının hepsinde doludur. Faz O öncesi üretilmiş
+planlarda alan yoktu; okuma yolunda markdown'dan bir kez türetilip DB'ye yazılır
+(2026-09-08 ölçümü: üretimdeki 357 planın 357'si ayrışıyor). Çok eski bir plan
+ayrıştırılamazsa istek **502 olmaz** — `days` alanı gelmez ve sunucu uyarı
+loglar; mobil bu durumda `markdown`'a düşmelidir.
 
 > **Faz Y:** çizelgedeki saatler `data/yas_bantlari.json`'dan türetilir. 9-12 ay
 > bandında pencere 3-4 saat aralığındadır; 24 saatlik toplam uyku 14 saat olmak
