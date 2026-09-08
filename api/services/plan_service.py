@@ -20,10 +20,15 @@ from sqlalchemy.orm import Session
 from api.models import Baby, SleepLog, SleepPlan, User
 from api.services import plan_adapter
 from api.services import usage
-from engine import plan_generator, yas_bantlari
+from engine import plan_generator, plan_gunleri, yas_bantlari
 from engine.parameter_engine import hesapla_yas_ay, load_kb, parametre_uret, yas_bucket_sec
 
 logger = logging.getLogger("tavsan.plan_service")
+
+# Gün bölümleri ayrıştırılamazsa plan kaç kez yeniden ürettirilir (Claude yolu).
+# Her deneme ~130 sn ve ayrı bir Sonnet faturası; ikiden fazlası hem pahalı hem
+# de anlamsız — biçim iki kez tutmuyorsa sorun prompt'ta, tekrarda değil.
+PLAN_DAYS_MAX_DENEME = 2
 
 
 class PlanError(RuntimeError):
@@ -154,6 +159,8 @@ def ensure_current_schema(db: Session, plan: SleepPlan | None) -> SleepPlan | No
     if not content.get("kestirme_protokolu"):
         content["kestirme_protokolu"] = yas_bantlari.kestirme_protokolu()
         degisti = True
+    # Yapısal gün bölümleri: eski planlarda yok, markdown'dan bir kez türetilip yazılır.
+    degisti = days_backfill(content) or degisti
 
     if degisti:
         content["schedule"] = yeni
@@ -162,6 +169,22 @@ def ensure_current_schema(db: Session, plan: SleepPlan | None) -> SleepPlan | No
         db.refresh(plan)
         logger.info("Plan güncel şemaya yükseltildi: plan_id=%s", plan.id)
     return plan
+
+
+def days_backfill(content: dict) -> bool:
+    """content'te yapısal gün bölümleri yoksa markdown'dan türet (yerinde yazar).
+
+    Dönen: içerik değişti mi. OKUMA yolunda kullanılır — üretimdeki gibi reddedip
+    yeniden üretmeyiz: eski bir planın GET'i 502 olmamalı ve kullanıcının elindeki
+    plan bir okuma yüzünden değişmemeli. Ayrıştırılamazsa days YAZILMAZ ve
+    plan_gunleri UYARI loglar (sessiz kalmaz, Sentry'de görünür)."""
+    if content.get("days"):
+        return False
+    days = plan_gunleri.days_from_content(content)
+    if not days:
+        return False
+    content["days"] = days
+    return True
 
 
 # =============================================================================
@@ -178,20 +201,49 @@ def generate_content(baby: Baby, req_overrides: dict | None,
     Sonnet çağrısını yapıyor; tek başlıkta toplanırsa hangisinin maliyeti şişirdiği
     görünmez."""
     profile = profile_from_baby(baby, req_overrides, dogum_haftasi)
-    _kullanim: dict = {}
-    _t0 = time.perf_counter()
     try:
         param = parametre_uret(profile)                 # deterministik parametreler
-        markdown = plan_generator.plan_uret(param, usage_sink=_kullanim)
     except Exception as e:
         raise PlanError(str(e)) from e
-    # _kullanim yalnız GERÇEK Claude çağrısında dolar; fallback yolunda boş kalır.
-    if _kullanim.get("usage"):
-        usage.kaydet(usage.SERVIS_ANTHROPIC, operation,
-                     model=_kullanim.get("model"), usage=_kullanim["usage"],
-                     user_id=baby.user_id,
-                     duration_ms=int((time.perf_counter() - _t0) * 1000))
     used_claude = bool(os.getenv("ANTHROPIC_API_KEY")) and plan_generator.HAS_ANTHROPIC
+    tip = param["plan_secimi"]["tip"]
+    gunler = int(param["plan_secimi"]["gunler"])
+
+    # Gün bölümleri ayrıştırılamazsa plan REDDEDİLİR ve yeniden üretilir: eğitim
+    # ekranının sessizce boş kalmasının sebebi buydu (başlık biçimi LLM'e bağlıydı,
+    # aynı sürümden 5 ayrı kalıp ölçüldü). Boş days ile plan KAYDEDİLMEZ.
+    markdown: str | None = None
+    days: list[dict] | None = None
+    son_hata: Exception | None = None
+    for deneme in range(1, PLAN_DAYS_MAX_DENEME + 1):
+        _kullanim: dict = {}
+        _t0 = time.perf_counter()
+        try:
+            markdown = plan_generator.plan_uret(param, usage_sink=_kullanim)
+        except Exception as e:
+            raise PlanError(str(e)) from e
+        # _kullanim yalnız GERÇEK Claude çağrısında dolar; fallback yolunda boş kalır.
+        # HER denemenin maliyeti ayrı yazılır — yeniden üretim bedava değil.
+        if _kullanim.get("usage"):
+            usage.kaydet(usage.SERVIS_ANTHROPIC, operation,
+                         model=_kullanim.get("model"), usage=_kullanim["usage"],
+                         user_id=baby.user_id,
+                         duration_ms=int((time.perf_counter() - _t0) * 1000))
+        try:
+            days = plan_gunleri.build_days(markdown, tip, gunler)
+            break
+        except plan_gunleri.DayParseError as e:
+            son_hata = e
+            logger.warning("Plan gün bölümleri ayrıştırılamadı (deneme %d/%d, baby=%s): %s",
+                           deneme, PLAN_DAYS_MAX_DENEME, baby.id, e)
+            if not used_claude:
+                # Yedek motor deterministiktir: aynı metni yeniden üretmek anlamsız.
+                # Buraya düşmek bizim fallback şablonumuzun bozuk olduğunu gösterir.
+                break
+    if days is None:
+        raise PlanError(f"Plan gün bölümleri ayrıştırılamadı "
+                        f"({'yedek motor' if not used_claude else f'{PLAN_DAYS_MAX_DENEME} deneme'}): "
+                        f"{son_hata}")
 
     # Faz Y: çizelge YAŞ BANDI TABLOSUNDAN kurulur (düzeltilmiş ay üzerinden).
     schedule = plan_adapter.build_schedule(
@@ -201,6 +253,8 @@ def generate_content(baby: Baby, req_overrides: dict | None,
 
     return {
         "markdown": markdown,                       # KALIR (geriye uyum + detay metni)
+        # Yapısal gün bölümleri — istemci markdown'ı regex'lemez (bkz. plan_gunleri).
+        "days": days,
         "headline": plan_adapter.headline(baby.name, param["bucket"], schedule),
         "bucket": param["bucket"],
         "yas": param["yas"],
@@ -263,6 +317,7 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         })
     else:
         content = base_content
+        days_backfill(content)        # eski taban planda days yoksa şimdi türet
         content.update({
             "schedule": result["schedule"],
             # Kestirme kuralı her adaptasyonda yeniden değerlendirilir (gündüz
@@ -332,6 +387,7 @@ def ensure_today_plan(db: Session, user: User, baby: Baby,
 
     content = dict(base_plan.content or {})
     sched = plan_adapter.normalize_schedule(content.get("schedule"))
+    days_backfill(content)            # taşınan planda da yapısal gün bölümleri dolsun
     content.update({
         "adapted": False,
         "base_plan_id": str(base_plan.id),

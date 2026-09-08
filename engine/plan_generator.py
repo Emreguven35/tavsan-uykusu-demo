@@ -63,8 +63,26 @@ Bu plan 4 haftaya yayılır ve "Eğitim Planı" bölümünü iki ayrı döneme a
 """
 
 
+def _gun_basliklari_blok(param: dict) -> str:
+    """Eğitim Planı bölümünde ZORUNLU olan gün başlıklarını birebir dayat.
+
+    Başlıklar sunucuda ayrıştırılıp content["days"] yapısal alanına yazılıyor
+    (engine/plan_gunleri.py). Ayrıştırma zaten esnek ve başarısızlıkta plan
+    reddedilip yeniden üretiliyor; bu blok İKİNCİ GÜVENCE — biçim serbest
+    bırakılınca aynı sürümden beş ayrı kalıp ölçüldü (emoji, "Günler", "1. Gün",
+    "|" ayracı, en-dash) ve eğitim ekranı iki kez boş kaldı."""
+    from engine.plan_gunleri import asamalar, baslik_satiri
+
+    try:
+        satirlar = [baslik_satiri(a) for a in asamalar(param["plan_secimi"]["tip"])]
+    except Exception:                     # merdiven okunamazsa prompt'u bozma
+        return ""
+    return ("\n".join(satirlar) + "\n")
+
+
 def _build_user_prompt(param: dict) -> str:
     bir_ay_blok = _bir_ay_program_blok(param)
+    gun_basliklari = _gun_basliklari_blok(param)
     return f"""Aşağıdaki PARAMETRELERİ kullanarak anneye yönelik bir uyku eğitimi planı yaz.
 
 KESIN KURALLAR (BUNLARI İHLAL ETME):
@@ -141,10 +159,15 @@ PLANIN İÇERMESİ GEREKEN BÖLÜMLER:
 2. ## Eğitim Uygunluğu (uygunsa "Uygun", değilse sebep ve hazırlık)
 3. ## Ön Hazırlık (varsa gün gün)
 4. ## Günlük Program (saat saat — yaş bucket'ından gelen "ornek_gunluk_program_basit" varsa kullan; A kuralını uygula: başlık ibaresi + tablonun altına uyanıklık süresi açıklaması)
-5. ## Eğitim Planı (gün gün, plan_secimi['gunler'] kadar gün; F kuralı: her günün altına o güne uyarlanmış "Bu gün kısa gündüz uykusu olursa" ve "Bu gün yoğun direnç olursa (B Planı)" alt başlıkları — AYRI genel protokol bölümü AÇMA)
+5. ## Eğitim Planı (gün gün, plan_secimi['gunler'] kadar gün; F kuralı: her günün altına o güne uyarlanmış "Bu gün kısa gündüz uykusu olursa" ve "Bu gün yoğun direnç olursa (B Planı)" alt başlıkları — AYRI genel protokol bölümü AÇMA. Aşama başlıklarının biçimi için aşağıdaki GÜN BAŞLIKLARI kuralına birebir uy.)
 6. ## Gece Uyanmaları Protokolü
 7. ## Başarı Kriterleri
 8. ## Dikkat Edilmesi Gerekenler (kaçınılması gereken hatalar)
+
+GÜN BAŞLIKLARI — BİÇİM SABİTTİR, DEĞİŞTİRME:
+"## Eğitim Planı" bölümünün içinde aşama başlıklarını AŞAĞIDAKİ SATIRLARIN BİREBİR AYNISI olarak yaz. Aynı sırayla, aynı sayıda, hepsi eksiksiz:
+{gun_basliklari}
+Bu satırlarda hiçbir değişiklik yapma: emoji EKLEME, "Günler" yazma, "1. Gün" biçimine çevirme, kısa tire (-) yerine uzun tire (– —) kullanma, ":" yerine "|" koyma, başlık düzeyini (###) değiştirme, etiket metnini değiştirme. Aşamaları bölme ya da birleştirme: 1'den {param['plan_secimi']['gunler']}'e kadar HER gün tam olarak bir aşamaya düşmeli, boşluk kalmamalı. Bu başlıklar makine tarafından okunup uygulamanın eğitim ekranına besleniyor; biçim bozulursa plan REDDEDİLİR ve baştan ürettirilir. Başlığın ALTINDAKİ metni istediğin kadar zenginleştirebilirsin — kısıt yalnızca başlık satırlarındadır.
 
 Plan yaklaşık 1500-2500 kelime arası olsun. Profesyonel, net, eyleme dönük.
 
@@ -324,16 +347,28 @@ def _fallback_plan(param: dict) -> str:
     lines.append("")
     lines.append(plan["aciklama"])
     lines.append("")
-    lines.append("**Kademeli uzaklaşma:**")
-    for k, v in bekleme["kademeli_uzaklasma"].items():
-        lines.append(f"- {k}: {v}")
-    lines.append("")
+    # Tüm günler için geçerli genel kurallar gün bloklarından ÖNCE yazılır: gün
+    # başlıklarından sonra gelirlerse son günün bloğuna yapışır ve days[-1].markdown
+    # o günün metni olmaktan çıkar.
     lines.append("**Kucağa alma bekleme süreleri:** " + bekleme["kucaktan_almak"])
     lines.append("")
     lines.append("**45 dakika kuralı:** " + bekleme["egitim_seans_max"])
     lines.append("")
-    lines.append("**B planı (yoğun direnç):** " + bekleme["B_plan_direnç"])
-    lines.append("")
+    # Gün başlıkları KANONİK biçimde yazılır (### Gün 1-3: Beşik yanı). Claude
+    # yolundaki başlıklarla aynı kalıp — plan_gunleri ayrıştırıcısı ikisini de
+    # okur, yedek motordan üretilen planda da content["days"] dolu gelir.
+    from engine.plan_gunleri import asamalar, baslik_satiri
+    for asama in asamalar(plan["tip"]):
+        lines.append(baslik_satiri(asama))
+        lines.append("")
+        lines.append(f"**Pozisyon:** {asama['position']}")
+        lines.append("")
+        lines.append("**Bu gün kısa gündüz uykusu olursa:** "
+                     + bekleme["kisa_gunduz_uykusu"])
+        lines.append("")
+        lines.append("**Bu gün yoğun direnç olursa (B Planı):** "
+                     + bekleme["B_plan_direnç"])
+        lines.append("")
 
     # Bölüm 6: Gece Uyanmaları
     lines.append("## Gece Uyanmaları Protokolü")
