@@ -30,6 +30,10 @@ Thumbs.db
 # Test outputs
 tests/test_results.json
 *.log
+
+# Denetim/faz raporları (hassas: bulgular + canlı test sonuçları — repoya girmez)
+AUDIT_RAPORU.md
+FAZ_*_RAPORU.md
 # Üretilmiş canlı plan çıktıları + denetim listesi (test profillerine ait üretilmiş içerik; repo'ya girmez)
 test_outputs/
 
@@ -49,3 +53,7 @@ data/answer_cache.json
 
 # Runtime ses cache'i (ElevenLabs MP3'leri — repoya girmez)
 data/audio_cache/
+
+# Lokal SQLite fallback DB'leri (DATABASE_URL yokken oluşur; production Postgres)
+tavsan_local.db
+_regresyon_chat.db

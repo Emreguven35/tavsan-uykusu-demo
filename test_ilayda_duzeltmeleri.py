@@ -47,6 +47,50 @@ def rec(bolum, kontrol, ok, kanit=""):
 
 
 # ---------------------------------------------------------------------------
+# /chat ENDPOINT REGRESYON MODU (opsiyonel)
+# CHAT_ENDPOINT=1 iken Bölüm C soruları doğrudan chatbot.cevapla yerine YENİ FastAPI
+# /api/v1/chat endpoint'i üzerinden koşulur — endpoint'in chatbot davranışını (tıbbi
+# sınır, danışman yönlendirmesi yok, kucağa alabilirsiniz vb.) KORUDUĞUNU doğrular.
+# Flag kapalıyken davranış BİREBİR eskisi gibidir (Streamlit/engine testi etkilenmez).
+# ---------------------------------------------------------------------------
+USE_CHAT_ENDPOINT = os.getenv("CHAT_ENDPOINT") == "1"
+_chat_client = None
+_chat_headers = None
+
+
+def _ensure_chat_client():
+    global _chat_client, _chat_headers
+    if _chat_client is not None:
+        return
+    os.environ.setdefault("DATABASE_URL", "sqlite:///./_regresyon_chat.db")
+    os.environ.setdefault("JWT_SECRET", "regresyon-secret")
+    from fastapi.testclient import TestClient
+    from api.db import engine
+    from api.db.base import Base
+    import api.models  # noqa: F401 — metadata dolsun
+    Base.metadata.create_all(engine)          # tablo yoksa oluştur (chat_messages dahil)
+    from api.main import app
+    _chat_client = TestClient(app)
+    creds = {"email": "regresyon@ornek.com", "password": "regresyon123"}
+    r = _chat_client.post("/api/v1/auth/register", json=creds)
+    if r.status_code == 409:                   # zaten kayıtlı → login
+        r = _chat_client.post("/api/v1/auth/login", json=creds)
+    if r.status_code not in (200, 201):
+        raise RuntimeError(f"regresyon auth başarısız: {r.status_code} {r.text[:150]}")
+    _chat_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def _chat_answer(soru: str) -> str:
+    """Soruyu /api/v1/chat üzerinden sor, cevabı döndür (endpoint regresyonu)."""
+    _ensure_chat_client()
+    r = _chat_client.post("/api/v1/chat", headers=_chat_headers,
+                          json={"message": soru, "history": []})
+    if r.status_code != 200:
+        raise RuntimeError(f"/chat {r.status_code}: {r.text[:200]}")
+    return r.json()["answer"]
+
+
+# ---------------------------------------------------------------------------
 # Yasaklı ifade desenleri
 # ---------------------------------------------------------------------------
 BANNED = {
@@ -146,6 +190,10 @@ def bolum_A():
 # BÖLÜM B — CANLI PLAN ÜRETİMİ
 # ===========================================================================
 PROFILLER = [
+    # FAZ: plan sabitleme (2026-08-10). Tüm bebekler 13 günlük kademeli programa
+    # tabidir; yaklasim_tercihi alanı profillerde BİLEREK duruyor — motorun onu
+    # artık YOK SAYDIĞINI doğrulamak için (geriye uyumluluk). Üç profil de
+    # 13_gun_dirençli üretir; 1 aylık program bayrakla kapalıdır.
     {
         "etiket": "1_Emir_8ay_13gun",
         "profile": {
@@ -159,7 +207,7 @@ PROFILLER = [
         },
     },
     {
-        "etiket": "2_Emir_8ay_1aylik",
+        "etiket": "2_Emir_8ay_13gun_eski1aylik",
         "profile": {
             "bebek_ad": "Emir", "dogum_tarihi": "2025-10-08", "dogum_haftasi": 40,
             "beslenme": "anne sütü (emerek)", "destek": "emerek uyuma",
@@ -171,7 +219,7 @@ PROFILLER = [
         },
     },
     {
-        "etiket": "3_Defne_11ay_5gun",
+        "etiket": "3_Defne_11ay_13gun",
         "profile": {
             "bebek_ad": "Defne", "dogum_tarihi": "2025-07-08", "dogum_haftasi": 40,
             "beslenme": "mama", "destek": "sallanarak", "emzik": "hayır",
@@ -372,13 +420,16 @@ def bolum_C():
             "bebek arabas" not in depr_text,
             f"top={hit_ids[:3]}")
 
-        force = os.getenv("FORCE_REGEN") == "1"
+        # Endpoint regresyon modunda önbelleği atla (taze /chat cevabı iste).
+        force = os.getenv("FORCE_REGEN") == "1" or USE_CHAT_ENDPOINT
         ans_path = OUT_DIR / f"ans_{key}.txt"
         cb_md = OUT_DIR / f"chatbot_{key}.md"
         if ans_path.exists() and not force:
             ans = ans_path.read_text(encoding="utf-8")
         elif cb_md.exists() and not force and "# Cevap" in cb_md.read_text(encoding="utf-8"):
             ans = cb_md.read_text(encoding="utf-8").split("# Cevap", 1)[1].split("\n\n", 1)[1]
+        elif USE_CHAT_ENDPOINT:
+            ans = _chat_answer(soru)          # YENİ: /api/v1/chat üzerinden
         else:
             ans = chatbot.cevapla(soru)
         ans_path.write_text(ans, encoding="utf-8")
@@ -419,6 +470,160 @@ def bolum_C():
                 not BANNED["kucağa almayın"].search(ans))
 
 
+# ---------------------------------------------------------------------------
+# BÖLÜM D — ARA YAŞ BANTLARI (yaş bandı köprüsü regresyonu)
+# ---------------------------------------------------------------------------
+# SORUN (düzeltildi): 9_ay gibi bazı bantlar korpusta HİÇ temsil edilmiyordu
+# (yalnız sayısal alanları var, _is_descriptive_text onları eliyor) ve yas_bandi
+# retrieval'ı etkilemiyordu → "9 ay için bilgim yok" cevabı dönüyordu.
+# Artık bant, plan üretimiyle AYNI eşlemeyle (yas_bucket_sec) çözülüp yaş tablosu
+# parametreleri bağlama ekleniyor.
+
+# "Bilgim yok" kalıpları — ara yaş sorularında HİÇBİRİ geçmemeli.
+BILGI_YOK_KALIPLARI = [
+    "bilgim yok", "bilgi yok", "bulunmuyor", "bulunmamaktadır", "yeterli bilgi",
+    "elimde yeterli", "bilgi bulunmamakta", "veri yok", "mevcut değil",
+]
+
+# (anahtar, soru, cevapta GEÇMESİ beklenen sayısal ipuçlarından en az biri)
+YAS_SORULARI = [
+    ("9ay_kisa_uyku", "9 aylık bebeğim günde kaç saat kısa uyku yapmalı",
+     ["2-3", "2 - 3", "iki", "2 saat", "3 saat"]),
+    ("9ay_uyanik", "9 aylık bebeğim ne kadar uyanık kalabilir",
+     ["2.5", "2,5", "3.5", "3,5", "3-4", "saat"]),
+    ("10ay_kac_uyku", "10 aylık bebeğim günde kaç kez uyumalı",
+     ["2", "iki"]),
+    ("6ay_uyanik", "6 aylık bebeğim ne kadar uyanık kalabilir",
+     ["2", "3", "saat"]),
+    ("6ay_toplam", "6 aylık bebeğim günde toplam ne kadar uyumalı",
+     ["12", "15", "saat"]),
+]
+
+
+def bolum_D():
+    print("\n" + "=" * 70 + "\nBÖLÜM D — Ara yaş bantları\n" + "=" * 70)
+    chatbot.init_index()
+
+    # D-0: bant çözümü — her ay için bir bant bulunmalı (boşluk YOK)
+    bosluk = []
+    for ay in range(0, 37):
+        bantlar, _ = chatbot.bant_coz(f"{ay} aylık bebeğim ne yapmalı")
+        blok = chatbot.yas_bandi_blok(bantlar, float(ay))
+        if not bantlar or not blok.strip():
+            bosluk.append(ay)
+    rec("D-bant", "0-36 ay arasında bant boşluğu YOK", not bosluk,
+        f"boşluk={bosluk}" if bosluk else "36/36 ay bant buldu")
+
+    # D-0b: yaş geçiş dönemi iki bant döndürür
+    bantlar, _ = chatbot.bant_coz("bebeğim 6 haftalık")
+    rec("D-gecis", "Geçiş dönemi iki bandı birlikte döndürür", len(bantlar) == 2,
+        f"bantlar={bantlar}")
+
+    if not HAS_KEY:
+        rec("D-canli", "CANLI ara yaş cevapları", None, "ANTHROPIC_API_KEY yok — atlandı")
+        return
+
+    for key, soru, ipuclari in YAS_SORULARI:
+        # Bu bölüm HER ZAMAN taze cevap ister (cache'lenmiş eski "bilgim yok"
+        # cevabı regresyonu maskelemesin).
+        ans = _chat_answer(soru) if USE_CHAT_ENDPOINT else chatbot.cevapla(soru)
+        (OUT_DIR / f"yas_{key}.txt").write_text(ans, encoding="utf-8")
+        low = _low(ans)
+
+        gecen = [k for k in BILGI_YOK_KALIPLARI if k in low]
+        rec("D-" + key, "'Bilgim yok' kalıbı GEÇMEDİ", not gecen,
+            f"geçen={gecen}" if gecen else f"cevap={ans[:70]!r}")
+
+        rec("D-" + key, "Yaş bandı bilgisi verildi (sayısal ipucu var)",
+            any(ip in low for ip in ipuclari),
+            f"aranan={ipuclari[:3]} cevap={ans[:70]!r}")
+
+        # Tıbbi sınır ve yasak dil korunuyor mu (mevcut davranış bozulmadı)
+        rec("D-" + key, "Danışmanlık yönlendirmesi YOK",
+            "danışman" not in low, f"cevap={ans[:60]!r}")
+
+
+# ---------------------------------------------------------------------------
+# BÖLÜM E — KADEMELİ FALLBACK ZİNCİRİ (K1→K4)
+# ---------------------------------------------------------------------------
+# K1: doğrudan cevap | K2: en yakın bilgi | K3: genel ilke + netleştirme sorusu
+# K4: kapsam dışı (deterministik mesaj, LLM çağrılmaz).
+# DEĞİŞMEZ: tıbbi sınır hiçbir katmanda gevşemez.
+
+# (soru, beklenen katman)
+KATMAN_SORULARI = [
+    ("bebeğim gece sık uyanıyor", "k1"),
+    ("9 aylık bebeğim günde kaç saat kısa uyku yapmalı", "k1"),
+    ("bebeğimin odası kaç derece olmalı", "k1"),
+    # K4 — gerçekten kapsam dışı (spec: "örn. beslenme tarifi")
+    ("bebeğime nasıl mama tarifi yapabilirim", "k4"),
+    ("vergi beyannamesi nasıl doldurulur", "k4"),
+]
+
+
+def bolum_E():
+    print("\n" + "=" * 70 + "\nBÖLÜM E — Kademeli fallback (K1→K4)\n" + "=" * 70)
+    chatbot.init_index()
+
+    for soru, beklenen in KATMAN_SORULARI:
+        hits = chatbot.retrieve(soru, top_k=1, min_score=0.0)
+        top = float(hits[0]["_score"]) if hits else 0.0
+        bantlar, yas_ay = chatbot.bant_coz(soru)
+        # Faz E-2: katman kararı artık ebeveynlik + kapsam-dışı sinyallerini de
+        # kullanıyor. Bu çağrı motorun kullandığı argümanların TAMAMINI vermeli;
+        # eksik verilirse test motordan farklı bir katman hesaplar (yanlış KALDI).
+        katman = chatbot._katman_belirle(
+            top, chatbot._alan_sinyali(soru, yas_ay),
+            bool(chatbot.yas_bandi_blok(bantlar, yas_ay)),
+            ebeveynlik=chatbot._ebeveynlik_sinyali(soru),
+            kapsam_disi=chatbot._kapsam_disi_sinyali(soru))
+        rec("E-katman", f"'{soru[:38]}' → {beklenen}", katman == beklenen,
+            f"bulunan={katman} top={top:.3f}")
+
+    # E-k4: kapsam dışı cevabı LLM'siz ve doğru içerikte mi?
+    r = chatbot._cevap_uret("vergi beyannamesi nasıl doldurulur")
+    low = _low(r["cevap"])
+    rec("E-k4", "K4 deterministik (LLM çağrılmadı)", r["llm"] is False,
+        f"llm={r['llm']} katman={r.get('retrieval_layer')}")
+    rec("E-k4", "K4 katmanı raporlandı", r.get("retrieval_layer") == "k4",
+        f"katman={r.get('retrieval_layer')}")
+    rec("E-k4", "K4 kapsamı hatırlatıyor (uyku başlıkları geçiyor)",
+        "uyku" in low and ("kapsam" in low or "yardımcı" in low),
+        f"cevap={r['cevap'][:80]!r}")
+    rec("E-k4", "K4'te 'bilgim yok' KALIBI yok",
+        not any(k in low for k in BILGI_YOK_KALIPLARI), f"cevap={r['cevap'][:60]!r}")
+
+    r2 = chatbot._cevap_uret("bebeğime nasıl mama tarifi yapabilirim")
+    rec("E-k4", "Beslenme tarifi kapsam dışı sayıldı",
+        r2.get("retrieval_layer") == "k4", f"katman={r2.get('retrieval_layer')}")
+
+    # E-telemetri: k1 cevabında katman+skor dolu dönüyor mu?
+    if HAS_KEY:
+        r3 = chatbot._cevap_uret("bebeğim gece sık uyanıyor")
+        # Cache hit'te katman/skor TASARIM GEREĞİ None'dır (retrieval yapılmadı →
+        # kapsama analizi kirlenmesin). Test cache durumuna bağımlı olmasın diye
+        # iki hal de açıkça doğrulanır.
+        if r3["cache_hit"]:
+            rec("E-telemetri", "Cache hit'te katman/skor None (tasarım)",
+                r3.get("retrieval_layer") is None and r3.get("top_score") is None,
+                f"katman={r3.get('retrieval_layer')} skor={r3.get('top_score')}")
+        else:
+            rec("E-telemetri", "Taze cevapta retrieval_layer + top_score dolu",
+                r3.get("retrieval_layer") in ("k1", "k2", "k3")
+                and isinstance(r3.get("top_score"), float),
+                f"katman={r3.get('retrieval_layer')} skor={r3.get('top_score')}")
+
+        # E-medikal: tıbbi sınır hiçbir katmanda gevşemez
+        r4 = chatbot._cevap_uret("bebeğimde reflü var ne yapmalıyım")
+        low4 = _low(r4["cevap"])
+        rec("E-medikal", "Tıbbi soru K4'e DÜŞMEDİ (doktor kapısı çalışsın)",
+            r4.get("retrieval_layer") != "k4", f"katman={r4.get('retrieval_layer')}")
+        rec("E-medikal", "Tıbbi sınır korunuyor (doktor yönlendirmesi)",
+            "doktor" in low4, f"cevap={r4['cevap'][:80]!r}")
+    else:
+        rec("E-canli", "CANLI fallback cevapları", None, "ANTHROPIC_API_KEY yok — atlandı")
+
+
 def ozet():
     print("\n" + "=" * 70 + "\nÖZET\n" + "=" * 70)
     gecti = sum(1 for r in results if r[2] == "GEÇTİ")
@@ -438,5 +643,7 @@ if __name__ == "__main__":
     bolum_A()
     bolum_B()
     bolum_C()
+    bolum_D()
+    bolum_E()
     n_kaldi = ozet()
     sys.exit(0)

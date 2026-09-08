@@ -15,3 +15,26 @@ sentence-transformers>=2.2,<4
 fastapi>=0.110
 uvicorn[standard]>=0.29
 requests>=2.31
+
+# --- Production backend: DB (PostgreSQL) + migration + auth (Railway). ---
+# psycopg2-binary yalnız postgres bağlanınca yüklenir; lokal SQLite fallback'te
+# import edilmez. Auth Faz 2'de python-jose (JWT) + passlib[bcrypt] kullanır.
+sqlalchemy>=2.0,<3
+alembic>=1.13
+psycopg2-binary>=2.9
+python-jose[cryptography]>=3.3
+passlib[bcrypt]>=1.7
+# bcrypt 4.1+ '__about__' sürüm alanını kaldırdı → passlib 1.7.4 backend'i kırılıyor.
+# 4.0.1 son uyumlu sürüm ve cp36-abi3 wheel'i Python 3.13'te de çalışır (Railway Linux dahil).
+bcrypt<4.1
+python-multipart>=0.0.9
+email-validator>=2.0        # pydantic EmailStr (auth e-posta doğrulaması)
+
+# --- Faz 6: bildirim zamanlayıcısı (uygulama içi, ayrı worker yok) ---
+# Yalnız ENVIRONMENT=production'da başlar (bkz. api/services/notifier.py).
+apscheduler>=3.10,<4
+
+# --- Gözlemlenebilirlik: Sentry hata izleme ---
+# YALNIZ ENVIRONMENT=production + SENTRY_DSN varken devreye girer (api/observability.py).
+# KVKK: send_default_pii=False + include_local_variables=False + before_send maskesi.
+sentry-sdk[fastapi]>=2.0,<3

@@ -17,6 +17,9 @@ Dönüşüm kuralları (konusma_metnine_cevir):
     "(elini tutma, emme vb.)" → ", elini tutma, emme ve benzeri,".
   - Yaygın kısaltmalar açılır (vb.→ve benzeri, örn.→örneğin ...).
   - Çift boşluk/satır tekile iner; art arda noktalama temizlenir.
+
+Ayrıca masal/ninni anlatımı için `masal_metni_hazirla` (bkz. aşağısı): paragraf
+ve cümle aralarına ElevenLabs `<break>` etiketi koyar.
 """
 import re
 
@@ -115,3 +118,63 @@ def konusma_metnine_cevir(text: str) -> str:
     s = re.sub(r",\s*([.!?])", r"\1", s)             # ", ." → "."
     s = re.sub(r"\s{2,}", " ", s)
     return s.strip(" ,;:")
+
+
+# ---------------------------------------------------------------------------
+# MASAL RİTMİ — ElevenLabs <break> etiketleri
+# ---------------------------------------------------------------------------
+# ElevenLabs SSML `<break time="x.xs" />` destekler (max 3 sn). Flash v2.5'te
+# çalıştığı ÖLÇÜLDÜ (2026-08-25): <break time="2.0s"/> sesi +2,25 sn uzattı.
+#
+# DİKKAT — neden her cümleye koymuyoruz: ElevenLabs "tek üretimde çok fazla
+# break etiketi kararsızlık yapar (hızlı okuma, gürültü, artefakt)" diye
+# uyarıyor. Korpustaki masallar 3.600-4.600 karakter ve 81-109 cümle; her cümle
+# sonuna etiket koymak tek istekte ~100 etiket demek. Üstelik etiketler metnin
+# parçası olarak gönderildiği için karakter başına ücretlendirmeyi de ~%50
+# şişirir. Bu yüzden kural kendi kendini sınırlar:
+#   - Paragraf araları HER ZAMAN duraklar (masalın nefes aldığı yer orası).
+#   - Cümle sonu duraklamaları YALNIZCA toplam etiket sayısı MASAL_MAX_BREAK'i
+#     aşmıyorsa eklenir. Pratikte: ninniler (6-7 cümle) cümle duraklaması ALIR,
+#     uzun masallar yalnız paragraf duraklaması alır — genel tempoyu zaten
+#     profildeki speed=0.85 sağlıyor.
+MASAL_PARAGRAF_SN = 0.8
+MASAL_CUMLE_SN = 0.3
+MASAL_MAX_BREAK = 40
+
+# Cümle sonu: nokta/ünlem/soru + (varsa) kapanış tırnağı + boşluk.
+# Boşluk ZORUNLU olduğu için paragrafın SON cümlesi eşleşmez — oraya paragraf
+# duraklaması gelecek, üst üste iki etiket olmaz.
+_CUMLE_SONU = re.compile(r"([.!?][\"»”’']?)(\s+)")
+
+
+def break_etiketi(saniye: float) -> str:
+    """ElevenLabs duraklama etiketi. Süre 3 sn üstüne çıkamaz (API sınırı)."""
+    return f'<break time="{min(float(saniye), 3.0):.1f}s" />'
+
+
+def masal_metni_hazirla(text: str, paragraf_sn: float = MASAL_PARAGRAF_SN,
+                        cumle_sn: float = MASAL_CUMLE_SN,
+                        max_break: int = MASAL_MAX_BREAK) -> str:
+    """Masal/ninni metnini anlatım ritmiyle TTS'e hazırla.
+
+    `konusma_metnine_cevir` paragrafları tek satıra indirdiği için temizlik
+    PARAGRAF PARAGRAF yapılır; yoksa duraklama koyacak yer kalmaz. Etiketler en
+    SONDA eklenir, böylece temizlik kuralları etiketleri bozamaz.
+    """
+    if not text:
+        return ""
+    paragraflar = [p for p in
+                   (konusma_metnine_cevir(ham) for ham in re.split(r"\n\s*\n", text))
+                   if p]
+    if not paragraflar:
+        return ""
+
+    paragraf_break = len(paragraflar) - 1
+    cumle_break = sum(len(_CUMLE_SONU.findall(p)) for p in paragraflar)
+    if cumle_sn > 0 and (paragraf_break + cumle_break) <= max_break:
+        etiket = break_etiketi(cumle_sn)
+        paragraflar = [_CUMLE_SONU.sub(rf"\1 {etiket}\2", p) for p in paragraflar]
+
+    if paragraf_sn <= 0:
+        return " ".join(paragraflar)
+    return f" {break_etiketi(paragraf_sn)} ".join(paragraflar)

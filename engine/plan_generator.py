@@ -15,9 +15,12 @@ except ImportError:
     HAS_ANTHROPIC = False
 
 from engine.config import PLAN_MODEL  # plan üretici modeli (sonnet — merkezi)
-# 16384: 1 aylık program (4 haftalık + 13 eğitim günü × gün-altı B-Planı protokolleri)
-# 4096 ve 8192'de yarıda kesiliyordu; bu sınır en uzun planın bile tamamlanmasını sağlar.
-MAX_TOKENS = 16384
+# 16384 eski 1 aylık program (28 gün) içindi; o yol artık kapalı (BIR_AY_PROGRAM_AKTIF)
+# ve herkes 13 günlük plan alıyor. Faz O2 ölçümü: gerçek çıktı 7167-7474 token.
+# 12288 = ~%64 pay. Süreyi ETKİLEMEZ (max_tokens rezervasyon değil, tavandır);
+# amacı kaçak üretimde maliyeti sınırlamak ve stop_reason='max_tokens'i anlamlı
+# bir uyarı sinyaline çevirmek.
+MAX_TOKENS = 12288
 
 
 def _format_dict(d: dict, indent: int = 0) -> str:
@@ -68,7 +71,7 @@ KESIN KURALLAR (BUNLARI İHLAL ETME):
 1. Sayısal değerleri (saatler, dakikalar, uyku sayısı, gün sayısı) ASLA değiştirme.
 2. Markdown formatı kullan, başlıkları ## ile aç.
 3. Profesyonel ama sıcak Türkçe yaz.
-4. Görsel referansı, ders/kayıt adı, "İlayda Hanım kaydından" gibi ifadeler YASAK.
+4. MARKA KURALI: Plan "Tavşan Uykusu" yöntemi adına konuşur. Cevapta KİŞİ ADI (danışmanın ya da bir eğitmenin adı), görsel referansı, ders/kayıt adı ya da "şu kayıtta anlatıldığı gibi" türü kaynak atfı GEÇMEZ. Yönteme atıf gerekiyorsa "Tavşan Uykusu yönteminde" de.
 5. Net, uygulanabilir adımlar ver — soyut tavsiye değil.
 6. Eğer eğitim uygun değilse, sebebini açıkça yaz ve plan yazma; sadece bekleyiş notu ve hazırlık önerileri ver.
 7. Anneye doğrudan ve nazik bir dille hitap et; emir kipi değil öneri kipi kullan (aşağıdaki ÜSLUP KURALI'na uy).
@@ -77,7 +80,7 @@ KESIN KURALLAR (BUNLARI İHLAL ETME):
 
 ÜSLUP KURALI: Ebeveyne hitap ederken sert emir kipi ve kesin gelecek zaman kullanma. 'takmayacaksınız', 'yapmayacaksınız', 'vermeyeceksiniz' gibi ifadeler yerine 'takmamalısınız', 'yapmamanızı öneriyorum', 'vermemeniz gerekiyor' gibi öneri/gereklilik kipi kullan. Ton her zaman destekleyici ve nazik olmalı, asla buyurgan olmamalı.
 
-İÇERİK KURALLARI (İLAYDA GÜNCELLEMELERİ — KESİNLİKLE UY):
+İÇERİK KURALLARI (TAVŞAN UYKUSU YÖNTEMİ — KESİNLİKLE UY):
 
 A) GÜNLÜK PROGRAM = UYANIKLIK SÜRESİ MANTIĞI: Günlük program tablosunun başlığına "(Örnek Akış — Saatler Uyanıklık Süresine Göre Kayar)" ibaresini ekle. Tablonun hemen ALTINA mutlaka şu açıklama bloğunu yaz: "ÖNEMLİ — Bu tablo örnek bir akıştır, saatler sabit değildir. Belirleyici olan bebeğin UYANIKLIK SÜRESİDİR. Örnek: Güne 06:00'da başlandı, 06:15 ilk beslenme, 07:30 ek gıda, 09:00'da uykuya yatırıldı. Bebek 10:30'da kalktıysa (1,5 saat uyuduysa) bir sonraki uykuya yatış saati buna göre hesaplanır; ama 09:30'da kalktıysa (30 dakika uyuduysa) bir sonraki uyku saati DAHA ERKENE çekilir. Her uykudan sonra bir sonraki yatış saatini bebeğin gerçek uyanma saatine ve yaşına uygun uyanıklık süresine göre güncelleyin. Bir sonraki yatış saatini, bebeğin UYANDIĞI saatin üzerine yaşına uygun uyanıklık süresini ekleyerek hesaplayın. Kısa uyuyup gereğinden uzun uyanık kalan bebekte kortizol yükselir ve uykuya geçiş zorlaşır." Açıklamadaki uyanıklık süresi değerini, YAŞ PARAMETRELERİ bölümündeki bu bebeğin yaşına ait gerçek uyanıklık penceresi değeriyle doldur.
 
@@ -94,6 +97,10 @@ F) PROTOKOLLERİN YERİ — HER GÜNÜN ALTINDA: "Kısa Gündüz Uykusu Protokol
 G) BEBEK ARABASI GÜVENLİK KURALI: Bebek arabasıyla (veya hareketle/sallayarak) uyutma önerisi HİÇBİR koşulda yapılmaz. 3 tekrar sonrasında da uyumuyorsa: o uyku denemesi sonlandırılır, bebek yaşına uygun uyanıklık süresi kadar uyanık tutulur ve bir sonraki uyku denemesinde eğitime devam edilir.
 
 H) SON GÜNDÜZ UYKUSU BİTİŞ SAATİ ESNEKTİR: Günlük programda son gündüz uykusu için bir bitiş saati (örn. 16:00) belirtildiğinde, o satırın/tablonun altına şu içerikte bir not ekle: "Not: Bu bitiş saati katı değildir. Önceliğimiz, bebeğin gün içinde uyuması gereken minimum uykuyu tamamlamasıdır. Bebek yaşına uygun minimum gündüz uyku süresini (YAŞ PARAMETRELERİ'ndeki gunduz_uyku_total değeri) ya da günlük toplam uyku hedefini dolduramadıysa, bu bitiş saati aşılsa bile İLAVE bir gündüz uykusu yaptırın; yani bebek yeterince uyumadıysa uykuyu 16:00'da bitirmenin bir kıymeti yoktur. Bu ilave uykudan sonra, bebeği yaşına uygun uyanıklık penceresi kadar uyanık tutup gece uykusuna geçin — gece uykusu biraz gecikse bile minimum gündüz/toplam uyku önceliklidir." Bu kural yalnızca alışma evresinde değil, eğitim tamamlandıktan sonra da geçerlidir. İlave uyku gerektiğinde, o yaşın normal gündüz uyku sayısının bir fazlasına çıkılabilir (ör. 8 ay: 3 yerine 4 uyku). Bu nottaki sayısal değerleri YAŞ PARAMETRELERİ bölümündeki gerçek değerlerden al; tabloda olmayan bir yaş için değer uydurma.
+
+I) EVRENSEL KESTİRME KURALI (HER YAŞTA GEÇERLİ — MUTLAKA YAZ): Bebek yaşına uygun GÜNDÜZ TOPLAM UYKU MİNİMUMUNU tamamlayamazsa, ilave bir kestirme uykusu yaptırılır. Bu kestirme {param.get('kestirme_protokolu', {}).get('sure_dk', 30)} DAKİKADIR ve süre dolunca bebek UYANDIRILIR. Bu kestirmeden uyandıktan {param.get('kestirme_protokolu', {}).get('gece_uykusuna_gecis_dk', 60)} dakika (1 saat) sonra bile gece uykusuna geçilebilir — yani gece uykusu bir miktar gecikse dahi minimum gündüz uykusunu tamamlamak önceliklidir. Bu kuralı "Günlük Program" bölümünün altında ayrı bir not olarak yaz; süreyi ve 1 saat kuralını AÇIKÇA belirt. Minimum gündüz uyku süresini YAŞ PARAMETRELERİ'ndeki gunduz_uyku_total değerinden al, uydurma.
+
+J) 24 SAATLİK TOPLAM UYKU İHTİYACI (MUTLAKA YAZ): YAŞ PARAMETRELERİ'ndeki toplam_uyku_24h değeri, bebeğin gündüz + gece toplam uyku ihtiyacıdır. "Günlük Program" bölümünde bu değeri AÇIKÇA belirt ve anneye şunu anlat: bebeğin yeterince uyuyup uymadığının ölçütü tek tek uyku süreleri değil, 24 saatteki TOPLAMDIR. Gündüz ve gece toplamı bu değerin altında kalıyorsa önce gündüz uykularını (kestirme kuralıyla), sonra gece yatış saatini öne çekerek tamamlayın. Bu sayıyı YAŞ PARAMETRELERİ'nden aynen al, uydurma veya yuvarlama yapma.
 
 PROFIL:
 {_format_dict(param['profile_summary'])}
@@ -169,9 +176,15 @@ def _build_cached_content(param: dict) -> list[dict]:
     ]
 
 
-def plan_uret(param: dict) -> str:
+def plan_uret(param: dict, usage_sink: dict | None = None) -> str:
     """
     Claude API ile plan üret. API key yoksa fallback olarak deterministik markdown çıktı verir.
+
+    usage_sink: verilirse yanıttaki GERÇEK usage sayaçları + model adı bu sözlüğe
+    yazılır (maliyet takibi tahmin etmez). Modül GLOBALİ kullanılmadı çünkü plan
+    üretimi arka plan iş parçacıklarında paralel koşuyor (api/services/plan_jobs.py)
+    ve global bir "son kullanım" değeri işler arasında yarışırdı. Çağıran taze bir
+    sözlük geçer; fallback yolunda sözlük DOLDURULMAZ (LLM çağrısı olmadı).
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
 
@@ -185,7 +198,29 @@ def plan_uret(param: dict) -> str:
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": _build_cached_content(param)}],
     )
+    if usage_sink is not None:
+        usage_sink["model"] = PLAN_MODEL
+        usage_sink["usage"] = _usage_ozet(response)
     return response.content[0].text
+
+
+def _usage_ozet(response) -> dict:
+    """Anthropic usage bloğunu düz sözlüğe indir (None-güvenli).
+    engine/ paketi api/ paketine bağımlı olmadığı için burada küçük bir kopya."""
+    u = getattr(response, "usage", None)
+    if u is None:
+        return {"input_tokens": 0, "output_tokens": 0,
+                "cached_tokens": 0, "cache_write_tokens": 0}
+
+    def _i(ad):
+        try:
+            return int(getattr(u, ad, 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    return {"input_tokens": _i("input_tokens"), "output_tokens": _i("output_tokens"),
+            "cached_tokens": _i("cache_read_input_tokens"),
+            "cache_write_tokens": _i("cache_creation_input_tokens")}
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +300,25 @@ def _fallback_plan(param: dict) -> str:
                 lines.append(f"- **{k}**: {v}")
     lines.append("")
 
+    # 24 saatlik toplam uyku ihtiyacı (Faz Y v1.1) — "yeterince uyuyor mu?" ölçütü.
+    if p.get("toplam_uyku_24h"):
+        lines.append(f"**24 saatlik toplam uyku ihtiyacı:** {p['toplam_uyku_24h']} "
+                     "(gündüz + gece). Bebeğinizin yeterince uyuyup uyumadığının "
+                     "ölçütü tek tek uyku süreleri değil, 24 saatteki toplamdır.")
+        lines.append("")
+
+    # Evrensel kestirme kuralı (Faz Y) — her yaşta geçerli, plandan düşmemeli.
+    kestirme = param.get("kestirme_protokolu") or {}
+    if kestirme:
+        lines.append(f"**Kestirme uykusu kuralı:** Bebeğiniz gündüz toplam uyku "
+                     f"minimumunu ({p.get('gunduz_uyku_total', '-')}) tamamlayamazsa "
+                     f"ilave {kestirme.get('sure_dk', 30)} dakikalık bir kestirme "
+                     f"uykusu yaptırın; {kestirme.get('sure_dk', 30)} dakika dolunca "
+                     f"uyandırın. Bu kestirmeden uyandıktan "
+                     f"{kestirme.get('gece_uykusuna_gecis_dk', 60)} dakika (1 saat) "
+                     "sonra bile gece uykusuna geçebilirsiniz.")
+        lines.append("")
+
     # Bölüm 5: Eğitim Planı
     lines.append(f"## Eğitim Planı — {plan['gunler']} Günlük {plan['tip']}")
     lines.append("")
@@ -292,6 +346,8 @@ def _fallback_plan(param: dict) -> str:
             lines.append(f"- {k}: {v}")
         lines.append("")
     lines.append("**Yatır-çık sonrası:** " + bekleme["yatir_cik_sonrasi"])
+    lines.append("")
+    lines.append("**Bekleme süresi artışı:** " + bekleme["artis_esnekligi"])
     lines.append("")
     lines.append("**Kısa gündüz uykusu uzatma:** " + bekleme["kisa_gunduz_uykusu"])
     lines.append("")

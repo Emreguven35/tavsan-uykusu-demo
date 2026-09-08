@@ -113,7 +113,8 @@ def main() -> int:
     print(f"   Birim dağılımı: toplam={result['toplam']} "
           f"(chunk={result.get('chunk',0)}, "
           f"global_rule={result.get('global_rule',0)}, "
-          f"yas_bucket={result.get('yas_bucket',0)})")
+          f"yas_bucket={result.get('yas_bucket',0)}, "
+          f"yas_bandi={result.get('yas_bandi',0)})")
     return 0
 
 

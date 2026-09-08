@@ -1,12 +1,18 @@
 """
 Parameter Engine — 37 cevap → kişisel parametreler.
 
-Sayısal değerler ASLA LLM'den değil, master_knowledge_base.json'dan gelir (deterministik).
+Sayısal değerler ASLA LLM'den gelmez (deterministik):
+  • Yaş bandı sayıları (uyanıklık penceresi, uyku sayısı, gündüz/gece uyku süresi)
+    → data/yas_bantlari.json (İlayda tablosu, Faz Y). TEK KAYNAK.
+  • Diğer bant içeriği (örnek program, gece beslenme notları, görsel referanslar)
+    → master_knowledge_base.json.
 """
 import json
 from datetime import datetime, date
 from pathlib import Path
 from typing import Any
+
+from engine import yas_bantlari
 
 # ---------------------------------------------------------------------------
 # Veri yükleme — data/ klasörü app.py'nin yanında
@@ -276,89 +282,88 @@ def on_hazirlik_belirle(profile: dict, yas: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Plan seçimi — 5 günlük standart mı 13 günlük dirençli mi
+# Plan seçimi — KARAR KB'DEN OKUNUR (İlayda kararı, 2026-08-10)
 # ---------------------------------------------------------------------------
-def _otomatik_yontem_sec(mizac: str, dayanma: str) -> dict:
-    """Mizaç + dayanma sınırına göre 5 mi 13 günlük yöntem mi (1 aylık programın 3-4. haftası için)."""
-    inatci = any(k in mizac for k in ["inatçı", "huysuz", "zor", "kararlı"])
-    hassas = any(k in mizac for k in ["hassas", "duyarlı"])
-    dusuk_dayanma = any(d in dayanma for d in ["10", "15 dakika", "20 dakika", "hiç", "az"])
-    if (inatci and dusuk_dayanma) or hassas:
-        return {
-            "tip": "13_gun_dirençli",
-            "gunler": 13,
-            "aciklama": "13 günlük kademeli yöntem: yatak yanı 1-3 gün, oda ortası 4-6, kapı 7-9, eşik 10-12, yatır-çık 13.",
-        }
-    return {
-        "tip": "5_gun_standart",
-        "gunler": 5,
-        "aciklama": "5 günlük standart yöntem: yatak yanı 1-2, oda ortası 3, kapı eşiği 4, yatır-çık 5.",
-    }
+# TÜM bebekler 13 günlük kademeli programa tabidir. Yaklaşım tercihi, mizaç ve
+# ağlamaya dayanma sınırı plan SÜRESİNİ ARTIK ETKİLEMEZ.
+#
+# Kural kodda SABİT DEĞİL: master_knowledge_base.json > global_rules >
+# egitim_plani_secimi'den okunur. Böylece karar İlayda'nın onayına açık bir
+# veri kaydı olur; değiştirmek için kod dağıtmak gerekmez.
+#
+# Kaldırılan mantık (önceki sürüm): mizaç ("hassas"/"inatçı") + dayanma sınırı
+# eşiğine göre 5 vs 13 seçimi ve tercih alanının bunu ezmesi. Bu mantığın
+# tamamı KB'de belgelenmemişti, yalnız kodda yaşıyordu (keşif raporu, madde 4).
+# Beraberinde alt-dize eşleşme hatası da gitti: "biraz" içindeki "az" ve
+# "60-100 dakika" içindeki "10" düşük tolerans sayılıyordu; dayanma_siniri'nin
+# başka bir karar noktasında kullanımı YOK (tarandı), dolayısıyla hata bu
+# kodun kaldırılmasıyla tamamen kapandı.
+
+# 1 aylık program bayrağı. Tercih alanı kalktığı için tetiklenemez hâle geldi;
+# kod SİLİNMEDİ, ileride geri açılabilsin diye bayrakla kapatıldı.
+BIR_AY_PROGRAM_AKTIF = False
+
+# Kural okunamazsa kullanılacak son çare (KB bozuksa plan üretimi durmasın).
+_VARSAYILAN_PLAN = {
+    "tip": "13_gun_dirençli",
+    "gunler": 13,
+    "aciklama": ("13 günlük kademeli plan: yatak yanı 1-3 gün, oda ortası 4-6, "
+                 "kapı 7-9, eşik 10-12, yatır-çık 13."),
+}
 
 
-def egitim_plani_secimi(profile: dict, yas: dict) -> dict:
-    """5_gun_standart / 13_gun_dirençli / 6_gun_buyuk_cocuk / 1_ay_program."""
-    # Büyük çocuk (24+ ay)
-    if yas["duzeltilmis_ay"] >= 24:
-        return {
-            "tip": "6_gun_buyuk_cocuk",
-            "gunler": 6,
-            "aciklama": "Büyük çocuk planı: 6 günlük (motivasyon panosu + 5 oyuncak + pozitif teşvik dahil).",
-        }
+def _plan_kurali(kb: dict | None = None) -> dict:
+    """KB'deki plan seçimi kaydını getir (yoksa güvenli varsayılan)."""
+    try:
+        kural = (kb or load_kb()).get("global_rules", {}).get("egitim_plani_secimi")
+        if isinstance(kural, dict) and kural.get("varsayilan_plan"):
+            return kural
+    except Exception:                       # KB okunamadı → plan üretimi durmasın
+        pass
+    return {"varsayilan_plan": dict(_VARSAYILAN_PLAN), "istisnalar": []}
 
-    tercih = _lowstr(profile.get("yaklasim_tercihi"))
-    mizac = _lowstr(profile.get("mizac"))
-    dayanma = _lowstr(profile.get("dayanma_siniri"))
 
-    # 1 aylık yumuşak geçiş programı: ilk 2 hafta destekle uyku (sadece düzen), 3-4. hafta eğitim.
-    if "1 ay" in tercih or "aylık program" in tercih:
-        alt = _otomatik_yontem_sec(mizac, dayanma)
-        return {
-            "tip": "1_ay_program",
-            "gunler": 28,
-            "alt_yontem_tip": alt["tip"],
-            "alt_yontem_gunler": alt["gunler"],
-            "alt_yontem_aciklama": alt["aciklama"],
-            "aciklama": (
-                "1 aylık yumuşak geçiş programı. Hafta 1-2 'Düzen Oturtma Dönemi': "
-                "destekle uyku devam eder, yalnızca uyku/beslenme saatleri ve rutinler "
-                "uygulanır (uyku eğitimi tekniği YOK, biyolojik saat oturtulur). "
-                "Hafta 3-4 'Eğitim Dönemi': bebeğe uygun yöntem devreye girer — "
-                f"{alt['aciklama']}"
-            ),
-        }
+def egitim_plani_secimi(profile: dict, yas: dict, kb: dict | None = None) -> dict:
+    """Eğitim planını seç. Dönen: 13_gun_dirençli (varsayılan) /
+    6_gun_buyuk_cocuk (24+ ay istisnası) / 1_ay_program (bayrak açıksa).
 
-    # Kullanıcı net istek belirttiyse
-    if "13" in tercih or "yumuşak" in tercih or "kademeli" in tercih or "uzun" in tercih:
-        return {
-            "tip": "13_gun_dirençli",
-            "gunler": 13,
-            "aciklama": "13 günlük kademeli plan: yatak yanı 1-3 gün, oda ortası 4-6, kapı 7-9, eşik 10-12, yatır-çık 13.",
-        }
-    if "5" in tercih or "hızlı" in tercih or "standart" in tercih:
-        return {
-            "tip": "5_gun_standart",
-            "gunler": 5,
-            "aciklama": "5 günlük standart plan: yatak yanı 1-2, oda ortası 3, kapı eşiği 4, yatır-çık 5.",
-        }
+    profile artık plan SÜRESİNİ etkilemez; yalnız 1 aylık program bayrağı
+    açıkken tercih alanına bakılır."""
+    kural = _plan_kurali(kb)
 
-    # Otomatik karar: mizaç + dayanma sınırı
-    inatci = any(k in mizac for k in ["inatçı", "huysuz", "zor", "kararlı"])
-    hassas = any(k in mizac for k in ["hassas", "duyarlı"])
-    dusuk_dayanma = any(d in dayanma for d in ["10", "15 dakika", "20 dakika", "hiç", "az"])
+    # --- İstisnalar (şimdilik tek: 24+ ay büyük çocuk) ----------------------
+    # TODO(İlayda onayı bekliyor): Büyük çocuk planı kendine özel içerik taşıyor
+    # (motivasyon panosu, 5 oyuncak, pozitif teşvik). 24+ ay da 13 güne çekilecek
+    # mi soruldu; cevaba göre bu istisna KB'den kaldırılabilir — kod değişikliği
+    # gerekmez, global_rules.egitim_plani_secimi.istisnalar boşaltmak yeterli.
+    for istisna in kural.get("istisnalar") or []:
+        if istisna.get("kosul") == "duzeltilmis_ay >= 24" and yas["duzeltilmis_ay"] >= 24:
+            return dict(istisna["plan"])
 
-    if (inatci and dusuk_dayanma) or hassas:
-        return {
-            "tip": "13_gun_dirençli",
-            "gunler": 13,
-            "aciklama": "Mizaç + dayanma sınırı dikkate alınarak 13 günlük kademeli plan önerildi.",
-        }
+    varsayilan = dict(kural["varsayilan_plan"])
 
-    return {
-        "tip": "5_gun_standart",
-        "gunler": 5,
-        "aciklama": "Standart 5 günlük plan önerildi. Direnç görülürse 13 güne uzatılır.",
-    }
+    # --- 1 aylık program (DEVRE DIŞI) ---------------------------------------
+    # Tercih alanı kaldırıldığı için normalde buraya girilmez. Bayrak açılırsa
+    # 3-4. haftanın alt yöntemi ARTIK SABİT 13 günlüktür (mizaç bakılmaz).
+    if BIR_AY_PROGRAM_AKTIF:
+        tercih = _lowstr(profile.get("yaklasim_tercihi"))
+        if "1 ay" in tercih or "aylık program" in tercih:
+            return {
+                "tip": "1_ay_program",
+                "gunler": 28,
+                "alt_yontem_tip": varsayilan["tip"],
+                "alt_yontem_gunler": varsayilan["gunler"],
+                "alt_yontem_aciklama": varsayilan["aciklama"],
+                "aciklama": (
+                    "1 aylık yumuşak geçiş programı. Hafta 1-2 'Düzen Oturtma Dönemi': "
+                    "destekle uyku devam eder, yalnızca uyku/beslenme saatleri ve rutinler "
+                    "uygulanır (uyku eğitimi tekniği YOK, biyolojik saat oturtulur). "
+                    "Hafta 3-4 'Eğitim Dönemi': " + varsayilan["aciklama"]
+                ),
+            }
+
+    # --- Varsayılan: HERKES 13 günlük --------------------------------------
+    return varsayilan
 
 
 # ---------------------------------------------------------------------------
@@ -432,10 +437,59 @@ def bekleme_sureleri_planla(plan_tipi: str) -> dict:
         "kademeli_uzaklasma": kademeli_yer,
         "kucaktan_almak": "30 saniye → 1 dakika → 1.5 dakika → 2 dakika diye artış",
         "egitim_seans_max": "45 dakika denenme + 15-30 dakika rutin molası + 45 dakika daha (uykuya kadar)",
-        "gece_uyanma_dis_bekleme": "1. uyanma 5 dk, sonra her uyanmada +5 dk. Asla 5 dk altına inme.",
+        "gece_uyanma_dis_bekleme": "1. uyanma 5 dk, sonra her uyanmada artırarak devam. Ertesi gün bir önceki günün başlangıcının ÜSTÜNDE başlanır. Asla 5 dk altına inme.",
         "kisa_gunduz_uykusu": kisa_gunduz,
-        "yatir_cik_sonrasi": "5 → 10 → 15 → 20 dk. Max 20-25 dk. 21 gün hiç dalmazsa max 45 dk veya tıbbi yönlendirme.",
+        "yatir_cik_sonrasi": "STANDART ilerleme 5 → 10 → 15 → 20 dk. Max 20-25 dk. 21 gün hiç dalmazsa max 45 dk veya tıbbi yönlendirme.",
+        "artis_esnekligi": "Bekleme süresi artışı KATI DEĞİLDİR: standart 5'er dakikadır, ancak çok dirençli çocukta 1 dakika, hatta 30 saniye aralıklarla artırılabilir (5 → 6 → 7 → 8 gibi). DEĞİŞMEZ KURAL: bekleme süresi her gün MUTLAKA artar — bir önceki günden düşük de olamaz, bir önceki günle aynı da olamaz (ikisi de alışkanlığa dönüşür). Artış ne kadar küçükse öğrenme süreci o kadar uzar; bu bedel anneye mutlaka söylenir.",
         "B_plan_direnç": "45 dakika direnç olursa → 15 dakika rutin molası → 45 dakika yeniden deneme. Çok dirençli bebeklerde rutin molası 30 dakikaya çıkarılabilir. Maksimum 3 tekrar. 3 tekrar sonrasında da uyumuyorsa: o uyku denemesi sonlandırılır, bebek yaşına uygun uyanıklık süresi kadar uyanık tutulur ve bir sonraki uyku denemesinde eğitime devam edilir.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Faz Y — yaş bandı tablosu köprüsü
+# ---------------------------------------------------------------------------
+def _tek_uyku_mu(profile: dict) -> bool | None:
+    """Profilden 12-18 ay tek/çift uyku ayrımını çöz.
+
+    Profil `tek_uyku` (bool) taşıyorsa doğrudan kullanılır. Aksi halde üç geçiş
+    şartı ölçülebiliyorsa (ogle_yatis_dk / tek_ogun_uyku_dk / uyaniklik_penceresi_dk)
+    değerlendirilir; hiçbiri yoksa None → varsayılan (2 uyku) uygulanır."""
+    if isinstance(profile.get("tek_uyku"), bool):
+        return profile["tek_uyku"]
+    alanlar = ("ogle_yatis_dk", "tek_ogun_uyku_dk", "uyaniklik_penceresi_dk")
+    if not any(profile.get(a) is not None for a in alanlar):
+        return None
+    return yas_bantlari.tek_uykuya_gecis_degerlendir(
+        **{a: profile.get(a) for a in alanlar})["tek_uyku"]
+
+
+def _bant_parametreleri(bant: dict) -> dict:
+    """Çözülmüş bandı, plan prompt'unun beklediği METİN alanlarına çevir.
+
+    KB'nin aynı adlı (ve tutarsız) alanlarının ÜSTÜNE yazılır — plan yazarına
+    giden sayılar artık yalnız İlayda tablosundan gelir."""
+    ww = yas_bantlari._aralik(bant["uyaniklik_penceresi_dk"])
+    if bant.get("uyaniklik_penceresi_kaynak"):
+        ww += f" (komşu banttan devralındı: {bant['uyaniklik_penceresi_kaynak']})"
+    proto = bant["kestirme_protokolu"]
+    return {
+        "yas_bandi_adi": bant["ad"],
+        "uyaniklik_penceresi": ww,
+        "uyku_sayisi": yas_bantlari._sayi_aralik(bant["gunduz_uyku_sayisi"],
+                                                 bant["gunduz_uyku_sayisi_sabit"]),
+        "gunduz_uyku_total": yas_bantlari._aralik(bant["gunduz_uyku_toplam_dk"]),
+        "gece_uyku": yas_bantlari._aralik(bant["gece_uykusu_dk"]),
+        # KB'nin toplam_uyku_24h değeri (ör. 6 ay için "12-15 Saat") tabloyla
+        # çelişiyor (İlayda: 14 saat) — tablo üstüne yazar.
+        "toplam_uyku_24h": yas_bantlari._aralik(bant["toplam_gunluk_uyku_dk"]),
+        "kestirme_protokolu": (
+            f"Gündüz toplam uyku minimumu ({yas_bantlari._aralik(bant['gunduz_uyku_toplam_dk'])}) "
+            f"tamamlanamazsa ilave {proto['sure_dk']} dakikalık kestirme uykusu "
+            f"yaptırılır; {proto['sure_dk']} dakika dolunca bebek uyandırılır. Bu "
+            f"kestirmeden uyandıktan {proto['gece_uykusuna_gecis_dk']} dakika "
+            "(1 saat) sonra bile gece uykusuna geçilebilir."
+        ),
+        "yas_bandi_notlari": list(bant.get("notlar") or []),
     }
 
 
@@ -454,11 +508,19 @@ def parametre_uret(profile: dict) -> dict:
     )
 
     bucket_key = yas_bucket_sec(yas["duzeltilmis_ay"])
-    bucket = kb["yas_buckets"].get(bucket_key, {})
+    bucket = dict(kb["yas_buckets"].get(bucket_key, {}))
+
+    # --- Faz Y: yaş bandı sayıları TABLODAN gelir (KB metinlerinin üstüne yazar).
+    # 12-18 ay tek/çift uyku ayrımı profilden gelen `tek_uyku` ile çözülür; profil
+    # bilgisi yoksa İlayda kuralı gereği çocuk 2 uyku bandında sayılır.
+    bant = yas_bantlari.yas_bandi_getir(yas["duzeltilmis_ay"],
+                                        tek_uyku=_tek_uyku_mu(profile))
+    bucket.update(_bant_parametreleri(bant))
 
     uygun, uyarilar = egitim_uygunlugu_kontrol(profile, yas)
     on_hazirlik = on_hazirlik_belirle(profile, yas)
-    plan_secimi = egitim_plani_secimi(profile, yas)
+    # kb zaten yüklü — tekrar okumasın diye geçilir (plan kuralı buradan gelir).
+    plan_secimi = egitim_plani_secimi(profile, yas, kb)
     gece_beslenme = gece_beslenme_planla(profile, yas)
     # 1 aylık programda eğitim (3-4. hafta) alt yöntemin bekleme sürelerini kullanır.
     bekleme_tip = plan_secimi.get("alt_yontem_tip", plan_secimi["tip"])
@@ -468,6 +530,9 @@ def parametre_uret(profile: dict) -> dict:
         "yas": yas,
         "bucket": bucket_key,
         "parametreler": bucket,
+        # Faz Y: çizelge kurucusunun ve mobilin okuduğu YAPILANDIRILMIŞ bant.
+        "yas_bandi": bant,
+        "kestirme_protokolu": yas_bantlari.kestirme_protokolu(),
         "uygun_mu": uygun,
         "uyarilar": uyarilar,
         "on_hazirlik": on_hazirlik,

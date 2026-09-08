@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tavşan Uykusu — LiveAvatar (LITE) Test</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 24px auto;
+         padding: 0 16px; line-height: 1.4; }
+  h1 { font-size: 1.25rem; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  button { padding: 10px 14px; font-size: 1rem; border-radius: 8px; border: 1px solid #888;
+           cursor: pointer; background: #f5f5f5; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #videoWrap { position: relative; width: 100%; aspect-ratio: 16/9; background: #111;
+               border-radius: 12px; overflow: hidden; }
+  #avatarVideo { width: 100%; height: 100%; object-fit: contain; background: #111; }
+  #placeholder { position: absolute; inset: 0; display: flex; align-items: center;
+                 justify-content: center; color: #aaa; font-size: .95rem; text-align: center; padding: 12px;}
+  #status { font-size: .9rem; padding: 6px 10px; border-radius: 6px; background: #eee; color:#333; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle;}
+  .dot.on { background:#1a9d3a; } .dot.off { background:#b02020; } .dot.busy{ background:#c98a00; }
+  #bubble { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: #eef3ff;
+            color:#12203a; white-space: pre-wrap; min-height: 1.4em; }
+  #warn { display:none; margin-top:10px; padding:10px 12px; border-radius:8px;
+          background:#fff3cd; color:#7a5b00; border:1px solid #e2c86b; }
+  #err  { display:none; margin-top:10px; padding:10px 12px; border-radius:8px;
+          background:#fdecea; color:#8a1c1c; border:1px solid #e6a6a1; }
+  small.mono { font-family: ui-monospace, monospace; color:#666; }
+  #log { margin-top:14px; font-family: ui-monospace, monospace; font-size:.75rem; color:#777;
+         max-height:150px; overflow:auto; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+  <h1>Tavşan Uykusu — LiveAvatar <small class="mono">(LITE mode / hızlı test)</small></h1>
+
+  <div class="row">
+    <span id="status"><span class="dot off"></span>oturum kapalı</span>
+    <span id="timer" class="mono"></span>
+    <span id="mode" class="mono"></span>
+  </div>
+
+  <div id="videoWrap">
+    <video id="avatarVideo" autoplay playsinline></video>
+    <div id="placeholder">Avatar başlatılmadı — “Avatarı Başlat”a basın.</div>
+  </div>
+
+  <div class="row">
+    <button id="btnStart">Avatarı Başlat</button>
+    <button id="btnMic" disabled>🎤 Konuş (tr-TR)</button>
+    <button id="btnStop" disabled>Oturumu Kapat</button>
+  </div>
+
+  <!-- Debug: aynı (son) cevabın sesini iki farklı formatla besle -->
+  <div class="row">
+    <small class="mono">Debug ses formatı (son cevabı yeniden besle):</small>
+    <button id="btnA" disabled title="BASE64(PCM16/24k) — SDK demo ile doğrulanan doğru yol">Yöntem A: base64</button>
+    <button id="btnB" disabled title="Ham binary string — eski/yanlış davranış (kıyas)">Yöntem B: binary</button>
+  </div>
+
+  <div id="warn"></div>
+  <div id="err"></div>
+
+  <div><strong>Cevap:</strong></div>
+  <div id="bubble">—</div>
+  <!-- fallback: avatara ses beslenemezse normal oynatıcı -->
+  <audio id="fallbackAudio" preload="none"></audio>
+
+  <div id="log"></div>
+
+<script type="module">
+/* ============================================================================
+   Tavşan Uykusu — LiveAvatar LITE mode test istemcisi.
+
+   Boru hattı DEĞİŞMEZ: STT (Web Speech API tr-TR) → POST /ask (mevcut backend:
+   RAG + Haiku + İlayda MP3) → cevap + ses_url. LiveAvatar YALNIZ görüntü katmanı:
+   İlayda MP3'ünü PCM16 24kHz'e çevirip session.repeatAudio() ile avatara besleriz;
+   avatar dudak senkronlu "konuşur". Beslenemezse fallback <audio> + uyarı.
+
+   Ses besleme yöntemi (resmi SDK yolu, LITE mode):
+     - new LiveAvatarSession(session_token, {voiceChat:false})
+     - session.on(SESSION_STREAM_READY) -> session.attach(<video>)  (video+audio track)
+     - session.repeatAudio(speakStr)    // AVATAR_SPEAK_AUDIO -> WS 'agent.speak'
+       * speakStr = BASE64( ham 16-bit signed PCM, 24kHz, mono ).  <-- DÜZELTİLDİ
+         (SDK demosunda ElevenLabs pcm_24000 audio_base64 doğrudan repeatAudio'ya
+          veriliyor. Önceki ham "binary string" WebSocket'te UTF-8'e kaçıp bozuluyordu;
+          bu yüzden avatar konuşmuyordu → fallback. Bkz. README_AVATAR.md § Sorun Giderme.)
+     - session.stop() -> sunucu oturumu kapatır (kredi sayacı durur).
+   ========================================================================== */
+
+import {
+  LiveAvatarSession,
+  SessionEvent,
+  SessionState,
+  AgentEventsEnum,
+} from "https://esm.sh/@heygen/liveavatar-web-sdk@0.0.18";
+import { pcmToSpeakString, PCM_SAMPLE_RATE } from "./avatar_audio.js";
+
+// --- Yapılandırma (gerekirse değiştirin) ------------------------------------
+const API_URL = "http://localhost:8000";     // mevcut FastAPI backend tabanı
+// Faz 5R: /ask ve /avatar-session artık X-API-Key ister (backend DEMO_API_KEY).
+// Sayfayı ?key=<DEMO_API_KEY> ile açın; değer localStorage'da saklanır.
+const DEMO_API_KEY = (new URLSearchParams(location.search).get("key")
+  || localStorage.getItem("tavsan_demo_key") || "");
+if (DEMO_API_KEY) localStorage.setItem("tavsan_demo_key", DEMO_API_KEY);
+const DEMO_HEADERS = DEMO_API_KEY ? { "X-API-Key": DEMO_API_KEY } : {};
+const HARD_CAP_MS = 90_000;                    // free plan max 2 dk → 90 sn'de kapat
+const SPEAK_TIMEOUT_MS = 4_000;                // avatar bu sürede konuşmazsa → fallback + neden logu
+// Avatar, beslenen sesi KENDİ audio track'inde geri çalar (attach ile duyulur).
+// Eğer avatardan ses gelmezse bunu false yapın: fallback <audio> her zaman çalar.
+const AVATAR_PROVIDES_AUDIO = true;
+// repeatAudio kodlaması: "base64" = DOĞRU (SDK demo'suyla doğrulandı). A/B düğmeleri
+// canlı testte bunu geçici olarak değiştirir; varsayılan akış hep base64 kullanır.
+let SPEAK_ENCODING = "base64";                 // "base64" | "binary"
+let lastSesUrl = null;                         // A/B düğmeleri için son cevabın sesi
+
+// --- DOM ---------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const videoEl = $("avatarVideo"), placeholder = $("placeholder");
+const btnStart = $("btnStart"), btnMic = $("btnMic"), btnStop = $("btnStop");
+const btnA = $("btnA"), btnB = $("btnB");
+const statusEl = $("status"), timerEl = $("timer"), modeEl = $("mode");
+const bubble = $("bubble"), warnEl = $("warn"), errEl = $("err");
+const fallbackAudio = $("fallbackAudio"), logEl = $("log");
+
+// --- Durum -------------------------------------------------------------------
+let session = null;
+let sessionOpen = false;
+let capTimer = null, elapsedTimer = null, startedAt = 0;
+let speakTimer = null, speaking = false;
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString();
+  logEl.textContent += `[${t}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log("[avatar]", msg);
+}
+function showWarn(m) { warnEl.textContent = "⚠ " + m; warnEl.style.display = "block"; }
+function clearWarn() { warnEl.style.display = "none"; }
+function showErr(m)  { errEl.textContent = "⛔ " + m; errEl.style.display = "block"; }
+function clearErr()  { errEl.style.display = "none"; }
+
+function setStatus(state, extra = "") {
+  // state: 'off' | 'busy' | 'on'
+  const label = { off: "oturum kapalı", busy: "bağlanıyor…", on: "oturum AÇIK" }[state];
+  statusEl.innerHTML = `<span class="dot ${state}"></span>${label}${extra ? " — " + extra : ""}`;
+}
+function updateTimer() {
+  if (!sessionOpen) { timerEl.textContent = ""; return; }
+  const s = Math.floor((Date.now() - startedAt) / 1000);
+  const left = Math.max(0, Math.ceil((HARD_CAP_MS - (Date.now() - startedAt)) / 1000));
+  timerEl.textContent = `süre: ${s}s (oto-kapanış ${left}s)`;
+}
+
+// --- Backend çağrıları -------------------------------------------------------
+async function fetchAvatarToken() {
+  const r = await fetch(`${API_URL}/avatar-session`, { method: "POST", headers: DEMO_HEADERS });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || `avatar-session HTTP ${r.status}`);
+  return j; // {session_token, session_id, avatar_id, is_sandbox, mode}
+}
+async function askBackend(soru) {
+  const r = await fetch(`${API_URL}/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...DEMO_HEADERS },
+    body: JSON.stringify({ soru }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || `ask HTTP ${r.status}`);
+  return j; // {cevap, ses_url, ...}
+}
+
+// --- Oturum yaşam döngüsü -----------------------------------------------------
+async function openSession() {
+  if (sessionOpen) return;
+  clearErr(); clearWarn();
+  setStatus("busy");
+  btnStart.disabled = true;
+  try {
+    const info = await fetchAvatarToken();
+    modeEl.textContent = `${info.mode} · ${info.is_sandbox ? "SANDBOX (ücretsiz)" : "CANLI (kredi!)"} · avatar ${String(info.avatar_id).slice(0, 8)}…`;
+    log(`token alındı (sandbox=${info.is_sandbox})`);
+
+    session = new LiveAvatarSession(info.session_token, { voiceChat: false });
+
+    session.on(SessionEvent.SESSION_STREAM_READY, () => {
+      session.attach(videoEl);
+      videoEl.muted = false;
+      placeholder.style.display = "none";
+      log("stream hazır → video attach edildi");
+    });
+    session.on(AgentEventsEnum.AVATAR_SPEAK_STARTED, (e) => {
+      speaking = true;
+      if (speakTimer) { clearTimeout(speakTimer); speakTimer = null; }
+      log("✅ AVATAR_SPEAK_STARTED (dudak senkron başladı) " + JSON.stringify(e || {}));
+    });
+    session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, (e) => {
+      speaking = false;
+      log("AVATAR_SPEAK_ENDED (konuşma bitti) " + JSON.stringify(e || {}));
+    });
+    // Görünürlük için tüm ilgili event/callback'leri console'a bağla.
+    session.on(SessionEvent.SESSION_STATE_CHANGED, (st) => log("SESSION_STATE_CHANGED: " + st));
+    session.on(SessionEvent.SESSION_CONNECTION_QUALITY_CHANGED, (q) => console.log("[avatar] conn quality:", q));
+    session.on(AgentEventsEnum.SESSION_STATE_UPDATED, (e) => log("SESSION_STATE_UPDATED " + JSON.stringify(e || {})));
+    session.on(AgentEventsEnum.SESSION_STOPPED, (e) => log("SESSION_STOPPED " + JSON.stringify(e || {})));
+    session.on(AgentEventsEnum.AVATAR_TRANSCRIPTION, (e) => console.log("[avatar] avatar.transcription:", e));
+    session.on(SessionEvent.SESSION_DISCONNECTED, (reason) => {
+      log("oturum koptu/bitti: " + reason);
+      onSessionClosed(`kapandı (${reason})`);
+    });
+
+    await session.start();
+    sessionOpen = true;
+    startedAt = Date.now();
+    setStatus("on");
+    btnMic.disabled = false; btnStop.disabled = false;
+    elapsedTimer = setInterval(updateTimer, 1000); updateTimer();
+    capTimer = setTimeout(autoClose, HARD_CAP_MS);
+    log("oturum AÇIK");
+  } catch (e) {
+    log("oturum açılamadı: " + e.message);
+    showErr("Oturum açılamadı: " + e.message);
+    onSessionClosed("hata");
+  }
+}
+
+async function autoClose() {
+  log("90sn doldu → kredi disiplini: oturum kapatılıyor");
+  await closeSession();
+  setStatus("off", "oturum yenilendi (kredi korundu) — yeni soru yeni oturum açar");
+  showWarn("Oturum yenilendi (free plan 2 dk sınırı). Yeni soru sorunca otomatik yeni oturum açılır.");
+}
+
+async function closeSession() {
+  if (capTimer) { clearTimeout(capTimer); capTimer = null; }
+  if (speakTimer) { clearTimeout(speakTimer); speakTimer = null; }
+  try {
+    if (session && sessionOpen) await session.stop();
+  } catch (e) { log("stop hatası: " + e.message); }
+  onSessionClosed();
+}
+
+function onSessionClosed(extra = "") {
+  sessionOpen = false; speaking = false;
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  if (capTimer) { clearTimeout(capTimer); capTimer = null; }
+  timerEl.textContent = "";
+  setStatus("off", extra);
+  btnStart.disabled = false; btnMic.disabled = true; btnStop.disabled = true;
+  btnA.disabled = true; btnB.disabled = true;
+  placeholder.style.display = "flex";
+}
+
+// --- Ses: İlayda MP3 → 24kHz mono Float32 örnekler ---------------------------
+async function mp3UrlToFloat32_24kMono(url) {
+  const buf = await (await fetch(url)).arrayBuffer();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const tmp = new AC();
+  const decoded = await tmp.decodeAudioData(buf.slice(0));
+  try { tmp.close(); } catch {}
+  // 24kHz mono'ya yeniden örnekle (OfflineAudioContext).
+  const frames = Math.max(1, Math.ceil(decoded.duration * PCM_SAMPLE_RATE));
+  const off = new OfflineAudioContext(1, frames, PCM_SAMPLE_RATE);
+  const src = off.createBufferSource();
+  src.buffer = decoded; src.connect(off.destination); src.start(0);
+  const rendered = await off.startRendering();
+  return rendered.getChannelData(0);   // Float32Array, 24kHz mono
+}
+
+// encoding: "base64" (varsayılan/doğru) | "binary" (A/B karşılaştırma için).
+async function speakOnAvatar(sesUrl, encoding = SPEAK_ENCODING) {
+  const fullUrl = sesUrl.startsWith("http") ? sesUrl : `${API_URL}${sesUrl}`;
+  lastSesUrl = sesUrl;
+  clearWarn();
+  // Fallback: avatara besleme başarısız olursa normal oynatıcı — NEDENİYLE loglanır.
+  const fallback = (why) => {
+    log("↩ FALLBACK <audio>: " + why);
+    showWarn("Avatar senkron başarısız — ses normal oynatılıyor. Neden: " + why);
+    fallbackAudio.src = fullUrl;
+    fallbackAudio.play().catch((e) => log("fallback audio play hata: " + e.message));
+  };
+  try {
+    if (!session || !sessionOpen) throw new Error("oturum kapalı (state != CONNECTED)");
+    if (session.state && session.state !== SessionState.CONNECTED) {
+      throw new Error("oturum durumu " + session.state + " (CONNECTED bekleniyordu)");
+    }
+    const f32 = await mp3UrlToFloat32_24kMono(fullUrl);
+    const speakStr = pcmToSpeakString(f32, encoding);
+    log(`ses hazır: ${f32.length} örnek @${PCM_SAMPLE_RATE}Hz mono → ` +
+        `${encoding} (${speakStr.length} char) → repeatAudio()`);
+    speaking = false;
+    const eventId = session.repeatAudio(speakStr);   // resmi LITE ses besleme yolu
+    log("repeatAudio çağrıldı (event_id=" + eventId + ", encoding=" + encoding + ")");
+    // Avatar SPEAK_STARTED yayınlamazsa fallback'e düş — timeout NEDENİYLE loglanır.
+    if (speakTimer) clearTimeout(speakTimer);
+    speakTimer = setTimeout(() => {
+      if (!speaking) fallback(`timeout: avatar ${SPEAK_TIMEOUT_MS / 1000} sn içinde ` +
+                              `konuşmaya başlamadı (AVATAR_SPEAK_STARTED gelmedi)`);
+    }, SPEAK_TIMEOUT_MS);
+    // Avatar sesi kendi track'inde çalmıyorsa fallback'i her zaman aç.
+    if (!AVATAR_PROVIDES_AUDIO) fallback("AVATAR_PROVIDES_AUDIO=false (yapılandırma)");
+  } catch (e) {
+    fallback("repeatAudio hata: " + e.message);
+  }
+}
+
+// --- STT (Web Speech API tr-TR) ---------------------------------------------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognizing = false;
+
+async function onMic() {
+  if (!SR) { showErr("Bu tarayıcı Web Speech API desteklemiyor (Chrome/Edge kullanın)."); return; }
+  if (recognizing) return;
+  clearWarn(); clearErr();
+  // Kredi disiplini: soru gelince oturum kapalıysa aç.
+  if (!sessionOpen) { log("soru geldi, oturum kapalı → yeni oturum açılıyor"); await openSession(); }
+  if (!sessionOpen) return; // açılamadıysa dur
+
+  const rec = new SR();
+  rec.lang = "tr-TR"; rec.interimResults = false; rec.maxAlternatives = 1;
+  recognizing = true; btnMic.disabled = true; setStatus("on", "dinliyor…");
+  rec.onresult = async (ev) => {
+    const soru = ev.results[0][0].transcript.trim();
+    log("STT: " + soru);
+    setStatus("on", "cevap üretiliyor…");
+    try {
+      const ans = await askBackend(soru);
+      bubble.textContent = ans.cevap || "(boş cevap)";
+      setStatus("on");
+      if (ans.ses_url) {
+        await speakOnAvatar(ans.ses_url);
+        btnA.disabled = false; btnB.disabled = false;   // A/B kıyası artık mümkün
+      } else showWarn("Backend ses üretemedi (ses_url=null) — sadece metin gösteriliyor.");
+    } catch (e) {
+      showErr("Cevap alınamadı: " + e.message);
+    }
+  };
+  rec.onerror = (e) => { showErr("STT hatası: " + e.error); };
+  rec.onend = () => { recognizing = false; btnMic.disabled = !sessionOpen; if (sessionOpen) setStatus("on"); };
+  rec.start();
+}
+
+// --- Bağla -------------------------------------------------------------------
+btnStart.addEventListener("click", openSession);
+btnMic.addEventListener("click", onMic);
+btnStop.addEventListener("click", async () => { await closeSession(); setStatus("off", "kullanıcı kapattı"); });
+// A/B debug: son cevabın sesini seçilen formatla yeniden besle (interrupt + feed).
+btnA.addEventListener("click", async () => {
+  if (!lastSesUrl) return;
+  try { session && session.interrupt(); } catch {}
+  log("── Yöntem A (base64) deneniyor ──");
+  await speakOnAvatar(lastSesUrl, "base64");
+});
+btnB.addEventListener("click", async () => {
+  if (!lastSesUrl) return;
+  try { session && session.interrupt(); } catch {}
+  log("── Yöntem B (binary — eski/yanlış) deneniyor ──");
+  await speakOnAvatar(lastSesUrl, "binary");
+});
+window.addEventListener("beforeunload", () => { if (sessionOpen && session) session.stop(); });
+
+setStatus("off");
+if (!SR) showWarn("Web Speech API yok — mikrofon için Chrome/Edge önerilir.");
+log("hazır. API_URL=" + API_URL + (DEMO_API_KEY ? " (X-API-Key var)" : " — UYARI: ?key= yok, /ask ve /avatar-session 401 döner"));
+</script>
+</body>
+</html>

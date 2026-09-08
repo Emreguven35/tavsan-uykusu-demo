@@ -78,6 +78,135 @@ MP3 (`audio/mpeg`) servis eder. Dosya adı yalnız hash kalıbıdır (path-trave
 
 ## Railway deploy
 
+### `/health` — sürüm damgası ve deploy doğrulaması
+
+```jsonc
+GET /health
+{
+  "status": "ok", "db": "ok", "rag_mode": "semantic", "model": "claude-haiku-4-5",
+  "version": "faz-e2",                     // KISA etiket — SHA DEĞİL
+  "build_time": "2026-08-07T17:58:17+00:00",
+  "corpus_units": 610                      // yüklü korpus birim sayısı
+}
+```
+
+**Neden:** sağlığın 200 dönmesi **yeni kodun canlı olduğunu kanıtlamaz** — hiç
+yeniden başlamamış eski bir konteyner de kesintisiz 200 döner. `version` +
+`build_time` + `corpus_units` üçlüsü deploy'un gerçekten indiğini gösterir
+(korpus büyüdüyse `corpus_units` artar).
+
+**Tam SHA public'te VERİLMEZ** (altyapı parmak izi). Ayrıntı için:
+
+```bash
+curl -H "X-API-Key: $DEMO_API_KEY" "https://.../health?detail=1"
+# → detail: { git_sha, git_sha_short, process_start, corpus_breakdown, embedding_model }
+```
+
+Anahtar yoksa/yanlışsa **401 dönmez, detay sessizce atlanır** — Railway
+healthcheck'i anahtarsız çağırdığı için kırılmamalı.
+
+Railway Variables: `APP_VERSION` (örn. `faz-e2`), `BUILD_TIME` (ISO-8601;
+verilmezse süreç başlangıcına düşer), `GIT_SHA` (Railway `RAILWAY_GIT_COMMIT_SHA`
+da okunur).
+
+---
+
+## Marka kuralı — üretilen cevaplarda kişi adı geçmez
+
+Ürün **"Tavşan Uykusu"** adıyla konuşur. Üretilen hiçbir cevapta danışmanın ya
+da bir eğitmenin adı geçmez. Savunma **iki katmanlı**:
+
+1. **Kaynak:** `chatbot.marka_temizle()` korpus kurulurken her metni/etiketi
+   temizler — ad modele HİÇ gitmez. Ham transkriptlerde anneler danışmana adıyla
+   sesleniyor ("… Hanım, ben gündüz yirmi dakika bekleyemiyorum"); bu hitaplar
+   düşer, iyelik ekleri "Tavşan Uykusu yönteminin …" olur.
+2. **Talimat:** `SYSTEM_PROMPT` ayrıca kişi adı yasağını söyler (başka bir yol
+   kalırsa diye).
+
+`chunks.json` **değiştirilmez** — temizlik okuma anında yapılır, transkript
+arşivi bozulmaz ve kural tek yerden değişir. KB anahtarları da isimsizdir çünkü
+`chunk_id` `ChatResp.sources` ile **istemciye döner**.
+
+Test: `tests/test_marka_ve_surum.py` — 20 çeşitli canlı soruda ihlal aranır
+(yaş, ortam, gece, yöntem, ağlama/motivasyon, tıbbi sınır, kapsam dışı, kriz).
+
+## Korpus filtreleri — eski numaralandırma ve danışmanlık lojistiği (Faz O3)
+
+Marka kuralıyla **aynı desen**: `chunks.json` değiştirilmez, filtre okuma anında
+uygulanır. İki sessiz sızıntı ölçümle yakalanıp kapatıldı.
+
+**1. Eski 5 günlük numaralandırma.** Ham kayıtlar İlayda'nın ESKİ 5 günlük
+programını anlatıyor ("üçüncü gün oda ortası", "beşinci gün yatır-çık") — **18 ayrı
+kayıtta**. Uygulanan program 13 günlük. Retrieval bu cümleleri getirdiği için model
+"3. gündeyim" sorusuna *oda ortası*, "6. gün" sorusuna *yatır-çık* diyordu.
+
+- `chatbot.gun_asama_temizle()` gün numarasını bir merdiven aşamasına **bağlayan
+  cümleleri** düşürür (75 cümle, korpusun %1,7'si). Teknik anlatım — bekleme
+  süreleri, 45 dakika kuralı, kucak aralıkları — olduğu gibi kalır.
+- Curated `kural_*` birimleri **muaftır** (gözden geçirilmiş içerik; cümle düşürmek
+  anlamlarını bozuyor).
+- Merdivenin **gün gün açık listesi** ayrı bir aranabilir birim olarak eklendi
+  (`…kademeli_uzaklasma_13_gun_dirençli.gun_gun_liste`). KB'deki aralık
+  anahtarlarından (`day_1_3`, `day_4_6`) **türetilir** — merdiven değişirse birim de
+  değişir, ayrışamaz. Aralık gösterimi sınır günlerinde yanlış okunduğu için 13 gün
+  tek tek yazılır (aynı ders `SYSTEM_PROMPT`'ta da alınmıştı).
+
+Ölçüm: 1–13. gün sorusu → **11/13 → 13/13**.
+
+**2. Danışmanlık lojistiği.** Rapor/video/tablo gönderme, iletişim saatleri, paket,
+ücret iadesi metodolojiyle aynı kayıtta. "Ben beceremiyorum" gibi sorular
+"danışmanınıza yazın" cevabına kayıyordu — **uygulama danışman değil, üründür.**
+
+- `data/chunk_konulari.json` arşiv listesini **gerekçeleriyle** tutar; oradaki
+  chunk'lar korpusa girmez (506 → 477 chunk birimi).
+- Arşivde: `kayıt28` (ücret iadesi/erteleme kaydının tamamı), `kayıt19` (paket ve
+  iletişim kuralları), `kayıt36`'nın lojistik kuyruğu (070–084, 086–087).
+  `kayıt36_chunk_085` metodoloji olduğu için **arşivlenmedi**.
+
+Ölçüm: 6 gerçek anne cümlesi × 2 örnek → **1/12 → 0/12** lojistik sapması.
+
+Test: `tests/test_korpus_filtreleri.py` (29 kontrol) — filtre davranışı, aşırı
+temizlik olmaması, kaynak dosyanın bozulmamış olması ve merdiven biriminin
+KB'den türetildiği.
+
+## Bekleme süresi artışı — esneklik + değişmez kural (İlayda düzeltmesi, 2026-08-25)
+
+Cevaplar `5 → 10 → 15 → 20` ilerlemesini **katı bir kural** gibi sunuyordu. Doğrusu
+bir standart + bir esneklik + bir bedelden oluşur:
+
+| Parça | İçerik |
+|---|---|
+| **Standart** | Artış 5'er dakikadır (`5 → 10 → 15 → 20`) — cevap buradan başlar |
+| **Esneklik** | Çocuk çok dirençliyse artış **1 dakikaya, hatta 30 saniyeye** inebilir (`5 → 6 → 7 → 8`) |
+| **DEĞİŞMEZ KURAL** | Bekleme süresi **her gün MUTLAKA artar**: bir önceki günden düşük **de**, bir önceki günle aynı **da** olamaz — ikisi de alışkanlığa dönüşür |
+| **Bedel** | Artış ne kadar küçükse öğrenme süreci o kadar **uzar**; esneklik verilirken bu da söylenir |
+
+> **Esneklik artışın MİKTARINDADIR, artışın kendisinde değil.** Bu ayrım kaybolursa
+> düzeltme kendi zıddına döner: "esneyebilir" cevabı "aynı kalabilir"e kayar.
+
+Üç yerde birden karşılanır — biri eksik kalırsa retrieval eski katı metni tek başına
+getirip yine dayatır:
+
+- **KB:** `global_rules."bekleme_suresi_artis_esnekligi (ek 2026-08-25)"` (6 alt madde,
+  hepsi ayrı aranabilir birim). Mevcut `bekleme_sureleri` kaydı da güncellendi:
+  sayılar artık **STANDART** olarak sunulur ve yeni kurala geri referans verir.
+- **`SYSTEM_PROMPT`:** standart + esneklik + bedel zorunlu; ayrıca anne **aynı** ya da
+  **daha az** süre sorarsa cevaba "Evet" ile başlamak yasak (ölçümde cevap
+  *"Evet, ikinci gecede de 5 dakika ile başlayabilirsiniz — ama…"* diye açılıyordu;
+  gövdede düzeltmek yetmiyor, anne ilk cümleyi uyguluyor).
+- **Plan motoru:** `bekleme_sureleri_planla()` her plan tipinde `artis_esnekligi`
+  döndürür; hem LLM prompt'una hem yedek plana girer.
+
+Test: `tests/test_bekleme_esnekligi.py` (36 kontrol). İki canlı soru **birlikte**
+sabitlenir — yalnız birincisi test edilirse düzeltme değişmez kuralı yer:
+
+| Soru | Beklenen |
+|---|---|
+| "1. gece 5 dk bekledim, 2. gece **6 dk** bekleyebilir miyim?" | **Evet** + sürecin uzayacağı uyarısı |
+| "1. gece 5 dk bekledim, 2. gece **de 5 dk** bekleyebilir miyim?" | **Hayır** — açılış cümlesi bile onaylayıcı olmamalı |
+
+---
+
 1. Repo'yu Railway'e bağla (New Project → Deploy from GitHub).
 2. Başlatma komutu `railway.json` / `Procfile` ile tanımlı:
    `uvicorn api.main:app --host 0.0.0.0 --port $PORT` (healthcheck: `/health`).
@@ -88,3 +217,994 @@ MP3 (`audio/mpeg`) servis eder. Dosya adı yalnız hash kalıbıdır (path-trave
 
 > **Not:** Streamlit demosu ayrı çalışır (Streamlit Cloud). Bu API onu etkilemez;
 > ikisi aynı `engine/` motorunu paylaşır.
+
+---
+
+# Gözlemlenebilirlik (2026-08-25)
+
+## Sentry — hata izleme
+
+`sentry-sdk[fastapi]`. **Yalnız** `ENVIRONMENT=production` **ve** `SENTRY_DSN`
+tanımlıyken açılır; lokalde ve testlerde kapalıdır (geliştirici makinesinden
+yanlışlıkla olay göndermek de bir sızıntıdır). `traces_sample_rate=0.1`.
+Release etiketi `APP_VERSION` — hangi build'de patladığı Sentry'de görünür.
+
+> **KVKK: asıl risk `send_default_pii` DEĞİL.** O bayrak istek gövdesini ve
+> çerezleri kapatır, ama Sentry **varsayılan olarak stack frame'lerdeki yerel
+> değişkenleri** gönderir. Bu uygulamada o değişkenler `req.message` (annenin
+> gece 3'te yazdığı cümle), `text` (topluluk gönderisi), `baby.name`,
+> `user.email` tutuyor. Tek bir 500 hatası anne verisini üçüncü bir servise
+> taşıyabilirdi.
+
+Üç katman birlikte uygulanır (`api/observability.py`):
+
+| Katman | Ayar | Neyi keser |
+|---|---|---|
+| 1 | `include_local_variables=False` | Frame değişkenleri **hiç toplanmaz** |
+| 2 | `max_request_body_size="never"` | İstek gövdesi eklenmez |
+| 3 | `before_send=maskele` | Kalan her şey süzülür |
+
+Katman 3 tek başına yetmez (bilinmeyen alan adları kaçar); 1–2 tek başına
+yetmez (içerik istisna **mesajının içine** gömülü gelebilir:
+`ValueError("geçersiz mesaj: <annenin cümlesi>")`).
+
+**`maskele` ne yapar:** kullanıcıdan yalnız hash'li id bırakır; istek
+gövdesi/çerez/IP/sorgu dizesini düşürür; `Authorization`/`X-API-Key` başlıklarını
+maskeler; frame `vars` + kaynak satırlarını siler; istisna metninden
+e-posta/token/DSN kalıplarını temizler ve 200 karakterde kırpar;
+**breadcrumb'ları ve biçimlendirilmiş log mesajını tamamen düşürür.**
+
+> **Breadcrumb'lar neden tamamen düşüyor?** Ölçümde şu kırıntı görüldü:
+> `SQL INSERT chat_messages content=<annenin cümlesi>`. O cümlede ne e-posta var
+> ne token, 200 karakterin de altında — hiçbir desene takılmıyor. Serbest metni
+> süzmeye çalışmak yerine kaynağı kapatmak tek güvenli yol. Teşhis için hata
+> tipi + stack trace + endpoint zaten yeterli. `logentry.message` **kalır**:
+> o geliştiricinin yazdığı biçim dizesidir (`"chat: user=%s q_len=%d"`) — kod,
+> veri değil; `params` düşürülür.
+
+**Kullanıcı bağlamı:** `get_current_user` her istekte
+`sha256(JWT_SECRET | user_id)[:16]` yazar. Tuzlu olduğu için Sentry'deki değerden
+geri çözülemez ve başka sistemlerdeki id'lerle eşleştirilemez. E-posta gitmez.
+
+Test: `tests/test_sentry_maskeleme.py` (49 kontrol) — gerçek sızıntı adaylarıyla
+(anne mesajı, bebek adı, doğum tarihi, JWT, topluluk gönderisi) beslenip olayın
+**içinde kalmadıkları** doğrulanır; teşhis için gerekenlerin (hata tipi, dosya,
+endpoint) **kaldığı** da ayrıca kontrol edilir.
+
+## Maliyet takibi — `api_usage`
+
+Her **gerçek** Anthropic/ElevenLabs çağrısı `api_usage`'a yazılır. Sütunlar:
+`service`, `operation`, `model`, `input_tokens`, `output_tokens`, `cached_tokens`,
+`cache_write_tokens`, `characters`, `estimated_cost_usd`, `duration_ms`,
+`user_id` (nullable), `created_at`. Migration `0008`.
+
+**Tahmin yok, gerçek veri var.** Anthropic yanıtındaki `usage` bloğu olduğu gibi
+alınır. Eski `/ask` tahmini (4 karakter ≈ 1 token) prompt caching'i **hiç
+görmüyordu**: cache'ten okunan token normal fiyatın %10'u, cache'e yazılan
+%125'i. O tahminle "cache bize ne kazandırdı" sorusu cevaplanamazdı.
+
+Fiyatlar `api/config.py`'de **kod sabiti** (env değil — fiyat değişimi gözden
+geçirme istesin): Haiku 4.5 $1/$5, Sonnet 4.6 $3/$15 (1M token),
+Flash v2.5 $0.00011/karakter. Cache çarpanları: okuma ×0.10, yazma ×1.25.
+
+> **Bilinmeyen model sessizce $0 yazmaz.** Fiyat tablosunda olmayan bir model
+> gelirse maliyet **üst sınırdan** hesaplanır ve uyarı loglanır. Sıfır yazmak,
+> maliyet tablosunu "her şey bedava" gösteren en tehlikeli hata olurdu.
+
+**Yazma asenkron:** tek arka plan iş parçacığı + kuyruk; çağıran kuyruğa bırakıp
+döner. Kuyruk dolarsa kayıt **düşürülür** (ana isteği bekletmektense veri kaybı).
+Her hata sessizce yutulur — maliyet defteri bir yan defterdir, anne cevabını
+yine alır.
+
+**Cache HIT'te satır AÇILMAZ** (dış servis çağrısı yok). Uygulama cevap
+cache'inin isabet oranı `chat_messages.cached`'ten raporlanır.
+
+**Günlük eşik:** toplam `$20`'yi aşınca `CRITICAL` log düşer (günde bir kez,
+uyarı yağmuru yok). Sayaç süreç içidir ve yeniden başlatmada o günün toplamını
+DB'den okuyarak başlar.
+
+### `GET /api/v1/admin/usage`
+
+Yalnız **moderatör** (`community_profiles.is_moderator`; topluluk kapısıyla aynı
+kontrol — yetki tek yerden yönetilsin). Parametreler: `from`, `to` (varsayılan
+son 30 gün, max 366), `group_by=day|operation|service`.
+
+```jsonc
+{
+  "toplam_usd": 3.42, "cagri_sayisi": 128,
+  "servis":    [{"ad": "anthropic", "usd": 3.1, "cagri": 120}, ...],
+  "operasyon": [{"ad": "chat", "usd": 1.2, "cagri": 98}, ...],
+  "gunluk":    [{"gun": "2026-08-25", "usd": 0.4, "cagri": 12}, ...],
+  "cache": {
+    "prompt_cache": { "okunan_token": 900000, "oran": 0.33, "kazanc_usd": 0.81 },
+    "cevap_cache":  { "toplam": 200, "hit": 60, "oran": 0.3,
+                      "tahmini_kazanc_usd": 0.72 }
+  },
+  "gunluk_esik_usd": 20.0, "esigi_asan_gunler": []
+}
+```
+
+`prompt_cache` **ölçülmüş** değerdir; `cevap_cache.tahmini_kazanc_usd` ise
+tahmindir (cache HIT'te çağrı olmadığı için gerçek maliyeti yok — aynı dönemin
+ortalama sohbet maliyetiyle çarpılır).
+
+Test: `tests/test_maliyet_takibi.py` (58 kontrol).
+
+**Geriye dönük tahmin:** `scripts/gecmis_maliyet_tahmini.py` — `api_usage` öncesi
+dönem için chat/plan/voice sayaçlarından büyüklük mertebesi verir. Fatura
+değildir (karakter→token oranı; prompt cache indirimini göremez).
+
+> **Nasıl çalıştırılır:** üretim Postgres'i **dışarıya kapalıdır** — `DATABASE_URL`
+> `postgres.railway.internal` adresini gösterir ve servise TCP proxy tanımlı
+> değildir (`DATABASE_PUBLIC_URL` bu yüzden boş host/port taşır). Bu bilinçli ve
+> doğru bir duruş; delmeyin. Betiği **konteynerin içinde** çalıştırın:
+> ```
+> railway ssh python scripts/gecmis_maliyet_tahmini.py
+> ```
+> İlk kullanımda SSH anahtarı gerekir (`ssh-keygen -t ed25519` → `railway ssh keys`);
+> alternatif olarak Railway panelindeki servis terminalinden aynı komut çalışır.
+> Betik salt-okunurdur. Yerelde ya da bir TCP proxy açıksa `DATABASE_PUBLIC_URL`
+> otomatik tercih edilir.
+
+---
+
+# Yedekleme ve alarm (operasyon notu)
+
+## Postgres yedeği — **OTOMATİK DEĞİL**
+
+Railway'de yedekleme **opt-in**'dir; açılmadıysa hiç yedek alınmaz. CLI'da
+`backup` komutu **yok** (`railway volume` yalnız list/add/delete/attach sunar),
+yani durum ancak panelden görülür.
+
+**Açma:** Railway → `tavsan-uykusu-api` → **Postgres** servisi → **Backups**
+sekmesi → zamanlama seç. Seçenekler:
+
+| Zamanlama | Sıklık | Saklama |
+|---|---|---|
+| Daily | 24 saatte bir | 6 gün |
+| Weekly | 7 günde bir | 1 ay |
+| Monthly | 30 günde bir | 3 ay |
+
+Aynı volume'a birden fazla zamanlama uygulanabilir; elle yedek de alınabilir
+(elle yedek volume kapasitesinin %50'siyle sınırlı). Ücret, yedeğin **artımlı**
+boyutu üzerinden GB/dakika. Mevcut volume: **934 MB / 50 GB** — yani yedek
+maliyeti şu ölçekte ihmal edilebilir.
+
+**Öneri:** Daily + Monthly birlikte açılsın. Daily 6 gün tutuyor; tek başına
+açılırsa bir haftadan eski bir hataya dönülemez. Monthly 3 aylık emniyet verir.
+
+**Geri yükleme:** Backups sekmesinde zaman damgasına göre yedek seçilir →
+restore. Railway volume'un zaman damgalı bir kopyasını oluşturur, orijinali
+bağlantısız saklar, değişikliği deploy öncesi onaya sunar.
+
+> ⚠️ **Geri yükleme, o yedekten SONRAKİ tüm yedekleri siler.** Yani "önce
+> deneyeyim, olmazsa bugüne dönerim" YAPILAMAZ. Restore etmeden önce elle bir
+> yedek alın.
+
+## Yedek yoksa: günlük `pg_dump` (öneri — uygulanmadı)
+
+Panelden backup açmak daha basit ve ucuz; aşağıdaki yalnız **panel yedeğine ek**
+bir kopya isteniyorsa (örn. Railway dışında da bir kopya bulunsun diye) geçerli.
+
+- Ayrı bir Railway **cron servisi** (`railway.json` → `cronSchedule: "0 3 * * *"`),
+  aynı projede, Postgres'e private network üzerinden bağlanır.
+- Komut: `pg_dump "$DATABASE_URL" | gzip > tavsan-$(date +%F).sql.gz`, ardından
+  bir nesne deposuna (Railway bucket / S3 / Backblaze B2) yükleme.
+- Saklama: 7 günlük + 4 haftalık kopya. Bugünkü boyut ~934 MB; gzip'li dump
+  bunun çok altında kalır (dump veri dosyası değil, SQL metnidir).
+- **Sırlar:** dump içinde kullanıcı e-postaları ve bcrypt hash'leri var — hedef
+  bucket **private** olmalı ve KVKK saklama süresi tanımlanmalı.
+- Doğrulama: haftada bir dump'ı boş bir DB'ye geri yükleyip
+  `alembic upgrade head` + `SELECT count(*)` ile kontrol. **Test edilmemiş yedek,
+  yedek değildir.**
+
+## Uptime / sağlık alarmı
+
+> ⚠️ **Railway healthcheck'i deploy'dan SONRA izlemez.** `/health` yalnız
+> dağıtım sırasında sorgulanır; canlı servis çökerse Railway bunu healthcheck
+> üzerinden fark etmez. Yani "healthcheck var" uptime alarmı değildir.
+
+Railway'in verdiği alarmlar (Proje → **Settings** → **Webhooks** → URL + olay
+filtresi → Save):
+
+| Olay | Ne zaman |
+|---|---|
+| Deployment status | Deploy başarılı/başarısız olduğunda |
+| Volume usage | Volume kapasiteye yaklaştığında |
+| CPU/RAM monitor | Kaynak kullanımı eşiği aştığında |
+
+Slack (`hooks.slack.com`) ve Discord URL'leri **otomatik biçimlendirilir**;
+ara katman yazmaya gerek yok. Ayrıca konteyner tekrar tekrar çökerse yeniden
+başlatma sınırına ulaşıldığında proje üyelerine e-posta + webhook gider.
+
+**Uptime için dışarıdan bir izleyici gerekiyor** (Railway'de yok): UptimeRobot /
+BetterStack / Cronitor gibi bir servis
+`https://tavsan-api-production.up.railway.app/health` adresini 1–5 dakikada bir
+çeksin, 200 dışında bir yanıtta ya da yanıt gecikmesinde bildirsin.
+
+**Bonus — sürüm damgasıyla deploy doğrulaması:** aynı izleyici yanıt gövdesinde
+`"version"` alanını da kontrol edebilir. Beklenen sürüm görünmüyorsa deploy
+inmemiş demektir (`/health`'in 200 dönmesi tek başına bunu kanıtlamaz).
+
+### Yapılacaklar listesi (panelden, elle)
+
+1. Postgres → Backups → **Daily** + **Monthly** aç.
+2. Elle bir yedek al (restore'un geri dönüşü olmadığı için taban kopya).
+3. Project Settings → Webhooks → Slack URL'i ekle, üç olayı da seç.
+4. UptimeRobot'ta `/health` için 5 dakikalık HTTP(s) monitörü kur.
+5. `SENTRY_DSN`'i Railway Variables'a ekle (backend projesinin DSN'i).
+
+---
+
+# Faz 6 — Adaptif plan, bildirim, e-posta
+
+Canlı: `https://tavsan-api-production.up.railway.app` · Mobil taban: `.../api/v1`
+
+## 6.0 Plan üretimi — eşzamanlılık ve kuyruk (Faz O2)
+
+Plan üretimi **~135 saniye** sürüyor. Süre neredeyse tamamen çıktı token sayısına
+bağlı: Sonnet 4.6 ~53 token/sn üretiyor, plan ~7.200 token. Ölçüldü ve doğrulandı:
+
+| Kurulum | Süre | Çıktı | Maliyet |
+|---|---|---|---|
+| Sonnet 4.6, tek çağrı (**üretimdeki**) | 137 sn | 7.167 tok | $0,133 |
+| Haiku 4.5, tek çağrı | 107 sn | 10.450 tok | $0,060 |
+| Sonnet, 3 parça paralel | 83 sn | 10.614 tok | $0,237 |
+| Sonnet, 4 parça paralel | 80 sn | 15.124 tok | $0,279 |
+
+**Model Sonnet 4.6'da kalıyor.** Haiku aynı prompt'la iki içerik kuralını ihlal etti
+("temas yok", "hiç yaklaşmayın" — metodolojiye aykırı) ve prompt caching'i sessizce
+devre dışı bıraktı (sabit ön-ek 3.707 token, Haiku 4.5'in cache eşiği 4.096).
+
+**Paralelleştirme kapalı.** Her parça tek başına daha uzun yazdığı için toplam çıktı
+şişiyor, duvar saati ~80 sn'de tıkanıyor ve maliyet ikiye katlanıyor.
+
+**Eşzamanlılık:** üretim uvicorn threadpool'unda değil, **adanmış 3 kişilik havuzda**
+koşar (`plan_jobs.MAX_ESZAMANLI`). Yığılma `/health` dahil hiçbir ucu etkilemez.
+
+`POST /plans/generate` (202) ve `GET /plans/generate/{job_id}` yanıtları
+**`queue_position`** taşır: `0` = üretim başladı (ya da bitti), `>0` = havuz dolu,
+önünde kaç iş var. Alan varsayılan `0`'dır — eski istemciler etkilenmez.
+
+> **Beta sonrasına not — streaming.** Toplam süreyi kısaltmadan algılanan gecikmeyi
+> çözen tek seçenek planı akış olarak göndermek: ilk metin 2–3 saniyede ekrana düşer,
+> anne planın yazılışını izler. İş/polling mimarisinin SSE'ye taşınmasını ve mobil
+> tarafında karşılık gelen değişikliği gerektirir. Beta çıkışından sonra ele alınacak.
+>
+> **İlayda onayı bekliyor — plan kısaltma.** 60 sn'nin altına inmek ~950 kelime
+> gerektiriyor (bugün 2.175). Kesilebilecek yer: her eğitim gününün altına yazılan
+> "kısa gündüz uykusu" ve "B Planı" blokları aşama başına bir kez yazılabilir.
+
+## 6.1 Adaptif plan
+
+Plan içeriği artık markdown'a **ek olarak** yapısal alanlar taşır:
+
+```jsonc
+"content": {
+  "markdown": "...",                  // değişmedi (mobil gösterim)
+  "schedule": [                       // YENİ — saat saat çizelge
+    {"key":"wake","type":"wake","start":"07:00","end":"07:00","label":"Sabah uyanış",
+     "start_minute":420,"end_minute":420},
+    {"key":"nap_1","type":"nap","start":"10:00","end":"11:30","label":"1. gündüz uykusu", ...},
+    {"key":"bedtime","type":"night","start":"19:00","end":"07:00","label":"Gece uykusu", ...}
+  ],
+  "night_wake_protocol": {            // YENİ — 45-15-45 gece direnme protokolü
+    "resist_minutes": 45, "routine_minutes": 15, "repeat": true, "aciklama": "..."
+  },
+  "kestirme_protokolu": {             // FAZ Y — evrensel 30dk kestirme kuralı
+    "tetik": "gündüz min süre tamamlanmadı",
+    "sure_dk": 30,                    // kestirme süresi; dolunca bebek UYANDIRILIR
+    "gece_uykusuna_gecis_dk": 60,     // kestirmeden sonra 1 saatte gece uykusuna geçilebilir
+    "uyandirilir": true, "tum_bantlarda_gecerli": true, "aciklama": "..."
+  },
+  "yas_bandi": {                      // FAZ Y — çözülmüş İlayda yaş bandı (sayısal)
+    "id": "9-12_ay", "ad": "9-12 ay", "varyant": null,
+    "uyaniklik_penceresi_dk": [180, 240],
+    "uyaniklik_penceresi_kaynak": null,   // devralındıysa kaynak bant yolu
+    "gunduz_uyku_sayisi": [2, 2], "gunduz_uyku_sayisi_sabit": true,
+    "gunduz_uyku_toplam_dk": [120, 180],  // ALT sınır = kestirme tetikleyicisi
+    "gece_uykusu_dk": [600, 720],
+    "toplam_gunluk_uyku_dk": [840, 840],  // 24s toplam ihtiyaç (gündüz + gece)
+    "notlar": ["..."]
+  },
+  "kestirme_degerlendirme": {         // FAZ Y — yalnız adaptasyon sonrası dolar
+    "gerekli": true, "eksik_dk": 60, "min_gunduz_dk": 180,
+    "gerceklesen_dk": 120, "sure_dk": 30, "gece_uykusuna_gecis_dk": 60
+  },
+  "toplam_uyku_degerlendirme": {      // "bebeğim yeterince uyuyor mu?" (v1.1)
+    "yeterli": false, "gerceklesen_dk": 780, "hedef_dk": [840, 840],
+    "eksik_dk": 60, "fazla_dk": 0, "durum": "az"
+  },
+  "adapted": true, "base_plan_id": "<uuid>", "adaptation": { ... }
+}
+```
+
+### Faz Y — yaş bandı tablosu tek kaynaktır
+
+Çizelgenin **tüm sayıları** `data/yas_bantlari.json`'dan gelir (İlayda tablosu):
+uyanıklık penceresi, gündüz uyku sayısı, gündüz toplam uyku, gece uykusu.
+`master_knowledge_base.json`'ın serbest metinleri artık **ayrıştırılmaz** (yalnız
+Faz Y öncesi saklanmış planlar için geriye uyumluluk yolu korunur).
+**0-36 ay arasındaki her ay bir banda düşer** — ara yaş yoktur.
+
+İlayda'nın **resmi** tablosu (`yas_bantlari.json` v1.1):
+
+| Bant | Uyanıklık penceresi | Gündüz uyku | Gündüz toplam | Gece | **24s TOPLAM** |
+|---|---|---|---|---|---|
+| 0-2 ay | 40 dk – 1 s 20 dk | 4-5 | 5-7 saat | 8-10 saat | 15-18 saat |
+| 3-5 ay | 1 s 30 dk – 2 s 15 dk | 3-4 | 4-5 saat | 10-11 saat | 14-16 saat |
+| 6-8 ay | 2-3 saat | **3 (SABİT)** | 3-4 saat | 10-11 saat | 14 saat |
+| 9-12 ay | 3-4 saat | 2 | 2-3 saat | 10-12 saat | 14 saat |
+| 12-18 ay (2 uyku) | 3-4 saat | 2 | en az 2 saat | 11-12 saat | 13-14 saat |
+| 12-18 ay (tek uyku) | 4-6 saat | 1 | en az 2 saat | 11-12 saat | 13-14 saat |
+| 18-24 ay | 5-6 saat | 1 | en az 2 saat | 10-11 saat | 12-13 saat |
+| 24-36 ay | 5 s 30 dk – 7 saat | 1 | en az 1 saat | 10-11 saat | 11-12,5 saat |
+
+**Tablo okuma kuralı (İlayda teyidi):** gündüz aralığının **ALT SINIRI** kestirme
+tetikleyicisidir. Üst sınır hedefin tavanıdır, tetikleyici değildir — ör. 9-12 ay
+bandında 2 saatin altı kestirme üretir, 3 saatin üstü üretmez.
+
+**24 saatlik toplam** (`toplam_gunluk_uyku_dk`) "bebeğim yeterince uyuyor mu?"
+ölçütüdür ve **çizelge çözücüsünü de kısıtlar**: çizelge kimliği gereği
+`toplam = 1440 − (uyku_sayısı + 1) × pencere` olduğundan bu alan doğrudan bir
+pencere kısıtıdır. Adaptasyon çıktısında `content.toplam_uyku_degerlendirme`
+olarak raporlanır (`durum`: `yeterli` | `az` | `fazla` | `veri_yok`); gündüz
+**veya** gece verisi eksikse değerlendirme yapılmaz (yarım veriden yanlış alarm
+üretilmez).
+
+- **6-8 ay:** uyku sayısı sabittir; **8. ayda 2'ye düşürülmez.**
+- **12-18 ay tek uykuya geçiş** (ÜÇÜ BİRDEN gerekir): ① öğlen uykusuna 12:00'den
+  önce yatmamak, ② tek öğünde en az 2 saat uyku, ③ uyanıklık penceresi 4-6 saat.
+  Üçü sağlanmıyorsa çocuk **hâlâ 2 uyku bandındadır** (varsayılan da budur).
+- **24-36 ay öğlen uykusu reddi:** güne başlama 07:00 → hâlâ reddediyorsa 06:00 →
+  hâlâ reddediyorsa öğlen uykusu kademeli kaldırılabilir.
+- **Evrensel kestirme kuralı (tüm bantlar):** gündüz toplam uyku minimumu
+  tamamlanamazsa **ilave 30 dakikalık kestirme**; 30 dk dolunca uyandırılır ve bu
+  kestirmeden **1 saat sonra bile** gece uykusuna geçilebilir.
+
+| Endpoint | Açıklama |
+|---|---|
+| `POST /plans/adapt?baby_id=` | Son 3 günün kayıtlarına göre çizelgeyi kaydırır. Kayıt yoksa/plan yoksa **409**. |
+| `GET /plans/today?baby_id=` | Bugünün planı; yoksa en güncel plan bugüne adapte edilir (lazy). Hiç plan yoksa **404**. |
+
+**Tekillik:** `generate` ve `adapt` aynı güne yazarken o günün kaydını **günceller** (UPSERT) — satır yığılmaz.
+
+### Kurallar (deterministik, LLM yok)
+
+İki **ayrı katman** vardır, karıştırılmamalıdır:
+
+1. **Günlük ritim kaydırma** (eğitim dışı dönem): gerçek uyanış plandakinden **≥30 dk**
+   saparsa çizelgenin tamamı sapma kadar kaydırılır, **maks ±45 dk**. Çizelge yaş
+   bandına aykırı düşerse kaydırma yapılmaz, plan **tam yeniden üretilir**
+   (`regenerate_required=true`). Faz Y'den sonra bandın üç ölçütü kontrol edilir:
+   gündüz uyku **sayısı**, son uyku ile yatış arası **uyanıklık penceresi**, ve
+   yatıştan sabah uyanışına **gece uykusu süresi**. Çizelgenin tamamı eşit
+   kaydığında bu üçü değişmez — yani günlük ±45 dk kaydırma **tek başına** yeniden
+   üretim tetiklemez; asıl tetikleyici bebeğin **bant atlamasıdır** (ör. 8 aylık
+   3 uykuluk çizelge, 9. ayda 2 uyku bandına düşer).
+2. **Regresyon protokolü** (İlayda): `training_completed_at` dolu **ve** üzerinden
+   **≥13 gün** geçmiş **ve** son 3 gecenin **≥2**'sinde **≥20 dk** süren `night_wake`
+   varsa → `regression_detected=true`, `restart_program_suggested=true`.
+   **Otomatik hiçbir şey üretilmez.**
+
+### Mobil sözleşmesi (yapılacaklar)
+
+- **14 günlük eğitim modülü** `PATCH /babies/{id}` ile `training_started_at` (modül
+  başlarken) ve `training_completed_at` (bitince) alanlarını set etmelidir.
+  Bu tarihler set edilmezse regresyon tespiti **hiçbir zaman** çalışmaz.
+- `restart_program_suggested=true` geldiğinde kullanıcıya *"Programı baştan başlatmak
+  ister misiniz?"* kartı gösterilir. Onaylanırsa mobil: `POST /plans/generate` +
+  `PATCH /babies/{id}` ile `training_started_at=bugün`.
+- Dashboard `GET /plans/today` çağırır (adaptasyonu tetikler).
+
+## 6.2 Bildirimler (Expo Push)
+
+| Endpoint | Açıklama |
+|---|---|
+| `POST /notifications/register-token` | `{expo_token, platform?, device_name?}` — upsert. Cihaz başka hesaba geçerse token devredilir. |
+| `DELETE /notifications/token` | `{expo_token}` — çıkışta. Token yoksa da 200 (idempotent). |
+| `GET /notifications/preferences` | `{plan_reminders, daily_summary}` — ikisi de varsayılan `true`. |
+| `PATCH /notifications/preferences` | Kısmi güncelleme. |
+
+**Zamanlayıcı:** uygulama içi APScheduler, **15 dakikada bir** (ayrı worker yok).
+Bugünün planı olan her bebek için, önümüzdeki **15–30 dk** penceresinde başlayan uyku
+bloklarına bildirim gönderir. Mükerrerlik `sent_notifications` tablosundaki UNIQUE
+kısıtla engellenir. `DeviceNotRegistered` → token silinir.
+**Yalnız `ENVIRONMENT=production`'da başlar** (lokal test kirliliği önlenir).
+
+> **Ölçek notu:** birden çok instance'a çıkılırsa zamanlayıcı ayrı bir servise
+> taşınmalıdır; şu an mükerrerliği yalnız DB kısıtı engelliyor.
+
+## 6.3 E-posta
+
+`MAIL_PROVIDER` üç moddan biri:
+
+| Mod | Davranış |
+|---|---|
+| `resend` | Gerçek gönderim (`RESEND_API_KEY` gerekir). |
+| `console` | Gönderim yok, içerik **loglanır**. Yalnız lokal geliştirme — token log'a düşer. |
+| `disabled` | Gönderim yok, içerik **hiçbir yere** yazılmaz. Endpoint yine 200 döner. |
+
+Boş bırakılırsa: anahtar varsa `resend`, yoksa production'da `disabled`,
+geliştirmede `console`. **Şu an production `disabled`** — Resend bağlanınca tek env
+değişikliğiyle (`RESEND_API_KEY` + `MAIL_PROVIDER` silinmesi) aktifleşir.
+
+`POST /auth/reset-password-request` → 200 `{detail}`. Token **yanıtta dönmez**;
+`resend` modunda derin bağlantı ile e-postaya gider:
+`tavsan-uykusu://reset-password?token=...` (+ elle girme için düz metin token).
+
+> **Mobil:** Resend bağlanana kadar "Şifremi unuttum" akışı **"yakında"** olarak
+> işaretlenmelidir — `disabled` modda token kullanıcıya ulaşmaz.
+
+## 6.4 Kademeli fallback zinciri (K1→K4) + kapsama telemetrisi
+
+`/chat` artık "bilgim yok" duvarı örmez; sırayla dener ve hangi katmanda
+cevapladığını raporlar (`ChatResp.retrieval_layer`):
+
+| Katman | Ne zaman | Davranış |
+|---|---|---|
+| **k1** | Alan içi, `top_score ≥ 0.55` | Metodolojiden doğrudan cevap |
+| **k2** | Alan içi, `top_score ≥ 0.40` **veya** yaş bandı çözüldü | Eşik bir kademe düşer (−0.05) + yaş bandı genişletme; "en yakın bilgiye göre" çerçevelenir |
+| **k3** | Alan içi ama skor düşük | Yaş-bağımsız **genel ilkeler** (`global_rule:*`) havuza girer + cevabın sonunda **1 netleştirme sorusu** sorulur |
+| **k3_5** | Alan sözlüğü tutmadı ama soru bebek/ebeveynlik dünyasında | Eksikliği **dürüstçe söyler** ("bu konuda net bir kayıt yok, ama şu ilkeler geçerli…") + genel ilkelerden yardım + netleştirme sorusu. **"Kapsam dışı" DEMEZ** |
+| **k4** | Soru **gerçekten** başka konuda (mama tarifi, vergi, hava durumu) | Kibar kapsam-dışı mesajı (**deterministik, LLM çağrılmaz**) |
+
+### K4 SON ÇAREDİR (Faz E-2 — kalıcı kural)
+
+Cevap üretilemeyen her durumda **önce K3.5 denenir.** K4 artık varsayılan değil,
+**pozitif bir karardır**: yalnız açık kapsam-dışı işareti varsa (`tarif`, `vergi`,
+`hava durumu`…) ya da hiçbir alan/ebeveynlik sinyali yoksa verilir.
+
+**Neden değişti:** "Üçüncü gündeyiz hiç düzelmedi, bırakmak istiyorum" gibi
+gerçek anne cümleleri hiçbir metodoloji terimi içermediği için K4'e düşüyordu —
+tam da yardıma en çok ihtiyaç duyan kullanıcı kapıdan çevriliyordu. Artık
+**duygusal/motivasyon sinyali TEK BAŞINA kapsam-içi sayılır**; metodoloji terimi
+şartı aranmaz.
+
+> **Türkçe kök tuzağı:** alan sözlüğündeki `"ağla"` kökü `"ağlıyor"`u YAKALAMAZ
+> (ağla + ıyor → ağlıyor). "3 gündür ağlıyor hiç düzelmedi" bu yüzden alan dışı
+> sayılıyordu. Kök `"ağl"` olarak düzeltildi; çekim biçimleri testte sabitlendi.
+
+**Serbest yorum yok:** K3.5'te de cevap yalnız KB ilkelerinden kurulur. Bilgi
+gerçekten yoksa bunu söylemek serbesttir, uydurmak değildir.
+
+**Eşik kalibrasyonu ölçümle yapıldı:** kapsam içi sorular `0.63–0.89`, kapsam dışı
+`0.21–0.53`. Skor tek başına yetmiyor (`"mama tarifi"` 0.526 ile `"odası kaç derece"`
+0.629 çok yakın), bu yüzden K4 kapısı **skor + alan sözlüğü** birlikte değerlendirir.
+Sözlük geniş tutulmuştur: yanlış K4 (geçerli soruyu reddetmek), gereksiz K3'ten
+daha kötüdür. Skor `≥0.55` ise sözlük eşleşmese bile soru alan içi sayılır.
+
+**Değişmezler:** tıbbi sınır hiçbir katmanda gevşemez (tıbbi terim içeren sorular
+asla K4 sayılmaz, doktor yönlendirmesi kapısına düşer); Claude K3'te bile yalnız
+KB ilkelerinden konuşur, serbest bilgi eklemez.
+
+#### Özgüven/çaresizlik ailesi (Faz O4)
+
+Faz O3 ölçümünde ikinci bir aile K4'e düşerken yakalandı: **"Yanlış mı yapıyorum
+acaba, hiçbir şey yolunda gitmiyor"**. Bu cümlelerde ne metodoloji terimi ne de
+klasik pes etme ifadesi ("vazgeç", "bırakıyorum") geçiyor — sözlüğün hiçbir grubu
+tutmuyordu. Önemi zamanlamasında: anne *"bırakıyorum"* demeden **önce** bu cümleyi
+kuruyor; burada karşılanmazsa müdahale edilecek an kaçırılıyor.
+
+Düzeltme **iki ayrı mekanizmaya** birden yazıldı, çünkü ikisi ayrı iş yapıyor:
+
+| Mekanizma | Ne sağlıyor |
+|---|---|
+| `MOTIVASYON_TERIMLERI` (sözlük) | Soruyu **alan içi** yapar → K1/K2/K3, K4 değil |
+| `_RE_ZORLANMA` (duygu sinyali) | Cevabın **önce anneyi görmesini** zorunlu kılar (ton kuralı) |
+
+Kapsanan kalıplar: "yanlış mı yapıyorum", "doğru mu yapıyorum", "hata mı ediyorum",
+"yolunda gitmiyor", "kafam karıştı", "emin değilim", "ne yapacağımı bilmiyorum",
+"yetersiz hissediyorum", "beceriksiz", "yeterince iyi değil".
+
+> **Türkçe tuzağı — soru eki cümlenin ortasına giriyor.** `"yanlış yapıyor"` kökü
+> `"yanlış MI yapıyorum"`u YAKALAMAZ. Sözlük tarafında ekli ve eksiz biçim ayrı
+> ayrı yazılır; regex tarafında `yanlış\s*(mı|mi)?\s*yap` kullanılır.
+
+**Sonuç:** bu cümleler artık **K3**'te cevaplanıyor — yani istenen K3.5 tabanının
+bir üstünde, aynı "genel ilkelerden cevapla + netleştirme sorusu sor" davranışıyla.
+Retrieval iyi eşleşme bulursa K2/K1'e de çıkabiliyorlar.
+
+**Aşırı genişleme koruması:** aynı kalıp başka bir konuda geçerse K4 kalır
+("Kek yaparken yanlış mı yapıyorum" → K4). `_katman_belirle` açık kapsam-dışı
+işaretini sözlükten **önce** değerlendiriyor; bu sıralama testle sabitlendi.
+
+Golden-set: `tests/test_kapsama.py` — 10 özgüven cümlesi + 3 aşırı-genişleme
+tuzağı, ikisi canlı cevapla doğrulanıyor.
+
+## 6.7 Faz E — duygusal ton ve annenin ruhsal durumu
+
+`/chat` cevapları bilgi verirken İlayda'nın sıcaklığını da taşır. Ton kuralları
+`SYSTEM_PROMPT`'ta; ancak duygusal sinyal yakalandığında aynı kural **sorunun
+yanına** (user prompt'un kural listesinin BAŞINA) enjekte edilir — yalnız sistem
+promptuna bırakıldığında empatik açılış ve somut veri örnekten örneğe düşüyordu.
+
+**Dört kademe** (`ruhsal_durum_tespit` + `duygu_sinyali`):
+
+| Kademe | Tetik | Davranış | `retrieval_layer` |
+|---|---|---|---|
+| **kriz** | Anne kendine/bebeğine zarar İFADE ediyor (birinci tekil şahıs) | **LLM çağrılmaz.** Sabit destek mesajı + profesyonel yardım. Uyku tekniği ANLATILMAZ, cache'e yazılmaz | `ruhsal_kriz` |
+| **sıkıntı** | Derin çaresizlik / tükenmişlik | LLM çağrılır, prompt'a "önce duygusal destek + uzman yönlendirmesi, teknik anlatma" zorunlu eklenir. **K4'e düşmez** (K3'e çekilir) | k1..k3 |
+| **ağlama endişesi** | Ağlamanın zararı / güven bağı kaygısı | Empatik açılış + İlayda'nın ŞARTLARI + somut umut verisi (45 dk → 5 dk) zorunlu | k1..k3 |
+| **zorlanma** | Yorgunluk, pes etme eşiği | İlk cümle duygusal tanıma, ardından somut yönlendirme | k1..k3 |
+
+> **Kritik ayrım:** zarar **ifadesi** ile zarar **sorusu** aynı şey değildir.
+> "bebeğime zarar vereceğimden korkuyorum" → kriz. "ağlamanın bebeğime zararı
+> olur mu" → sıradan ağlama sorusu. Kalıp birinci tekil şahıs çekimi zorunlu
+> kılar; aksi hâlde en sık sorulan ağlama sorusu kriz kapısına düşer.
+
+**Mutlak iddia yasağı:** "ağlama zarar vermez" MUTLAK olarak kurulmaz. Yalnız
+İlayda'nın şartlarıyla verilir — *"tıbbi bir problem ve duygu regülasyon
+bozukluğu yoksa genel olarak zarar oluşturmuyor"* + *"teknik olarak kesin bir
+ifade kullanılamaz"*. 3-6 haftalık süreç çerçevesi de aynı şartlarla verilir.
+
+**Alan sözlüğü genişledi:** ağlama/güven bağı/motivasyon artık KB'de küratörlü
+bir bölüm (`global_rules.aglama_ve_motivasyon`), dolayısıyla bu sorular alan
+içidir. Önceden "Üçüncü gündeyiz, bırakmak istiyorum" gibi bir cümle hiçbir
+metodoloji terimi içermediği için **K4'e düşüyor** ve tam da motivasyona en çok
+ihtiyaç duyan anne kapıdan çevriliyordu.
+
+Test: `tests/test_duygusal_ton.py` (golden-set, senaryo başına 2 canlı örnek).
+
+### Kapsama telemetrisi
+
+`chat_messages` tablosuna `retrieval_layer` (indeksli) ve `top_score` eklendi
+(migration `0005`). Cache hit'te ikisi de NULL (retrieval yapılmadı).
+
+> ⚠️ **Kolon uzunluğu (migration `0007`):** `retrieval_layer` başlangıçta
+> `String(2)` idi (`k1`..`k4`). Faz E `ruhsal_kriz` (11 karakter) yazmaya
+> başlayınca **Postgres `StringDataRightTruncation` fırlatıyor** ve kriz
+> anındaki anne destek mesajı yerine 500 alıyordu. **SQLite VARCHAR uzunluğunu
+> ZORLAMAZ**, bu yüzden yerel testler bunu görmedi. Kolon `String(32)`'ye
+> genişletildi ve `tests/test_kapsama.py` artık üretilen tüm katman adlarının
+> kolona sığdığını şema seviyesinde doğruluyor. **Yeni katman adı eklerken bu
+> testi kontrol edin.**
+
+### Haftalık kapsama raporu
+
+```bash
+python scripts/kapsama_raporu.py --gun 7            # ekrana
+python scripts/kapsama_raporu.py --gun 7 --json rapor.json
+```
+
+`k3` + `k3_5` satırları **korpusun eksik olduğu yerlerdir** — rapor bunları
+konu başlıklarına göre gruplar (gece uyanma, ağlama/motivasyon, beslenme…) ve
+örnek soruları listeler. Bu liste İlayda'ya gider ve korpus güncelleme turunun
+girdisi olur; **kalıcı çözüm budur, sözlük yamamak değil.**
+
+Rapor `k4`'e düşenleri de ayrı gösterir: aralarında alan içi bir soru varsa bu,
+alan sözlüğünün eksik olduğunu gösterir (K3.5 kapısı kaçırmış demektir).
+
+> **KVKK:** rapor soru metnini içerir (eksik konuyu görmenin tek yolu) ama
+> `user_id` **hiç girmez**. Dışarı paylaşırken kişisel ayrıntı kontrolü yapılmalı.
+
+Haftalık korpus boşluğu analizi — İlayda ile güncelleme turlarının girdisi:
+
+```sql
+SELECT content, top_score, created_at
+  FROM chat_messages
+ WHERE role = 'user'
+   AND retrieval_layer IN ('k3', 'k4')
+   AND created_at >= now() - interval '7 days'
+ ORDER BY created_at DESC;
+```
+
+## Plan `content` şeması (resmî)
+
+```jsonc
+{
+  "headline": "Elif için 9 ay programı — 2 kısa uyku, 20:00 yatış",
+  "schedule": [
+    {"time": "07:00", "end": "07:00", "type": "wake",  "title": "Sabah uyanışı",
+     "key": "wake", "start_minute": 420, "end_minute": 420},
+    {"time": "10:20", "end": "11:50", "type": "nap",   "title": "1. gündüz uykusu",
+     "note": "Uyanıklık penceresi ~200 dk sonra", "key": "nap_1", ...},
+    {"time": "15:10", "end": "16:40", "type": "nap",   "title": "2. gündüz uykusu", ...},
+    {"time": "20:00", "end": "07:00", "type": "sleep", "title": "Gece uykusu", ...}
+  ],
+  "night_wake_protocol": {"resist_minutes": 45, "routine_minutes": 15, "repeat": true, "aciklama": "..."},
+  "kestirme_protokolu": {"tetik": "gündüz min süre tamamlanmadı", "sure_dk": 30,
+                         "gece_uykusuna_gecis_dk": 60, "aciklama": "..."},
+  "yas_bandi": {"id": "9-12_ay", "ad": "9-12 ay", "uyaniklik_penceresi_dk": [180, 240], ...},
+  "markdown": "...",        // KALDI — geriye uyumluluk + detay metni
+  "bucket": "9_ay", "adapted": false, ...
+}
+```
+
+> **Faz Y:** çizelgedeki saatler `data/yas_bantlari.json`'dan türetilir. 9-12 ay
+> bandında pencere 3-4 saat aralığındadır; 24 saatlik toplam uyku 14 saat olmak
+> zorunda olduğundan (`toplam = 1440 − 3 × pencere`) pencere **200 dk**'ya oturur
+> ve ilk uyku **10:20** olur. Faz Y öncesi KB metninden 10:00 çıkıyordu.
+
+`schedule` **hem** `/plans/generate` **hem** `/plans/adapt` yanıtında doludur.
+`type` enum'u: `wake | nap | sleep | feed | routine` — v1'de yalnız `wake/nap/sleep`
+üretilir (`feed`/`routine` şemada ayrıldı; KB'de bu blokları türetecek veri yok).
+`key`/`start_minute`/`end_minute` dahilidir (kaydırma + bildirim penceresi); mobil
+`time`/`end`/`type`/`title`/`note` alanlarını kullanır.
+
+## 6.5 `/chat` bebek log bağlamı (kişiselleştirme)
+
+`ChatReq`'e opsiyonel `baby_id` eklendi. Verildiğinde bebeğin profili + son 3 günün
+logları + bugünün plan çizelgesi kompakt bir özet olarak Claude'a **RAG
+chunk'larından ayrı** bir blokla geçilir:
+
+```
+BEBEK VERİSİ (bu kullanıcının kendi kaydı):
+Elif, 16 aylık (kayıtlı başlangıç gece uyanma: 3; eğitim başlangıcı 2026-07-01;
+eğitim tamamlanma 2026-07-15). Son 3 gün: bugün şekerleme 1 (12:30-13:15);
+dün gece yatış 19:05 (planlanan 20:00'den 55dk erken), gece uyanma 1 kez
+(03:10, 25dk); önceki gün gece yatış 20:30 (planlanan 20:00'den 30dk geç).
+Bugünün planı: 07:00 uyanış, 12:30-15:00 uyku, 20:00 yatış.
+```
+
+Sistem promptuna kural eklendi: *"Bebek verisi mevcutsa cevabını bu veriyle
+ilişkilendir — bebeğin adıyla, somut saatlerle konuş; veriyle metodolojiyi
+birleştir. Veride olmayan şeyi UYDURMA."* Kural **system** bloğundadır (statik,
+cache prefix'i bozmaz); **veri** ise `messages` içinde, yani cache
+breakpoint'inden **sonra** gider.
+
+### ⚠️ Cache davranışı (güvenlik kritiği)
+
+`baby_id` verilen istekler cevap cache'ini **tamamen bypass eder** — ne okur ne
+yazar. Aksi halde bir bebeğin saatleri başka kullanıcıya cevap olarak dönerdi.
+`baby_id`'siz genel sorularda exact + semantik cache aynen çalışmaya devam eder.
+
+Diğer davranışlar:
+- Bebek çağırana ait değilse **404** (varlık sızdırmaz — `get_owned_baby`).
+- Log **ve** bugünün planı yoksa bağlam bloğu eklenmez → mevcut genel metodoloji
+  cevabı korunur.
+- Gece uyanmaları 12:00'den önceyse **bir önceki günün gecesine** yazılır.
+- KVKK: bebek verisi içeriği uygulama loguna yazılmaz (yalnız `bebek=var|yok`).
+
+## 6.7 Masal kütüphanesi + mutlak ses URL'leri
+
+### Masal kataloğu
+
+`data/stories.json` **statik**tir — metinler `scripts/build_stories.py` ile Claude
+API üzerinden **bir kez** üretilip commit'lenir. `/voice/stories` ve
+`/voice/generate` çalışma zamanında LLM çağırmaz (maliyet + gecikme + tutarlılık).
+
+```sh
+python scripts/build_stories.py           # eksik masalları üret
+python scripts/build_stories.py --force   # hepsini yeniden üret
+```
+
+5 masal (511-629 kelime, ort. 589; `duration_hint: "5 dk"`):
+Keloğlan ile Sihirli Değnek · Kırmızı Başlıklı Kız · Üç Küçük Domuzcuk ·
+Çirkin Ördek Yavrusu · Ayşecik ile Uyku Perisi. **3 ninni değişmedi.**
+
+Uyku öncesi ton kuralları üretim prompt'unda sabit: kısa cümleler, sakin ritim,
+**şiddet/korku yok**, mutlu-sakin son, düz metin (markdown/emoji yok — mevcut TTS
+temizleme katmanından sorunsuz geçer). Kırmızı Başlıklı Kız ve Üç Küçük Domuzcuk
+**yumuşatılmıştır**: kurt kimseyi yemez, ev yıkılmaz, kovalama/avcı/balta yoktur.
+
+### Uzun metin ve `eleven_flash_v2_5`
+
+**Bölme gerekmedi.** `eleven_flash_v2_5` istek başına **40.000 karakter** kabul
+ediyor; 700 kelimelik Türkçe masal ~5.000 karakter — limitin çok altında. Kod
+değiştirilmedi. (Karşılaştırma: `eleven_multilingual_v2` 10.000, `eleven_v3` 5.000.)
+
+### Anlatım tonu — iki ses profili (2026-08-25)
+
+Masallar **çok hızlı** okunuyordu: `/voice/generate` ElevenLabs'e `voice_settings`
+**hiç göndermiyordu**, yani her şey varsayılan hızdaydı. İki profil tanımlandı
+(`tts.SES_PROFILLERI`):
+
+| Profil | speed | stability | similarity_boost | style | Nerede |
+|---|---|---|---|---|---|
+| `masal` | 0.85 | 0.70 | 0.75 | 0.05 | `/voice/generate` **varsayılanı**, `/clone` örneği |
+| `sohbet` | 1.00 | 0.50 | 0.75 | 0.00 | `/ask` TTS'i — ElevenLabs varsayılanlarıyla **aynı** |
+
+`sohbet` profilinin bilerek varsayılanlarla aynı tutulması, mevcut chat ses
+cache'inin sessizce geçersizleşmemesi içindir. İstemci `profile` alanıyla profil
+seçebilir; geçersiz ad **422** döner.
+
+**Ölçüldü, varsayılmadı** (canlı anahtar, flash v2.5): `speed` 1.0 → 0.85 aynı
+cümleyi **%20** uzattı; `<break time="2.0s" />` sesi **+2,25 sn** uzattı. Yani
+Flash v2.5 ikisini de uyguluyor, daha pahalı bir modele geçmek gerekmedi.
+
+**Duraklamalar** (`konusma_metni.masal_metni_hazirla`): paragraf araları **0,8 sn**,
+cümle araları **0,3 sn**. `konusma_metnine_cevir` paragrafları tek satıra indirdiği
+için temizlik **paragraf paragraf** yapılır; etiketler **en sonda** eklenir ki
+temizlik kuralları onları bozmasın.
+
+> **Cümle duraklaması neden her masalda yok.** ElevenLabs "tek üretimde çok fazla
+> break etiketi kararsızlık yapar (hızlı okuma, gürültü, artefakt)" diye uyarıyor.
+> Korpustaki masallar 81–109 cümle → tek istekte ~100 etiket, üstelik etiketler
+> karakter başına ücretlendirmeye girdiği için ~%50 fazla maliyet. Kural kendini
+> sınırlar: paragraf araları **her zaman**, cümle araları **yalnız** toplam etiket
+> `MASAL_MAX_BREAK`(=40) altında kalıyorsa. Pratikte ninniler (5–6 cümle) cümle
+> duraklaması alır, uzun masallar almaz; genel tempoyu zaten `speed=0.85` sağlıyor.
+> Ölçülen yük: masallarda +%7…+%15, ninnilerde +110…+132 karakter.
+
+**Cache tuzağı:** profil adı ve `SES_AYAR_SURUMU` damgası cache anahtarına
+**girer** — `sha256(voice_id || profil || ayar_sürümü || hazır_metin)`. Girmeseydi
+kalibrasyondan sonra eski **hızlı okunmuş** MP3 sunulmaya devam eder ve düzeltme
+kullanıcıya hiç ulaşmazdı. Ayar değiştirilirse `SES_AYAR_SURUMU` da artırılmalı.
+
+Test: `tests/test_masal_tonu.py` (43 kontrol) — profil değerleri, `voice_settings`in
+istek gövdesine gerçekten konduğu, duraklama kuralı, etiket/maliyet freni ve cache
+tazelenmesi.
+
+### Mutlak ses URL'leri
+
+`PUBLIC_BASE_URL` tanımlıysa `audio_url` ve `sampleUrl` **mutlak** döner:
+
+```
+https://tavsan-api-production.up.railway.app/audio/<hash>.mp3
+```
+
+Tanımsızsa göreli path (`/audio/<hash>.mp3`) — lokal geliştirme davranışı korunur.
+Mobilin göreli path'i yanlış tabanla birleştirme riski böylece kalkar.
+
+`/audio/{dosya}` **auth'suz** erişilebilir: dosya adı tahmin edilemez bir
+SHA-256 hash'idir ve route yalnız hash kalıbını kabul eder (path-traversal
+engelli). Beta için yeterli koruma; kamuya açık ama listelenemez.
+
+### Ses cache (maliyet)
+
+`voice_audio()` anahtarı
+`sha256(voice_id || profil || ayar_sürümü || hazır_metin)`. Aynı kullanıcı
+aynı masalı ikinci kez dinlerken **TTS'e gidilmez** — dosya diskten servis edilir,
+`cached: true`, maliyet `0`. Farklı `voice_id` aynı metinde ayrı dosya üretir.
+
+> **Maliyet notu:** 5 masal = **21.124 karakter/kullanıcı** (~**$2.32** @ flash
+> v2.5 kredi fiyatı, $0.00011/karakter). Bu **tek seferliktir** — tekrar dinlemeler
+> cache'ten gelir. LRU sınırı 500 dosya / 100 MB; Railway'de disk efemer
+> olduğundan yeniden deploy sonrası cache boşalır ve ilk dinlemeler yeniden
+> üretilir. Kalıcılık isteniyorsa `data/audio_cache` klasörüne volume mount edilmeli.
+
+---
+
+# Faz T — Anne Topluluğu API (`/api/v1/community/*`)
+
+Metin tabanlı topluluk. **v1 kapsamı:** yalnız metin + düz cevap listesi.
+Kapsam DIŞI: DM, görsel, profil sayfası, kullanıcı-tanımlı kategori, iç içe cevap.
+
+## ⚠️ MOBİL BAĞLANTI — önce bunu oku (kategoriler yüklenmiyor sorunu)
+
+Uç canlıda **çalışıyor**; `GET /api/v1/community/categories` gerçek token'la **200**
+döner (aşağıda kanıt). "Kategoriler yüklenemedi" hatası neredeyse kesin **istemci
+tarafı** üç nedenden biri (canlı loglarla doğrulandı):
+
+| Belirti | Sunucu yanıtı | Sebep | Çözüm (mobil) |
+|---|---|---|---|
+| **401 Unauthorized** | `{"detail":"Geçersiz veya süresi dolmuş oturum"}` | Token yok / süresi dolmuş / `Authorization` başlığı eksik | Community sekmesini **giriş sonrası** çağır; `Authorization: Bearer <access_token>` ekle. Süre dolmuşsa `POST /api/v1/auth/refresh`. |
+| **404 Not Found** | `{"detail":"Not Found"}` | Yol **`/api/v1`** ön-ekini içermiyor (ör. `/community/categories`) | Taban URL `https://<host>/api/v1`; yol `community/categories`. Tam yol: `/api/v1/community/categories`. |
+| **307 Temporary Redirect** | (gövde yok) | Yolun **sonunda `/`** var (`…/categories/`). FastAPI `redirect_slashes` 307 döndürür ve bazı HTTP istemcileri redirect'te `Authorization`'ı düşürür → sonraki istek 401. | Yol sonuna `/` **koyma**. `…/categories` (slash yok). |
+
+> **KURAL:** Tüm uçlar **`/api/v1` ön-ekli**, **sonda slash yok**, **hepsi `Authorization: Bearer <token>` zorunlu** (health/community dahil değil — community %100 auth'lu). `/openapi.json` production'da **kapalıdır** (404, bilinçli — Faz G4); şema doğrulaması için bu bölüm resmî kaynaktır.
+
+**Ortak hata zarfları:**
+- **401** (auth): `{"detail":"Geçersiz veya süresi dolmuş oturum"}`
+- **400** (K0 moderasyon): `{"detail":{"code":"content_blocked","reason":"hakaret|iletisim_bilgisi|spam"}}`
+- **403** (gönderi yasağı): `{"detail":{"code":"posting_blocked","reason":"muted|banned"}}`
+- **429** (hız limiti): `{"detail":{"code":"rate_limited","reason":"cok_sik_konu | cok_sik_cevap"}}` + `Retry-After` (sn). **AYRI sayaçlar:** konu açma **60 sn/1**, cevap **15 sn/1** — konu açıp hemen cevap yazma akışı bloklanmaz.
+- **404** (`/block` var olmayan kullanıcı): `{"detail":"Kullanıcı bulunamadı"}`
+- **422** (Pydantic doğrulama): `{"detail":[{"type":"...","loc":["body","<alan>"],"msg":"..."}]}`
+
+> **🔴 Engelleme akışı (Apple 1.2):** thread/reply yanıtları artık **`author_id`** (uuid, silinmiş kullanıcıda `null`) taşır. Bir gönderiden kullanıcı engellemek için `POST /block {"user_id": <author_id>}`. Kendi `author_id`'ini engelleme → **400**. Var olmayan uuid → **404**.
+> **`status` alanı:** her thread/reply yanıtında `status` ∈ `visible | hidden`. Moderasyonla gizlenen içerik listede/detayda **yalnız SAHİBİNE** `status:"hidden"` olarak döner (mobil "kurallara aykırı bulundu" etiketi gösterir); başkasına hiç görünmez (listede yok, detayda 404).
+
+---
+
+## Profil
+
+### `GET /api/v1/community/profile`
+Kendi topluluk profili. **Profil yoksa 404** → mobil takma ad ekranını açmalı.
+```jsonc
+// 200
+{"id":"24ddce0d-…","nickname":"DocAnne","status":"active","post_count":0,
+ "is_expert":false,"is_moderator":false,
+ "rules_accepted_at":"2026-08-04T22:09:19.548921Z","created_at":"2026-08-04T22:09:19.544893Z"}
+// 404 (profil yok)
+{"detail":"Topluluk profili yok — önce takma ad belirleyin"}
+```
+`status`: `active | muted | banned`. `is_expert` = İlayda/uzman rozeti. `is_moderator` = mod yetkisi.
+
+### `POST /api/v1/community/profile`
+Body: `{"nickname": "<2-24 karakter>"}` → **201** (yukarıdaki `ProfileResp`).
+Takma ad **K0 filtresinden geçer** (küfür → 400). `rules_accepted_at` otomatik set edilir.
+- **409** `{"detail":"Bu takma ad kullanılıyor"}` (çakışma) veya `{"detail":"Topluluk profili zaten var"}`.
+- **400** `{"detail":{"code":"content_blocked","reason":"hakaret"}}` (uygunsuz takma ad).
+
+### `PATCH /api/v1/community/profile`
+Body: `{"nickname": "<yeni>"}` → **200** güncellenmiş `ProfileResp`. Aynı 409/400 kuralları.
+
+---
+
+## Kategoriler
+
+### `GET /api/v1/community/categories`
+Sabit 5 kategori + her birinde **published** konu sayısı.
+```jsonc
+// 200 — CANLI DOĞRULANMIŞ GERÇEK YANIT
+{"categories":[
+  {"key":"uyku","thread_count":0},
+  {"key":"beslenme","thread_count":0},
+  {"key":"gelisim","thread_count":0},
+  {"key":"anne_hali","thread_count":0},
+  {"key":"oneri","thread_count":0}]}
+```
+Kategori anahtarları (enum, sabit): **`uyku` `beslenme` `gelisim` `anne_hali` `oneri`**.
+
+---
+
+## Konular (threads)
+
+### `GET /api/v1/community/threads`
+**Cursor pagination.** Query:
+- `category` (opsiyonel): yukarıdaki 5 anahtardan biri. Verilmezse tüm kategoriler.
+- `cursor` (opsiyonel): önceki yanıtın `next_cursor` değeri (opak base64). İlk sayfada gönderme.
+- `limit` (opsiyonel, default **20**, max **50**).
+
+Sıralama `last_activity_at` **DESC**. Engellenen kullanıcıların ve `hidden/removed`
+içerik **gizli**. Yanıt zarfı:
+```jsonc
+// 200 — GERÇEK YANIT
+{
+  "items": [
+    {
+      "id": "e871bcf5-…",
+      "author_id": "24ddce0d-…",         // engelleme için (POST /block user_id). Silinmişte null
+      "nickname": "DocAnneX",
+      "is_expert": false,
+      "category": "uyku",
+      "title": "Gece uyanmalari nasil azalir",
+      "body_preview": "6 aylik bebegim gece 4-5 kez uyaniyor…",  // body ilk 140 karakter
+      "reply_count": 1,
+      "like_count": 1,
+      "expert_replied": false,
+      "liked_by_me": true,
+      "status": "visible",               // visible | hidden (hidden yalnız sahibine döner)
+      "last_activity_at": "2026-08-04T22:10:11.421690Z",
+      "created_at": "2026-08-04T22:10:10.475063Z"
+    }
+  ],
+  "next_cursor": null    // null → son sayfa. Doluysa bir sonraki GET'te ?cursor=<bu değer>
+}
+```
+**Sayfalama akışı:** `next_cursor` `null` olana kadar `?cursor=<next_cursor>&limit=20` ile devam et.
+Kendi **gizlenmiş** (moderasyon) gönderin listede `status:"hidden"` ile döner (başkasına görünmez).
+
+### `GET /api/v1/community/threads/{thread_id}`
+Konu + cevaplar (cevaplar **created_at ASC**, sayfalı). Query: `cursor`, `limit` (cevap sayfalama).
+Konu görünür değilse **404** (published herkese; `hidden` yalnız sahibine; `removed`/pending hiç).
+```jsonc
+// 200 — GERÇEK YANIT
+{
+  "id":"e871bcf5-…","author_id":"24ddce0d-…","nickname":"DocAnneX","is_expert":false,
+  "category":"uyku","title":"Gece uyanmalari nasil azalir","body":"6 aylik bebegim…",
+  "reply_count":1,"like_count":1,"expert_replied":false,"liked_by_me":true,"status":"visible",
+  "last_activity_at":"2026-08-04T22:10:11.421690Z","created_at":"2026-08-04T22:10:10.475063Z",
+  "replies":[
+    {"id":"f77ae6e0-…","author_id":"…","nickname":"DocAnneY","is_expert":false,
+     "body":"Uyaniklik penceresine dikkat cok yardimci oldu",
+     "like_count":0,"liked_by_me":false,"status":"visible","created_at":"2026-08-04T22:10:11.416506Z"}
+  ],
+  "replies_next_cursor": null    // cevap sayfalama cursor'u (null → tüm cevaplar geldi)
+}
+```
+> **"Silinmiş kullanıcı":** hesabı silinmiş yazarın konusu/cevabı KALIR; `nickname` = `"Silinmiş kullanıcı"`, `is_expert:false`, **`author_id:null`** döner.
+> **`status:"hidden"`:** moderasyonla gizlenmiş; yalnız sahibi görür. Mobil "kurallara aykırı bulundu" etiketi gösterir. Sahibinin cevapları da aynı kuralla (`hidden` yalnız sahibine).
+
+### `POST /api/v1/community/threads`
+Body: `{"category":"uyku","title":"<1-100>","body":"<1-1000>"}` → **201** (tam `ThreadDetail`
+zarfı, `replies:[]`). Moderasyon hattı K0→K1→K2 uygulanır (bkz. altta).
+```jsonc
+// 201 — GERÇEK YANIT
+{"id":"e871bcf5-…","author_id":"24ddce0d-…","nickname":"DocAnneX","is_expert":false,
+ "category":"uyku","title":"Gece uyanmalari nasil azalir","body":"6 aylik bebegim…",
+ "reply_count":0,"like_count":0,"expert_replied":false,"liked_by_me":false,"status":"visible",
+ "last_activity_at":"…","created_at":"…","replies":[],"replies_next_cursor":null}
+```
+Hatalar: **400** content_blocked (K0), **403** posting_blocked (muted/banned),
+**429** rate_limited (**konu: 60 sn/1**), **404** profil yok, **422** geçersiz alan.
+
+### `DELETE /api/v1/community/threads/{thread_id}`
+Yalnız **sahibi** (status=`removed`). Başkasının / yok → **404** `{"detail":"Konu bulunamadı"}`.
+Başarı: **200** `{"detail":"Konu silindi"}`.
+
+---
+
+## Cevaplar (replies)
+
+### `POST /api/v1/community/threads/{thread_id}/replies`
+Body: `{"body":"<1-1000>"}` → **201**.
+```jsonc
+// 201 — GERÇEK YANIT
+{"id":"f77ae6e0-…","author_id":"…","nickname":"DocAnneY","is_expert":false,
+ "body":"Uyaniklik penceresine dikkat cok yardimci oldu",
+ "like_count":0,"liked_by_me":false,"status":"visible","created_at":"2026-08-04T22:10:11.416506Z"}
+```
+Yazan **uzman (is_expert)** ise konunun `expert_replied` alanı `true` olur + konu sahibine
+**"İlayda konuna cevap verdi 🐰"** bildirimi gider (kendi cevabına gitmez).
+K0/K1/K2/403 aynı; **hız limiti AYRI** (cevap **15 sn/1**, konu sayacından bağımsız). Konu yoksa/`published` değilse **404**.
+
+### `DELETE /api/v1/community/replies/{reply_id}`
+Yalnız sahibi (status=`removed`, konu `reply_count` düşer). Başkası/yok → **404**.
+
+---
+
+## Etkileşim
+
+### `POST /api/v1/community/like`  (toggle)
+Body: `{"target_type":"thread|reply","target_id":"<uuid>"}` → **200**.
+```jsonc
+// 200 — beğenildi
+{"liked":true,"like_count":1}
+// tekrar çağır → beğeni geri alınır
+{"liked":false,"like_count":0}
+```
+İçerik yok/`published` değil → **404** `{"detail":"İçerik bulunamadı"}`.
+
+### `POST /api/v1/community/report`
+Body: `{"target_type":"thread|reply","target_id":"<uuid>","reason":"<enum>","note":"<opsiyonel ≤500>"}`.
+`reason` enum: **`spam` `hakaret` `tibbi_risk` `reklam` `uygunsuz` `diger`**.
+```jsonc
+// 200
+{"detail":"Şikayet alındı"}
+// 200 — 2. farklı kullanıcı şikayeti → içerik otomatik gizlendi
+{"detail":"Şikayet alındı, içerik incelemeye alındı"}
+// 409 — aynı kullanıcı aynı içeriği tekrar şikayet edemez
+{"detail":"Bu içeriği zaten şikayet ettiniz"}
+```
+
+### `POST /api/v1/community/block`
+Body: `{"user_id":"<uuid>"}` → **200** `{"detail":"Kullanıcı engellendi"}` (idempotent).
+`user_id` = engellenecek gönderinin **`author_id`**'si (thread/reply yanıtından alınır).
+- **400** `{"detail":"Kendinizi engelleyemezsiniz"}` (kendi author_id'in).
+- **404** `{"detail":"Kullanıcı bulunamadı"}` (var olmayan uuid — artık 500 değil).
+Engellenen kullanıcının içeriği listelerde/detayda gizlenir.
+
+### `DELETE /api/v1/community/block/{blocked_user_id}` → **200** `{"detail":"Engel kaldırıldı"}` (idempotent).
+
+### `GET /api/v1/community/blocks`
+```jsonc
+// 200
+[]  // veya [{"blocked_user_id":"<uuid>","nickname":"…","created_at":"…"}]
+```
+
+---
+
+## Moderatör uçları  (`is_moderator` şart; değilse **403** `{"detail":"Moderatör yetkisi gerekli"}`)
+
+### `GET /api/v1/community/mod/reports?resolved=false`
+Bekleyen şikayetler (içerikle):
+```jsonc
+// 200
+{"reports":[{"id":"…","target_type":"thread","target_id":"…","reason":"uygunsuz",
+  "note":"…","resolved":false,"created_at":"…",
+  "content_status":"published","content_body":"…(≤300)"}]}
+```
+
+### `POST /api/v1/community/mod/action`
+Body: `{"target_type":"thread|reply","target_id":"<uuid>","action":"hide|restore|remove"}`
+→ **200** `{"detail":"Uygulandı: hide"}`. İlgili şikayetler `resolved=true` yapılır.
+
+### `POST /api/v1/community/mod/user`
+Body: `{"user_id":"<uuid>","action":"mute|unmute|ban|unban"}` → **200**.
+`mute` = 24 saat gönderi yasağı; `ban` = kalıcı + içerik gizli.
+
+---
+
+## Moderasyon davranışı (mobilin bilmesi gereken)
+
+- **K0 (senkron):** küfür/hakaret, iletişim bilgisi (URL/tel/IBAN/e-posta), spam → **400
+  content_blocked**, içerik KAYDEDİLMEZ. Kullanıcıya `reason`'a göre mesaj göster.
+- **Hız limiti (AYRI sayaç):** konu açma **60 sn/1**, cevap yazma **15 sn/1** → **429**
+  (+`Retry-After` sn). Konu açıp hemen cevap yazma akışı bloklanmaz. Mobil gönder butonunu
+  ilgili süreyle kısıtlayabilir (ya da 429'da `Retry-After`'ı kullanır).
+- **K1+K2 (asenkron):** işaretli içerik **anında yayınlanır** (201 döner), arka planda
+  Haiku değerlendirir; uygunsuzsa sonradan gizlenir. Yani 201 = "yayınlandı", ama içerik
+  moderasyonla **`status:"hidden"`**e düşebilir — sahibi görmeye devam eder (etiketli),
+  başkasından gizlenir. Mobil bunu normal karşılamalı.
+- **muted/banned:** gönderi denemesi **403 posting_blocked**; `reason` = `muted`/`banned`.
+- **Engelleme (Apple 1.2):** her gönderi `author_id` taşır → `POST /block {"user_id":<author_id>}`.
+  Kendi author_id → 400; var olmayan → 404. Engellenen kullanıcının içeriği listelerde/detayda gizlenir.
+
+## Bildirim tercihi
+`GET/PATCH /api/v1/notifications/preferences` artık **`community_replies`** (default `true`)
+alanını da içerir: `{"plan_reminders":true,"daily_summary":true,"community_replies":true}`.
+Kapatmak: `PATCH {"community_replies": false}`.
+
