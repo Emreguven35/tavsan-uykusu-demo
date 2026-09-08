@@ -48,16 +48,37 @@ HIDDEN_BAN_THRESHOLD = 5     # bu kadar hidden → banned
 MUTE_HOURS = 24
 
 # --- Normalizasyon -----------------------------------------------------------
-_TR = str.maketrans({"ş": "s", "ı": "i", "ğ": "g", "ü": "u", "ö": "o", "ç": "c",
-                     "İ": "i", "Ş": "s", "Ğ": "g", "Ü": "u", "Ö": "o", "Ç": "c"})
+# DİKKAT — 'ı' (noktasız i) KORUNUR, 'i'ye katlanMAZ. Eskiden ı→i katlanıyordu ve
+# masum "sık" küfür kökü "sik" ile ÇAKIŞIYORDU: "bebeğim gece sık uyanıyor" gibi
+# en yaygın anne cümlesi K0'da bloklanıyordu. Türkçe'de ı ve i AYRI harflerdir;
+# katlamak anlamı yok eder. Diğer diyakritikler (ş/ğ/ü/ö/ç) katlanmaya devam eder.
+_TR = str.maketrans({"ş": "s", "ğ": "g", "ü": "u", "ö": "o", "ç": "c",
+                     "Ş": "s", "Ğ": "g", "Ü": "u", "Ö": "o", "Ç": "c"})
 _LEET = str.maketrans({"@": "a", "0": "o", "1": "i", "3": "e", "4": "a",
                        "5": "s", "7": "t", "$": "s", "€": "e"})
+# 'ı' NFKD+ascii katlamasında silinir; ascii taşıyıcı karakterle korunup geri konur.
+_DOTLESS = "\x01"
+_TOKEN_RE = re.compile(r"[a-z0-9ı]+")
+_NONTOKEN_RE = re.compile(r"[^a-z0-9ı]")
 
 
 def _basic(text: str) -> str:
-    """küçült + Türkçe translit + leetspeak + ascii."""
-    t = (text or "").lower().translate(_TR).translate(_LEET)
-    return unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode()
+    """Türkçe kurallı küçültme + translit + leetspeak + ascii. 'ı' korunur.
+
+    Küçültme Türkçe'ye göre yapılır: I→ı, İ→i. Python'un .lower() metodu I→i der,
+    bu da "SIK SIK UYANIYOR"u "sik"e çevirip aynı false-positive'i geri getirirdi."""
+    t = (text or "").replace("I", "ı").replace("İ", "i").lower()
+    t = t.replace("ı", _DOTLESS)          # ascii katlaması 'ı'yı silmesin
+    t = t.translate(_TR).translate(_LEET)
+    t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode()
+    return t.replace(_DOTLESS, "ı")
+
+
+def _fold_dotless(tok: str) -> str:
+    """ı→i katlanmış biçim. YALNIZ risk sözcükleri (K1) için kullanılır: orada
+    fazladan eşleşme zararsızdır (içerik yalnız incelemeye alınır), küfür
+    sözlüğünde ise masum anneyi susturur."""
+    return tok.replace("ı", "i")
 
 
 def _collapse(tok: str) -> str:
@@ -71,8 +92,8 @@ def _prep(text: str) -> tuple[list[str], str]:
     daraltmadan ÖNCE değerlendirilebilsin (örn. 'sikke' → daraltınca 'sike' olur,
     whitelist ham 'sikke' üzerinden korur)."""
     base = _basic(text)
-    raw_tokens = re.findall(r"[a-z0-9]+", base)
-    squeezed = _collapse(re.sub(r"[^a-z0-9]", "", base))
+    raw_tokens = _TOKEN_RE.findall(base)
+    squeezed = _collapse(_NONTOKEN_RE.sub("", base))
     return raw_tokens, squeezed
 
 
@@ -87,16 +108,44 @@ def _load_wordlist() -> set[str]:
 
 
 WORDSET = _load_wordlist()
+
+# --- "sik" ailesi: noktasız yazımda masum "sık" ile çakışır ------------------
+# Mobil klavyede Türkçe karakter kullanmayan anneler "sık sık uyanıyor" yerine
+# "sik sik uyaniyor" yazar — harfler küfür köküyle BİREBİR aynı olur. Bu biçimler
+# K0'da BLOKLANMAZ (masum anne susturulmasın); K1'de flagged edilir, K2'de Haiku
+# bağlama bakıp karar verir (izin=false & güven>=0.7 → hidden). Fail-open ilkesi.
+# İstisna: aşağıdaki çekimlerin "sık-" ailesinde karşılığı YOKTUR → net hakaret.
+SIK_HARD_PREFIXES = ("siktir", "sikeyim", "sikerim", "sikim", "sikik")
+
+
+def _is_ambiguous_sik(tok: str) -> bool:
+    """'sik' köküyle başlayan ama noktasız yazılmış masum bir "sık-" biçimi
+    OLABİLEN token (sik/siki/sikin/sikis/sikti/sikiyor/sikildim...). Net hakaret
+    çekimleri (siktir/sikeyim/sikerim/sikim/sikik...) belirsiz SAYILMAZ."""
+    return tok.startswith("sik") and not tok.startswith(SIK_HARD_PREFIXES)
+
+
 # Ayraç-kaçışı (squeezed) taraması yalnız GÜÇLÜ (uzun) köklerde — kısa köklerin
-# masum kelimelere (sikke vb.) alt-dize olarak denk gelmesini önler.
-_STRONG = {w for w in WORDSET if len(w) >= 5}
+# masum kelimelere (sikke vb.) alt-dize olarak denk gelmesini önler. Belirsiz
+# "sik-" biçimleri de dışarıda: "sikisik" (=sıkışık) içinde "sikis" geçer, bu
+# alt-dize eşleşmesi masum cümleyi bloklardı.
+_STRONG = {w for w in WORDSET if len(w) >= 5 and not _is_ambiguous_sik(w)}
 
 # Bağlamsal masumlar (EBEVEYN/EMZİRME/BESLENME): asla küfür sayılmaz.
 WHITELIST = {
     "sikke", "orospuotu", "amca", "amac", "amele", "gotur", "goturur", "goturdu",
     "meme", "memeli", "hiyar", "mal", "adi", "salatalik", "top", "topuk",
     "picture", "toparlanma", "malzeme", "malatya",
+    # "sık" ailesi — bebek uykusunda EN SIK kullanılan kelimeler.
+    "sık", "sıkı", "sıkça", "sıkıntı", "sıkıntılı", "sıkışık", "sıkışıklık",
+    "sıkışma", "sıkıcı", "sıkıldı", "sıkıldım", "sıkılıyor", "sıkıyor", "sıkar",
+    "sıkmak", "sıktı", "sıkın",
+    # Noktasız yazılmış hâlleri — bunların hakaret karşılığı YOK (tek anlamlı).
+    "sikinti", "sikintili", "sikisik", "sikisiklik", "sikisma", "sikca",
 }
+# Katlanmış biçim EKLENMEZ: "sık"ı katlamak whitelist'e "sik" koyar ve gerçek
+# hakareti de aklardı. Token tarafı zaten katlanmış biçimiyle de aranıyor.
+_WL = {_basic(w) for w in WHITELIST}
 _WL_SQUEEZED = {_collapse(_basic(w)) for w in WHITELIST}
 
 # İletişim bilgisi (reklam/dolandırıcılık yüzeyi) — engellenir.
@@ -124,23 +173,47 @@ NEW_ACCOUNT_POSTS = 3        # post_count < bu → yeni hesap (flagged)
 
 
 # --- K0: içerik filtresi -----------------------------------------------------
+def scan_profanity(text: str) -> tuple[bool, bool]:
+    """Küfür taraması. Dönen: (net_hakaret, belirsiz_hakaret).
+
+    net_hakaret     → K0 içeriği reddeder (kaydedilmez).
+    belirsiz_hakaret→ noktasız "sık" ailesiyle çakışan biçim; K0 GEÇİRİR, K1 bunu
+                      flagged eder ve kararı K2'deki Haiku'ya bırakır."""
+    hard = ambiguous = False
+    raw_tokens, squeezed = _prep(text)
+    # Her token 4 biçimde aranır: ham, çekim-daraltılmış ve ikisinin ı→i katlanmış
+    # hâli. Katlanmış biçim şart: sözlük ascii'dir ("gerizekali"), kullanıcı ise
+    # "gerizekalı" yazar. Katlamanın TEK tehlikeli çakışması "sık"→"sik" ailesidir;
+    # o da belirsiz sayılıp K2'ye devredilir. Whitelist DARALTMADAN önce bakılır.
+    for raw in raw_tokens:
+        forms = {raw, _collapse(raw)}
+        forms |= {_fold_dotless(f) for f in forms}
+        if forms & _WL:
+            continue
+        hits = forms & WORDSET
+        if not hits:
+            continue
+        if all(_is_ambiguous_sik(h) for h in hits):
+            ambiguous = True              # "sik sik uyaniyor" → bloklama, Haiku'ya sor
+        else:
+            hard = True
+    sq_forms = (squeezed, _fold_dotless(squeezed))
+    for w in _STRONG:                     # ayraç-kaçışı (s i k t i r)
+        if any(w in sq for sq in sq_forms) and not any(w in wl for wl in _WL_SQUEEZED):
+            hard = True
+            break
+    return hard, ambiguous
+
+
 def check_content(text: str) -> str | None:
     """K0 içerik kapısı. Engel sebebi (str) döner, temizse None. İçerik KAYDEDİLMEZ.
     Dönen sebepler: 'hakaret' | 'iletisim_bilgisi' | 'spam'."""
     if not text or not text.strip():
         return "bos"
 
-    # 1) Küfür/hakaret. Whitelist DARALTMADAN önce (ham token) değerlendirilir.
-    raw_tokens, squeezed = _prep(text)
-    for raw in raw_tokens:
-        col = _collapse(raw)
-        if raw in WHITELIST or col in WHITELIST:
-            continue
-        if raw in WORDSET or col in WORDSET:
-            return "hakaret"
-    for w in _STRONG:                     # ayraç-kaçışı (s i k t i r)
-        if w in squeezed and not any(w in wl for wl in _WL_SQUEEZED):
-            return "hakaret"
+    # 1) Küfür/hakaret (belirsiz biçimler burada bloklanmaz — K1/K2'ye devredilir)
+    if scan_profanity(text)[0]:
+        return "hakaret"
 
     # 2) İletişim bilgisi (URL/e-posta/IBAN/telefon)
     if _RE_URL.search(text) or _RE_EMAIL.search(text) or _RE_IBAN.search(text) \
@@ -189,10 +262,15 @@ def risk_flags(text: str, post_count: int) -> tuple[bool, list[str]]:
     reasons: list[str] = []
     raw_tokens, _ = _prep(text)
     tokens = set(raw_tokens) | {_collapse(t) for t in raw_tokens}
+    # Risk sözlükleri ascii ('ası'/'satılık' → 'asi'/'satilik'): burada ı→i
+    # katlaması GÜVENLİ, çünkü sonuç yalnızca incelemeye alır, engellemez.
+    tokens |= {_fold_dotless(t) for t in tokens}
     if tokens & MEDICAL_WORDS:
         reasons.append("tibbi_risk")
     if tokens & COMMERCIAL_WORDS:
         reasons.append("ticari")
+    if scan_profanity(text)[1]:      # noktasız "sik/sık" çakışması → Haiku baksın
+        reasons.append("belirsiz_hakaret")
     if post_count < NEW_ACCOUNT_POSTS:
         reasons.append("yeni_hesap")
     return (len(reasons) > 0, reasons)

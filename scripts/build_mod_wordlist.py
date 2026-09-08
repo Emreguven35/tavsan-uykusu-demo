@@ -12,6 +12,15 @@ kritik — bu bir EBEVEYN/EMZİRME topluluğu: "meme", "hıyar" (salatalık), "g
   - Ek genişletmesi dar tutulur (masum türev üretmemek için),
   - moderation.WHITELIST bağlamsal masumları ayıklar (ikinci güvenlik ağı).
 
+TÜRKÇE ı/i UYARISI: burada üretilen kökler ascii'dir ("sik", "gerizekali").
+Runtime normalizasyonu ARTIK "ı"yı "i"ye katlamaz — yoksa masum "sık" ("sık sık
+uyanıyor") bu listedeki "sik" köküne çarpardı. moderation tarafı sözlüğe bakarken
+ı→i katlanmış biçimi de dener (kullanıcı "gerizekalı" yazar, liste "gerizekali"
+tutar), ama "sik-" ailesinde net olmayan çekimleri BLOKLAMAZ; onları K1'de
+"belirsiz_hakaret" ile işaretleyip kararı K2'deki Haiku'ya bırakır. Bu listeye
+"sik" kökü altında yeni çekim eklerken bunu hatırla: eklediğin biçimin noktasız
+yazılmış bir "sık-" kelimesiyle çakışıp çakışmadığına bak.
+
 Çalıştırma: python scripts/build_mod_wordlist.py
 """
 import sys

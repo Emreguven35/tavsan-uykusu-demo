@@ -111,8 +111,12 @@ def test_k0():
         ok = r.status_code == 400 and r.json()["detail"].get("code") == "content_blocked"
         check(f"K0 blok: {body[:16]!r} → 400", ok, f"{r.status_code} {r.text[:80]}")
 
-    # false-positive OLMAMALI (ebeveyn bağlamı) → 201
-    for body in ["bebeğim memeyi bırakmıyor ne yapmalıyım", "hıyar turşusu tarifi paylaşır mısınız"]:
+    # false-positive OLMAMALI (ebeveyn bağlamı) → 201.
+    # "sık*" ailesi: ı→i katlaması yüzünden "sik" sanılıp bloklanıyordu (bkz.
+    # tests/test_moderasyon_normalizasyon.py). Noktasız yazan anne de geçmeli.
+    for body in ["bebeğim memeyi bırakmıyor ne yapmalıyım", "hıyar turşusu tarifi paylaşır mısınız",
+                 "bebeğim gece sık sık uyanıyor ne yapmalıyım", "sıkıntı yaşıyorum çok sıkıldım",
+                 "bebegim gece sik sik uyaniyor yardim edin", "bezi sıkışık geliyor sıkça oluyor"]:
         moderation.rate_reset()
         r = client.post("/api/v1/community/threads", headers=H(tok),
                         json={"category": "beslenme", "title": "soru var", "body": body})
