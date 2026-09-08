@@ -198,6 +198,17 @@ try:
 except pg.DayParseError:
     check("2d) 1-2. günü hiç olmayan plan → reddedilmeli", True, "")
 
+# Uzun tire hem aralık hem etiket ayracı olabiliyor; ifade etikete taşarsa gün
+# numaralarının ARTAN gitmesi kuralı aralığı kurtarır. (Bilinen kozmetik sınır:
+# böyle bir başlıkta etiketin başındaki sayı düşer — aralık doğru kalır, ekran
+# boş kalmaz; ölçülen hiçbir üretim planında bu biçim yok.)
+check("2e) Tire etiket ayracıyken aralık bozulmuyor",
+      pg.parse_gun_basligi("Gün 4-6 — 2. Aşama")[:2] == (4, 6),
+      str(pg.parse_gun_basligi("Gün 4-6 — 2. Aşama")))
+check("2e) İki nokta ayracında etiket tam korunuyor",
+      pg.parse_gun_basligi("Gün 1-3: 2. hafta notu") == (1, 3, "2. hafta notu"),
+      str(pg.parse_gun_basligi("Gün 1-3: 2. hafta notu")))
+
 # Gün kelimesi ya da sayı yoksa başlık sayılmaz
 for ham in ["Gün Sonu Değerlendirmesi", "3 Aşamalı Plan", "Gün İçi Notlar"]:
     check(f"2d) yanlış pozitif değil: {ham!r}", pg.parse_gun_basligi(ham) is None,

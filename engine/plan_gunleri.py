@@ -53,9 +53,11 @@ _SAYI = r"(\d{1,3})"
 # çünkü ölçülen biçimler çok çeşitli — sayı önce ("1. – 3. Gün"), kelime önce
 # ("Gün 1-3"), bağlaçlı ("Gün 1 ve Gün 2", "1. ve 2. Gün"), çoğul ("Günler 1-3").
 # Aralık = ifadedeki en küçük ve en büyük sayı.
-_BAGLAC = r"\bve\b|\bile\b|&"
-_RE_ARALIK = re.compile(rf"^(?:{_GUN}|\d{{1,3}}|[.\s:]|{_TIRE}|{_BAGLAC})+",
-                        re.IGNORECASE)
+_BAGLAC = rf"{_TIRE}|\bve\b|\bile\b|&"
+# Tek parça: "Gün 1" | "1." | "1. Gün" | "Gün 1." — gün kelimesi iki yanda da olabilir.
+_PARCA = rf"(?:{_GUN}\s*)?\d{{1,3}}\s*\.?\s*(?:{_GUN})?\s*"
+# Aralık ifadesi: parça (bağlaç parça)*
+_RE_ARALIK = re.compile(rf"^{_PARCA}(?:(?:{_BAGLAC})\s*{_PARCA})*", re.IGNORECASE)
 _RE_GUN_VAR = re.compile(_GUN, re.IGNORECASE)
 # Başlık önündeki emoji/işaret ("### 📍 Gün 1-3" → "Gün 1-3")
 _RE_ONEK = re.compile(r"^[^\w]+", re.UNICODE)
@@ -140,7 +142,14 @@ def parse_gun_basligi(baslik: str) -> tuple[int, int, str] | None:
     sayilar = [int(x) for x in re.findall(r"\d{1,3}", ifade)]
     if not sayilar:
         return None
-    bas, son = min(sayilar), max(sayilar)
+    # Uzun tire hem aralık hem etiket ayracı olabiliyor ("Gün 4-6 — 2. Aşama"),
+    # yani ifade etikete taşabilir. Gün numaraları ARTAN gider; ilk düşüşte kes.
+    artan = [sayilar[0]]
+    for s in sayilar[1:]:
+        if s < artan[-1]:
+            break
+        artan.append(s)
+    bas, son = artan[0], artan[-1]
     if bas < 1:
         return None
     etiket = _RE_AYRAC.sub("", metin[m.end():]).strip(" *#:•|")
