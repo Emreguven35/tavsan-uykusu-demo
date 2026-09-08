@@ -124,14 +124,49 @@ reddedilmeli("gün boşluğu (7,8,9 yok)", plan_metni([
 reddedilmeli("çakışan aralık", plan_metni([
     "### Gün 1-3: Beşik", "### Gün 3-6: Oda", "### Gün 7-9: Kapı",
     "### Gün 10-12: Eşik", "### Gün 13: Yatır-çık"]))
-reddedilmeli("13 tek gün başlığı (aşama değil)", plan_metni(
-    [f"### Gün {g}: Aşama" for g in range(1, 14)]))
 reddedilmeli("hiç gün başlığı yok", plan_metni([]))
 reddedilmeli("Eğitim Planı bölümü yok",
              "# Plan\n\n## Günlük Program\n\n### Gün 1-3: Beşik\n\nmetin\n")
 reddedilmeli("gün sayısı taşkın (14. gün)", plan_metni([
     "### Gün 1-3: Beşik", "### Gün 4-6: Oda", "### Gün 7-9: Kapı",
     "### Gün 10-12: Eşik", "### Gün 13-14: Yatır-çık"]))
+
+# =============================================================================
+# 2b) İNCE TANELİ BAŞLIKLAR AŞAMALARA TOPLANIR (yeniden üretmeye gerek yok)
+# =============================================================================
+# Bazı planlar aşamayı gün gün yazıyor ("1. Gün", "2. Gün") oysa merdiven "1-2"
+# diyor. Bu biçim farkı; içerik eksik değil. Üretimde 130 sn + bir Sonnet
+# faturası harcamak yerine toplanır. Üretimdeki 298 eski 5 günlük plan bu yüzden
+# ayrışamıyordu (2026-09-08 ölçümü).
+_teksatir = pg.build_days(plan_metni([f"### Gün {g}: Aşama {g}" for g in range(1, 14)]),
+                          TIP, GUNLER)
+check("2b) 13 tek gün başlığı → 5 aşamaya toplanıyor",
+      [(d["start"], d["end"]) for d in _teksatir] == ASAMALAR,
+      str([(d["start"], d["end"]) for d in _teksatir]))
+check("2b) Toplanan blok tüm günlerin metnini taşıyor",
+      all(f"Aşama {g}" in _teksatir[0]["markdown"] for g in (1, 2, 3)),
+      _teksatir[0]["markdown"][:80])
+check("2b) Toplanan aşamanın etiketi ilk günden geliyor",
+      _teksatir[0]["label"] == "Aşama 1", _teksatir[0]["label"])
+
+# Karışık taneli: bazı aşama tek başlık, bazısı gün gün
+_karma = pg.build_days(plan_metni([
+    "### Gün 1: Beşik", "### Gün 2: Beşik", "### Gün 3: Beşik",
+    "### Gün 4-6: Oda ortası", "### Gün 7-9: Kapı",
+    "### Gün 10-11: Eşik", "### Gün 12: Eşik", "### Gün 13: Yatır-çık"]), TIP, GUNLER)
+check("2c) Karışık taneli başlıklar toplanıyor",
+      [(d["start"], d["end"]) for d in _karma] == ASAMALAR,
+      str([(d["start"], d["end"]) for d in _karma]))
+
+# Toplama BOŞLUĞU kapatmaz: aşamanın içinde eksik gün varsa yine reddedilir
+reddedilmeli("aşama içi boşluk (2. gün yok)", plan_metni([
+    "### Gün 1: Beşik", "### Gün 3: Beşik",
+    "### Gün 4-6: Oda", "### Gün 7-9: Kapı",
+    "### Gün 10-12: Eşik", "### Gün 13: Yatır-çık"]))
+# Aşama sınırını AŞAN başlık toplanamaz (merdiven bozulur)
+reddedilmeli("aşama sınırını aşan başlık (2-4)", plan_metni([
+    "### Gün 1: Beşik", "### Gün 2-4: Karışık", "### Gün 5-6: Oda",
+    "### Gün 7-9: Kapı", "### Gün 10-12: Eşik", "### Gün 13: Yatır-çık"]))
 
 # =============================================================================
 # 3) YANLIŞ POZİTİF YOK — gün başlığı olmayanlar başlık sayılmamalı

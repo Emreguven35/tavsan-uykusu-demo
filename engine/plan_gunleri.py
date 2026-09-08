@@ -194,6 +194,39 @@ def parse_days(markdown: str) -> list[dict]:
     return out
 
 
+def _grupla(bulunan: list[dict], beklenen: list[dict]) -> list[dict] | None:
+    """Daha ince taneli gün başlıklarını KB aşamalarına topla; olmuyorsa None.
+
+    Bazı planlar aşamayı tek başlıkta değil gün gün yazıyor ("### 1. Gün — Beşik
+    Yanı", "### 2. Gün — Beşik Yanı (Devam)") oysa merdiven "1-2" diyor. Bu bir
+    BİÇİM farkı, eksik içerik değil: aşama eksiksiz anlatılmış, yalnız daha ince
+    bölünmüş. Yeniden ürettirmek yerine toplarız — üretimde 130 saniye + bir
+    Sonnet faturası, okuma yolunda ise kurtarılabilir eski planlar kazanılır.
+    Aşamanın günleri TAM kapsanmıyorsa (ör. 1. gün hiç yazılmamış) None döner ve
+    çağıran reddeder."""
+    gruplar: list[dict] = []
+    kullanilan = 0
+    for bek in beklenen:
+        icerdekiler = [b for b in bulunan
+                       if bek["start"] <= b["start"] and b["end"] <= bek["end"]]
+        if not icerdekiler:
+            return None
+        kapsanan: set[int] = set()
+        for b in icerdekiler:
+            kapsanan |= set(range(b["start"], b["end"] + 1))
+        if kapsanan != set(range(bek["start"], bek["end"] + 1)):
+            return None                   # aşamanın içinde boşluk var
+        kullanilan += len(icerdekiler)
+        gruplar.append({
+            "start": bek["start"], "end": bek["end"],
+            "label": next((b["label"] for b in icerdekiler if b["label"]), ""),
+            "markdown": "\n\n".join(b["markdown"] for b in icerdekiler),
+        })
+    if kullanilan != len(bulunan):
+        return None                       # aşamaların dışında kalan başlık var
+    return gruplar
+
+
 def build_days(markdown: str, plan_tipi: str, gun_sayisi: int) -> list[dict]:
     """Doğrulanmış gün bölümleri. Beklenmedik biçimde DayParseError yükseltir.
 
@@ -209,19 +242,22 @@ def build_days(markdown: str, plan_tipi: str, gun_sayisi: int) -> list[dict]:
     bulunan = parse_days(markdown)
     if not bulunan:
         raise DayParseError("'## Eğitim Planı' bölümünde hiç gün başlığı bulunamadı")
-    if len(bulunan) != len(beklenen):
+
+    # Sınırlar merdivenle birebir tutmuyorsa, ince taneli başlıkları aşamalara
+    # toplamayı dene (bkz. _grupla). O da tutmazsa biçim gerçekten beklenmedik.
+    eslesme = (bulunan if [(b["start"], b["end"]) for b in bulunan]
+               == [(b["start"], b["end"]) for b in beklenen]
+               else _grupla(bulunan, beklenen))
+    if eslesme is None:
         raise DayParseError(
-            f"Aşama sayısı uyuşmuyor: {len(bulunan)} bulundu, {len(beklenen)} bekleniyor "
-            f"(bulunan: {[(d['start'], d['end']) for d in bulunan]})")
+            f"Aşamalar merdivenle eşleşmiyor: bulunan "
+            f"{[(d['start'], d['end']) for d in bulunan]}, beklenen "
+            f"{[(d['start'], d['end']) for d in beklenen]}")
 
     days: list[dict] = []
-    for bul, bek in zip(bulunan, beklenen):
-        if (bul["start"], bul["end"]) != (bek["start"], bek["end"]):
-            raise DayParseError(
-                f"Aşama sınırı uyuşmuyor: {bul['start']}-{bul['end']} bulundu, "
-                f"{bek['start']}-{bek['end']} bekleniyor")
+    for bul, bek in zip(eslesme, beklenen):
         if not bul["markdown"].strip():
-            raise DayParseError(f"Gün {bul['start']}-{bul['end']} bloğu boş")
+            raise DayParseError(f"Gün {bek['start']}-{bek['end']} bloğu boş")
         days.append({
             "start": bek["start"],
             "end": bek["end"],
