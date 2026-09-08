@@ -48,12 +48,15 @@ _TIRE = f"[{_TIRE_CHARS}]"
 _GUN = r"g[uü]n(?:ler)?(?![a-zA-ZçğıöşüÇĞİıÖŞÜ])"
 _SAYI = r"(\d{1,3})"
 
-# "Gün 1-3" / "Günler 1-3" / "Gün 13"
-_RE_GUN_ONCE = re.compile(rf"^{_GUN}\s*:?\s*{_SAYI}\s*(?:{_TIRE}\s*{_SAYI})?\s*\.?",
-                          re.IGNORECASE)
-# "1-3. Günler" / "1. – 3. Gün" / "13. Gün"
-_RE_SAYI_ONCE = re.compile(rf"^{_SAYI}\s*\.?\s*(?:{_TIRE}\s*{_SAYI}\s*\.?)?\s*{_GUN}",
-                           re.IGNORECASE)
+# Başlığın BAŞINDAKİ "aralık ifadesi": gün kelimesi, sayılar, nokta, tire ve
+# bağlaçlardan oluşan kesintisiz kısım. Tek bir kalıp yerine bunu kullanıyoruz
+# çünkü ölçülen biçimler çok çeşitli — sayı önce ("1. – 3. Gün"), kelime önce
+# ("Gün 1-3"), bağlaçlı ("Gün 1 ve Gün 2", "1. ve 2. Gün"), çoğul ("Günler 1-3").
+# Aralık = ifadedeki en küçük ve en büyük sayı.
+_BAGLAC = r"\bve\b|\bile\b|&"
+_RE_ARALIK = re.compile(rf"^(?:{_GUN}|\d{{1,3}}|[.\s:]|{_TIRE}|{_BAGLAC})+",
+                        re.IGNORECASE)
+_RE_GUN_VAR = re.compile(_GUN, re.IGNORECASE)
 # Başlık önündeki emoji/işaret ("### 📍 Gün 1-3" → "Gün 1-3")
 _RE_ONEK = re.compile(r"^[^\w]+", re.UNICODE)
 # Aralık ile etiket arasındaki ayraç (":", "|", "—", "–", "-", "•")
@@ -126,17 +129,22 @@ def parse_gun_basligi(baslik: str) -> tuple[int, int, str] | None:
     metin = _RE_ONEK.sub("", (baslik or "").strip())
     if not metin:
         return None
-    for rx in (_RE_GUN_ONCE, _RE_SAYI_ONCE):
-        m = rx.match(metin)
-        if m is None:
-            continue
-        bas = int(m.group(1))
-        son = int(m.group(2)) if m.group(2) else bas
-        if bas < 1 or son < bas:
-            return None
-        etiket = _RE_AYRAC.sub("", metin[m.end():]).strip(" *#:•|")
-        return bas, son, etiket
-    return None
+    m = _RE_ARALIK.match(metin)
+    if m is None:
+        return None
+    ifade = m.group(0)
+    # "gün" kelimesi ŞART: "3 Aşamalı Plan" gün başlığı değildir.
+    # Sayı da şart: "Gün Sonu Değerlendirmesi" de değildir.
+    if not _RE_GUN_VAR.search(ifade):
+        return None
+    sayilar = [int(x) for x in re.findall(r"\d{1,3}", ifade)]
+    if not sayilar:
+        return None
+    bas, son = min(sayilar), max(sayilar)
+    if bas < 1:
+        return None
+    etiket = _RE_AYRAC.sub("", metin[m.end():]).strip(" *#:•|")
+    return bas, son, etiket
 
 
 def _bolum_sinirlari(markdown: str) -> tuple[int, int] | None:

@@ -169,6 +169,41 @@ reddedilmeli("aşama sınırını aşan başlık (2-4)", plan_metni([
     "### Gün 7-9: Kapı", "### Gün 10-12: Eşik", "### Gün 13: Yatır-çık"]))
 
 # =============================================================================
+# 2d) BAĞLAÇLI ARALIK ("Gün 1 ve Gün 2") — üretimdeki 231 planın kök sebebi
+# =============================================================================
+for ham, beklenen in [
+    ("🟢 Gün 1 ve Gün 2 — Beşik Yanı", (1, 2, "Beşik Yanı")),
+    ("📅 1. Gün ve 2. Gün — Beşik Yanında Bekleme", (1, 2, "Beşik Yanında Bekleme")),
+    ("1. ve 2. Gün — Beşik Yanı", (1, 2, "Beşik Yanı")),
+    ("Gün 1 ile Gün 2: Beşik", (1, 2, "Beşik")),
+    ("Gün 1 & 2 — Beşik", (1, 2, "Beşik")),
+]:
+    check(f"2d) bağlaçlı aralık: {ham[:34]!r}", pg.parse_gun_basligi(ham) == beklenen,
+          str(pg.parse_gun_basligi(ham)))
+
+# Eski 5 günlük planın gerçek biçimi uçtan uca ayrışmalı
+_eski5 = pg.build_days(plan_metni([
+    "### 🟢 Gün 1 ve Gün 2 — Beşik Yanı", "### 🟡 Gün 3 — Oda Ortası",
+    "### 🟠 Gün 4 — Kapı Eşiği (İçerden)", "### 🔴 Gün 5 — Yatır-Çık"]),
+    "5_gun_standart", 5)
+check("2d) Eski 5 günlük plan biçimi ayrışıyor",
+      [(d["start"], d["end"]) for d in _eski5] == [(1, 2), (3, 3), (4, 4), (5, 5)],
+      str([(d["start"], d["end"]) for d in _eski5]))
+
+# Gerçekten eksik gün (1-2 hiç yazılmamış) HÂLÂ reddedilmeli
+try:
+    pg.build_days(plan_metni(["### 🗓️ 3. Gün — Oda Ortası", "### 🗓️ 4. Gün — Kapı",
+                              "### 🗓️ 5. Gün — Yatır-Çık"]), "5_gun_standart", 5)
+    check("2d) 1-2. günü hiç olmayan plan → reddedilmeli", False, "kabul edildi")
+except pg.DayParseError:
+    check("2d) 1-2. günü hiç olmayan plan → reddedilmeli", True, "")
+
+# Gün kelimesi ya da sayı yoksa başlık sayılmaz
+for ham in ["Gün Sonu Değerlendirmesi", "3 Aşamalı Plan", "Gün İçi Notlar"]:
+    check(f"2d) yanlış pozitif değil: {ham!r}", pg.parse_gun_basligi(ham) is None,
+          str(pg.parse_gun_basligi(ham)))
+
+# =============================================================================
 # 3) YANLIŞ POZİTİF YOK — gün başlığı olmayanlar başlık sayılmamalı
 # =============================================================================
 for baslik in ["Günlük Program (Saat Saat)", "Gündüz uykusu protokolü",
