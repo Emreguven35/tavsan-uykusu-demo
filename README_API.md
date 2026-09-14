@@ -1160,6 +1160,83 @@ aynı masalı ikinci kez dinlerken **TTS'e gidilmez** — dosya diskten servis e
 > olduğundan yeniden deploy sonrası cache boşalır ve ilk dinlemeler yeniden
 > üretilir. Kalıcılık isteniyorsa `data/audio_cache` klasörüne volume mount edilmeli.
 
+
+## Aylık ses klonlama limiti (`POST /voice/clone`)
+
+Gizlilik politikası **"ses kaydı ayda bir kez yenilenebilir"** diyordu ama kodda
+hiçbir kontrol yoktu: kullanıcı istediği kadar klon açabiliyordu. Her klon
+ElevenLabs'te bir **slot + ücret** tutuyor ve gereksiz **biyometrik veri**
+saklanıyordu. Politika ile davranış ayrışmıştı — sınır artık sunucuda zorlanıyor.
+
+**Sınır: son klonlamadan itibaren 30 gün** (`voice_profiles.last_cloned_at`).
+
+### Limit dolduğunda → `429`
+
+```jsonc
+// POST /api/v1/voice/clone   → 429 Too Many Requests
+// Header: Retry-After: <kalan saniye>
+{
+  "detail": "Sesini ayda bir kez kaydedebilirsin. Bir sonraki hakkın: 14.10.2026",
+  "retry_after_days": 30,
+  "next_clone_available_at": "2026-10-14T19:17:03.706553+00:00"
+}
+```
+
+- Kontrol **ses gövdesi okunmadan ÖNCE** yapılır: 15MB boşuna yüklenmez ve
+  ElevenLabs'e **hiç gidilmez** (maliyet oluşmaz).
+- `retry_after_days` **yukarı yuvarlanır** (asla 0 olmaz): 0,2 gün kalmışken
+  "0 gün" demek kullanıcıya tekrar 429 aldırırdı.
+
+### `GET /voice/voice-status` — genişletildi
+
+```jsonc
+{
+  "status": "ready",                  // pending | ready | replaced | none
+  "voiceId": "voice-2",
+  "sampleUrl": "/audio/voice-2.mp3",
+  "created_at": "2026-09-14T19:17:03Z",
+  "last_cloned_at": "2026-09-14T19:17:03Z",   // YENİ
+  "can_clone": false,                          // YENİ
+  "next_clone_available_at": "2026-10-14T19:17:03Z",  // YENİ (can_clone=true iken null)
+  "retry_after_days": 30                       // YENİ (can_clone=true iken 0)
+}
+```
+
+**Mobil:** "Sesi yenile" düğmesini `can_clone=false` iken **kapat** ve
+`next_clone_available_at`'i göster — kullanıcı 429 duvarına çarpmadan görsün.
+Bu alanlar 429 kapısıyla **aynı fonksiyondan** hesaplanır; gösterilen tarih ile
+uygulanan sınır ayrışamaz.
+
+### Yeni klon alınınca ESKİ ses siliniyor
+
+Slot, ücret ve biyometrik veri birikmesin diye önceki klon ElevenLabs'ten
+silinir ve satır `status: "replaced"` olur.
+
+- Silme **yeni klon kaydedildikten SONRA** yapılır (sıra önemli: önce silinip
+  klonlama patlasaydı kullanıcı sessiz kalırdı).
+- Silme **best-effort**: başarısız olursa yeni ses **yine geçerlidir**, satır
+  `ready` kalır (yalan söylenmez) ve uyarı loglanır.
+- ElevenLabs `404` (ses zaten yok) **başarı** sayılır — temizlik idempotent.
+
+> **`410 Gone`:** `replaced` bir `voiceId` ile `POST /voice/generate` çağrılırsa
+> artık net bir yanıt döner (`"Bu ses kaydı yenilendiği için artık
+> kullanılamıyor…"`). Eskiden anlamsız bir upstream hatası dönerdi.
+> Güncel kimliği `/voice/voice-status`'tan alın.
+
+### Geriye uyum
+
+`0009_voice_clone_limit` migration'ı `last_cloned_at`'i **nullable** ekler ve
+**backfill ETMEZ**. Limit hesabı `COALESCE(last_cloned_at, created_at)` ile
+yürür — yani mevcut kullanıcılara sessizce **fazladan bir klonlama hakkı
+doğmaz** (`created_at` zaten klonlamanın yapıldığı andır).
+
+> **Düzeltilen yan hata:** `/voice-status` güncel profili `created_at DESC` ile
+> seçiyordu; `created_at` saniye hassasiyetinde yazıldığı için aynı saniyede
+> açılmış iki profil berabere kalıp **eski (silinmiş) `voiceId`** dönebiliyordu.
+> Limit gelmeden önce peş peşe klon açılabildiğinden üretimde böyle satırlar
+> olabilir. Sıralama artık önce `replaced` olmayanı, sonra en yeni klonlama
+> anını alıyor.
+
 ---
 
 # Faz T — Anne Topluluğu API (`/api/v1/community/*`)

@@ -13,8 +13,12 @@ voice router — /api/v1/voice/*
 Hepsi auth korumalı. Dış servis hatası (key yok/kota) → anlamlı JSON + uygun kod.
 """
 import logging
+import math
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import JSONResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api import tts
@@ -33,10 +37,93 @@ router = APIRouter(prefix="/voice", tags=["voice"])
 MAX_CLONE_BYTES = 15 * 1024 * 1024        # ~30sn ses için bol; kötüye kullanımı sınırla
 SAMPLE_TEXT = "Merhaba, ben senin sesinim. İyi geceler, tatlı rüyalar."
 
+# --- Aylık klonlama limiti ---------------------------------------------------
+# Gizlilik politikası "ses kaydı ayda bir kez yenilenebilir" diyor. Bu kural
+# kodda HİÇ zorlanmıyordu: kullanıcı istediği kadar klon açabiliyor, her biri
+# ElevenLabs'te slot + ücret tutuyor ve gereksiz biyometrik veri birikiyordu.
+# Politika ile davranış ayrışmıştı; sınır burada zorlanıyor.
+CLONE_COOLDOWN_DAYS = 30
 
-@router.post("/clone", response_model=VoiceCloneResp)
+
+def _son_klonlama(profile: VoiceProfile | None):
+    """Bu profilin klonlama anı — last_cloned_at, yoksa created_at.
+
+    COALESCE bilinçli: 0009 migration'ı öncesi satırlarda last_cloned_at NULL.
+    NULL'u "hiç klonlamamış" saymak mevcut her kullanıcıya sessizce fazladan bir
+    hak doğururdu; created_at zaten klonlamanın yapıldığı andır."""
+    if profile is None:
+        return None
+    return getattr(profile, "last_cloned_at", None) or profile.created_at
+
+
+def _klon_durumu(profile: VoiceProfile | None, simdi: datetime | None = None) -> dict:
+    """{can_clone, next_clone_available_at, retry_after_days} — tek hesap yeri.
+
+    Hem POST /clone kapısı hem GET /voice-status aynı fonksiyondan besleniyor:
+    mobilin gösterdiği tarih ile sunucunun uyguladığı sınır AYRIŞAMAZ."""
+    simdi = simdi or datetime.now(timezone.utc)
+    son = _son_klonlama(profile)
+    if son is None:
+        return {"can_clone": True, "next_clone_available_at": None,
+                "retry_after_days": 0}
+    if son.tzinfo is None:                 # SQLite naive datetime döndürebiliyor
+        son = son.replace(tzinfo=timezone.utc)
+    musait = son + timedelta(days=CLONE_COOLDOWN_DAYS)
+    if simdi >= musait:
+        return {"can_clone": True, "next_clone_available_at": None,
+                "retry_after_days": 0}
+    # Kalan süre GÜNE YUKARI yuvarlanır: 0.2 gün kalmışken "0 gün" demek
+    # kullanıcıya "şimdi deneyebilirim" dedirtip tekrar 429 aldırırdı.
+    kalan = musait - simdi
+    return {"can_clone": False, "next_clone_available_at": musait,
+            "retry_after_days": max(1, math.ceil(kalan.total_seconds() / 86400)),
+            "_kalan_saniye": max(1, int(kalan.total_seconds()))}
+
+
+def _son_profil(db: Session, user: User) -> VoiceProfile | None:
+    """Kullanıcının GÜNCEL ses profili.
+
+    Sıralama iki ölçüte göre, bu sırayla:
+      1. 'replaced' OLMAYAN önce — yenisi alınmış ses artık ElevenLabs'te yok,
+         voice-status onu göstermemeli.
+      2. Klonlama anı (last_cloned_at, yoksa created_at) AZALAN.
+
+    NEDEN İKİ ÖLÇÜT: eskiden yalnız created_at.desc() vardı ve created_at
+    server_default=now() ile SANİYE hassasiyetinde yazılıyor. Aynı saniyede
+    açılmış iki profil berabere kalıp sıralama rastgeleleşiyor, /voice-status
+    ESKİ (silinmiş) voiceId'yi dönebiliyordu. Aylık limit gelmeden önce
+    kullanıcılar peş peşe klon açabildiği için üretimde böyle satırlar VAR."""
+    return (db.query(VoiceProfile).filter(VoiceProfile.user_id == user.id)
+            .order_by((VoiceProfile.status == "replaced").asc(),
+                      func.coalesce(VoiceProfile.last_cloned_at,
+                                    VoiceProfile.created_at).desc())
+            .first())
+
+
+@router.post("/clone", response_model=None,
+             responses={200: {"model": VoiceCloneResp},
+                        429: {"description": "Aylık klonlama hakkı dolu"}})
 async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Sesi"),
                 db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    # AYLIK LİMİT — ses OKUNMADAN önce kontrol edilir: 15MB'lık gövdeyi boşuna
+    # almayalım ve ElevenLabs'e hiç gitmeyelim.
+    onceki = _son_profil(db, user)
+    durum = _klon_durumu(onceki)
+    if not durum["can_clone"]:
+        tarih = durum["next_clone_available_at"].strftime("%d.%m.%Y")
+        logger.info("Klonlama limiti: user=%s sonraki=%s", user.id, tarih)
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={
+                "detail": ("Sesini ayda bir kez kaydedebilirsin. "
+                           f"Bir sonraki hakkın: {tarih}"),
+                "retry_after_days": durum["retry_after_days"],
+                "next_clone_available_at":
+                    durum["next_clone_available_at"].isoformat(),
+            },
+            headers={"Retry-After": str(durum["_kalan_saniye"])},
+        )
+
     data = await audio.read()
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
@@ -61,21 +148,63 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
     sample_url = sample.get("audio_url")
 
     profile = VoiceProfile(user_id=user.id, elevenlabs_voice_id=voice_id,
-                           sample_url=sample_url, status="ready")
+                           sample_url=sample_url, status="ready",
+                           last_cloned_at=datetime.now(timezone.utc))
     db.add(profile)
     db.commit()
     logger.info("Voice clone tamam: user=%s voice_id=%s", user.id, voice_id)
+
+    # ESKİ SESİ TEMİZLE — yeni klon KAYDEDİLDİKTEN sonra. Sıra önemli: silme
+    # önce yapılsaydı ve klonlama sonradan patlasaydı kullanıcı sessiz kalırdı.
+    # Silme BEST-EFFORT: başarısız olursa yeni ses yine geçerli (bkz. delete_voice).
+    _eski_sesleri_temizle(db, user, yeni_voice_id=voice_id)
     return VoiceCloneResp(voiceId=voice_id, sampleUrl=sample_url)
+
+
+def _eski_sesleri_temizle(db: Session, user: User, yeni_voice_id: str) -> None:
+    """Kullanıcının ÖNCEKİ klon seslerini ElevenLabs'ten sil, satırı işaretle.
+
+    Neden: her klon ElevenLabs'te bir slot tutuyor ve ücretlendiriliyor; ayrıca
+    kullanılmayan biyometrik veriyi saklamanın bir gerekçesi yok. Kullanıcı yeni
+    sesini kaydettiği anda eskisi gereksizdir.
+
+    Hata YUTULUR: temizlik kullanıcının akışını bozmaz. Silinemezse satır
+    'ready' kalır (yalan söylemeyelim) ve uyarı loglanır."""
+    eskiler = (db.query(VoiceProfile)
+               .filter(VoiceProfile.user_id == user.id,
+                       VoiceProfile.elevenlabs_voice_id.isnot(None),
+                       VoiceProfile.elevenlabs_voice_id != yeni_voice_id,
+                       VoiceProfile.status != "replaced")
+               .all())
+    for eski in eskiler:
+        sonuc = voice_svc.delete_voice(eski.elevenlabs_voice_id)
+        if sonuc.get("ok"):
+            eski.status = "replaced"
+            logger.info("Eski klon sesi silindi: user=%s voice_id=%s",
+                        user.id, eski.elevenlabs_voice_id)
+        else:
+            logger.warning("Eski klon sesi SİLİNEMEDİ (user=%s voice_id=%s): %s "
+                           "— slot/ücret birikebilir, elle temizlik gerekebilir",
+                           user.id, eski.elevenlabs_voice_id, sonuc.get("error"))
+    if eskiler:
+        db.commit()
 
 
 @router.get("/voice-status", response_model=VoiceStatusResp)
 def voice_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    profile = (db.query(VoiceProfile).filter(VoiceProfile.user_id == user.id)
-               .order_by(VoiceProfile.created_at.desc()).first())
+    profile = _son_profil(db, user)
+    # Klonlama hakkı POST /clone ile AYNI fonksiyondan hesaplanıyor: mobilin
+    # gösterdiği tarih ile sunucunun uyguladığı sınır ayrışamaz.
+    durum = _klon_durumu(profile)
     if profile is None:
-        return VoiceStatusResp(status="none")
-    return VoiceStatusResp(status=profile.status, voiceId=profile.elevenlabs_voice_id,
-                           sampleUrl=profile.sample_url, created_at=profile.created_at)
+        return VoiceStatusResp(status="none", can_clone=True)
+    return VoiceStatusResp(
+        status=profile.status, voiceId=profile.elevenlabs_voice_id,
+        sampleUrl=profile.sample_url, created_at=profile.created_at,
+        last_cloned_at=_son_klonlama(profile),
+        can_clone=durum["can_clone"],
+        next_clone_available_at=durum["next_clone_available_at"],
+        retry_after_days=durum["retry_after_days"])
 
 
 @router.get("/stories", response_model=StoriesResp)
@@ -100,6 +229,14 @@ def generate(req: VoiceGenerateReq, db: Session = Depends(get_db),
     if sahip is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Bu ses profili size ait değil")
+    # Yenisi alınmış ses ARTIK ELEVENLABS'TE YOK (eski klon siliniyor). Eski
+    # voiceId'yi elinde tutan istemci buraya gelirse anlamsız bir upstream
+    # hatası yerine net bir yanıt alsın.
+    if sahip.status == "replaced":
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=("Bu ses kaydı yenilendiği için artık kullanılamıyor. "
+                    "Güncel ses kimliğini /voice/voice-status ile alın."))
 
     # storyId verildiyse katalogdan metni çöz; yoksa doğrudan text.
     if req.storyId:
