@@ -18,6 +18,7 @@ Kapsam:
 Çalıştırma: python tests/test_yenidogan.py
 """
 import os
+import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -321,12 +322,20 @@ check("8g) Gerçekten alakasız soru hâlâ kapsam dışı",
 # İlayda'nın yeni 0-6 hafta tablosu mevcut bantla çelişiyor; karar gelene kadar
 # tabloya DOKUNULMADI. Bu kontrol bir "yanlışlıkla güncelleme" alarmıdır.
 _b02 = yb.yas_bandi_getir(1.0)
-check("9a) 0-2_ay bandının değerleri korundu (40-80 dk / 8-10 saat / 5-7 saat)",
-      _b02["uyaniklik_penceresi_dk"] == [40, 80]
-      and _b02["gece_uykusu_dk"] == [480, 600]
-      and _b02["gunduz_uyku_toplam_dk"] == [300, 420],
+# FAZ P: çakışma KAPANDI — tablo tekleşti. Bu kontrol artık eski değerlerin
+# geri gelmediğini VE yeni tek kaynağın geçerli olduğunu doğruluyor.
+check("9a) 0-3 ay bandı TEKLEŞTİ (45-75 dk @1.5ay / 9-12 saat / 4-8 saat)",
+      _b02["uyaniklik_penceresi_dk"] == [45, 75]          # 1.0 ay → 1-2 ay alt bandı
+      and _b02["gece_uykusu_dk"] == [540, 720]
+      and _b02["gunduz_uyku_toplam_dk"] == [240, 480]
+      and _b02["toplam_gunluk_uyku_dk"] == [840, 1020],
       f"{_b02['uyaniklik_penceresi_dk']} {_b02['gece_uykusu_dk']} "
-      f"{_b02['gunduz_uyku_toplam_dk']}")
+      f"{_b02['gunduz_uyku_toplam_dk']} {_b02['toplam_gunluk_uyku_dk']}")
+
+check("9a2) Rehber ve tablo AYNI pencereyi veriyor (çakışma kapandı)",
+      all(yd.alt_bant(a)["uyaniklik_penceresi_dk"]
+          == yb.yas_bandi_getir(a)["uyaniklik_penceresi_dk"]
+          for a in (0.5, 1.5, 2.5)), "")
 
 _cakisma = [k for k in parametre_uret({
     "bebek_ad": "x", "dogum_tarihi": (date.today() - timedelta(days=400)).isoformat(),
@@ -335,11 +344,104 @@ check("9b) Çakışma kaydı KB'ye yazıldı (tutarsizlik_raporu)",
       any("0-6_hafta" in str(r.get("yas", ""))
           for r in chatbot._load_kb_safe().get("tutarsizlik_raporu", [])),
       "")
-check("9c) Yenidoğan alt bantları yas_bantlari.json'dan okunuyor (kodda sabit yok)",
-      yb.tablo().get("yenidogan_ritim", {}).get("alt_bantlar") is not None
-      and yb.tablo()["version"] == "1.2",
-      yb.tablo().get("version"))
+check("9c) Alt bantlar 0-3 ay BANDININ İÇİNDE (tek kaynak, v1.3)",
+      yb.tablo()["version"] == "1.3"
+      and len(yb.alt_bantlar()) == 3
+      # yenidogan_ritim'de ARTIK KOPYA YOK — ikinci kaynak kalmadı.
+      and yb.tablo().get("yenidogan_ritim", {}).get("alt_bantlar") is None,
+      f"v={yb.tablo().get('version')} bant={len(yb.alt_bantlar())}")
 
+# KB bucket'larındaki çakışan sayılar ARŞİVLENDİ mi? (korpusa girmemeli)
+_bucket_sizinti = [u["chunk_id"] for u in chatbot.build_corpus()
+                   if u["source"] == "yas_bucket"
+                   and any(b in u["chunk_id"] for b in ("0-6_hafta", "7-12_hafta", "3_ay."))
+                   and any(a in u["chunk_id"] for a in
+                           ("uyaniklik_penceresi", "uyku_sayisi", "gece_uyku",
+                            "gunduz_uyku_total", "toplam_uyku_24h", "yatma_vakti",
+                            "gunduz_uyku_bitirme"))]
+check("9d) KB'deki çakışan 0-3 ay sayıları korpusa GİRMİYOR (arşivlendi)",
+      not _bucket_sizinti, str(_bucket_sizinti))
+
+check("9e) Arşivlenen alanlar KB'de DURUYOR (silinmedi)",
+      all("ARSIV_uyaniklik_penceresi" in (chatbot._load_kb_safe()["yas_buckets"][b])
+          for b in ("0-6_hafta", "7-12_hafta", "3_ay")), "")
+
+
+# =============================================================================
+# 10) FAZ P — TEK TABLO: 5 YAŞ SORUSU, İKİ KÜMEDEN KARIŞMA OLMAMALI
+# =============================================================================
+# Canlı cevapta iki sayı kümesi yan yana çıkmıştı: "45-75 dakika … gece 8-10
+# saat". İlki rehber alt bandından, ikincisi MASTER tablodan geliyordu. Aşağıdaki
+# kontrol chat'e giden DETERMİNİSTİK bağlam bloğunu 5 yaş için kurar ve
+# ESKİ/ÇAKIŞAN hiçbir sayının kalmadığını doğrular (LLM'e gerek yok — sızıntı
+# olursa zaten buradan geçer).
+_SORULAR = [
+    ("3 haftalık bebeğim ne kadar uyanık kalmalı", 0.7, "30 dakika - 1 saat"),
+    ("1 aylık bebeğim ne kadar uyanık kalmalı",    1.0, "45 dakika - 1 saat 15 dakika"),
+    ("6 haftalık bebeğim ne kadar uyanık kalmalı", 1.4, "45 dakika - 1 saat 15 dakika"),
+    ("2 aylık bebeğim ne kadar uyanık kalmalı",    2.0, "1 saat - 1 saat 30 dakika"),
+    ("2.5 aylık bebeğim ne kadar uyanık kalmalı",  2.5, "1 saat - 1 saat 30 dakika"),
+]
+# Artık HİÇBİR yaşta görünmemesi gereken eski/çakışan değerler.
+_ESKI_DEGERLER = (
+    "40 dakika - 1 saat 20 dakika",   # eski MASTER penceresi
+    "8 saat - 10 saat",               # eski gece uykusu
+    "5 saat - 7 saat",                # eski gündüz toplamı
+    "15 saat - 18 saat",              # eski 24 saat toplamı
+    "4-5 uyku",                       # eski uyku sayısı
+    "45-60 Dakika", "60-90 Dakika",   # KB bucket ham metinleri
+    "4 - 8 Saat", "4 - 7 Saat", "14-17 Saat", "9-12 Saat",
+)
+_karisma, _eksik = [], []
+for soru, ay, beklenen_pencere in _SORULAR:
+    bantlar, _yas = chatbot.bant_coz(soru)
+    blok = chatbot.yas_bandi_blok(bantlar, chatbot.yas_ay_tespit(soru))
+    for eski in _ESKI_DEGERLER:
+        if eski in blok:
+            _karisma.append(f"{soru!r} → ESKİ DEĞER sızdı: {eski!r}")
+    if beklenen_pencere not in blok:
+        _eksik.append(f"{soru!r} → beklenen pencere yok: {beklenen_pencere!r}")
+
+check("10a) 5 yaş sorusunun hiçbirinde ESKİ/ÇAKIŞAN değer yok",
+      not _karisma, " | ".join(_karisma))
+check("10b) 5 yaş sorusunun hepsinde DOĞRU alt bant penceresi var",
+      not _eksik, " | ".join(_eksik))
+
+# Tek bandın değerleri: gece/gündüz/toplam her yaşta AYNI olmalı (yalnız pencere değişir).
+_tek_kume = []
+for soru, ay, _p in _SORULAR:
+    blok = chatbot.yas_bandi_blok(*(lambda b: (b, chatbot.yas_ay_tespit(soru)))(
+        chatbot.bant_coz(soru)[0]))
+    for zorunlu in ("9 saat - 12 saat", "4 saat - 8 saat", "14 saat - 17 saat",
+                    "21:00 - 23:00", "20:00"):
+        if zorunlu not in blok:
+            _tek_kume.append(f"{soru!r} → {zorunlu!r} yok")
+check("10c) Gece/gündüz/toplam/yatma/bitirme TEK bandın değerleri (5 yaşta da aynı)",
+      not _tek_kume, " | ".join(_tek_kume[:6]))
+
+# AYNI TABLO BANDI bağlamda iki kez yazılmamalı.
+# bant_coz geçiş döneminde iki KB bucket'ı döndürür. İkisi FARKLI tablo bandına
+# düşüyorsa iki blok DOĞRUDUR ve istenir (2.5 ay → 0-3 ay + 3-5 ay; prompt
+# "iki bandın aralığını birlikte özetle" diyor). Ama ikisi de AYNI tablo bandına
+# düşüyorsa blok tekrarlanır ve alt bant temsili yaşa göre değiştiği için aynı
+# cevapta İKİ FARKLI pencere çıkar ("1 aylık" → 45-75 ve 60-90). Ölçülen hata
+# buydu; kontrol tam olarak bunu kilitliyor.
+_ciftleme = []
+for soru, _a, _p in _SORULAR:
+    blok = chatbot.yas_bandi_blok(chatbot.bant_coz(soru)[0], chatbot.yas_ay_tespit(soru))
+    basliklar = re.findall(r"\[(.+?) bandı — Tavşan Uykusu yaş tablosu\]", blok)
+    if len(basliklar) != len(set(basliklar)):
+        _ciftleme.append(f"{soru!r} → {basliklar}")
+check("10d) AYNI tablo bandı bağlamda İKİ KEZ yazılmıyor",
+      not _ciftleme, " | ".join(_ciftleme))
+
+# Geçiş döneminde iki FARKLI bant hâlâ birlikte özetlenebilmeli (gerileme yok).
+_gecis = chatbot.yas_bandi_blok(
+    chatbot.bant_coz("2.5 aylık bebeğim ne kadar uyanık kalmalı")[0], 2.5)
+check("10e) Gerçek geçiş döneminde iki FARKLI bant birlikte özetleniyor",
+      _gecis.count("Tavşan Uykusu yaş tablosu") == 2
+      and "0-3 ay bandı" in _gecis and "3-5 ay bandı" in _gecis,
+      re.findall(r"\[(.+?) bandı", _gecis))
 
 # --- Özet --------------------------------------------------------------------
 print("\n" + "=" * 74)

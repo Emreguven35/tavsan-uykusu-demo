@@ -23,6 +23,78 @@ from engine.config import PLAN_MODEL  # plan üretici modeli (sonnet — merkezi
 MAX_TOKENS = 12288
 
 
+# ---------------------------------------------------------------------------
+# GLOBAL KURALLAR SEÇİMİ — kesme değil SEÇME (Faz P)
+# ---------------------------------------------------------------------------
+# ESKİ DAVRANIŞ: `_format_dict(param['global_rules'])[:3000]`. Bu sınır ilk
+# commit'te (2026-05-18) kondu; o gün global_rules 3.596 karakterdi ve sınır
+# kuralların %83'ünü kapsıyordu. KB o günden bu yana 9,5 katına çıktı (34.213
+# karakter) ve AYNI sınır artık %9'unu kapsıyor. Yani bir token bütçesi kararı
+# değil, sessizce içerik filtresine dönüşmüş bir sabit.
+#
+# Kesim noktası anahtar SIRASINA bağlı olduğu için hangi kuralın düştüğü de
+# rastgele: red flag'ler, başarı kriterleri, oda koşulları, rutinler, son gündüz
+# uykusu esnekliği ve ağlama/motivasyon bölümünün TAMAMI plan yazarına hiç
+# ulaşmıyordu — üstelik prompt'un kendi H kuralı "son_gunduz_uykusu_bitis
+# esnekligi"ne atıf yapıyor.
+#
+# YENİ DAVRANIŞ: plan tipine göre AÇIK SEÇİM. Üç gerekçeyle kesmekten iyi:
+#   1. Alakasız kural hiç girmiyor (yenidoğan/gelişim/atak içeriği 13 günlük
+#      plana gerekmiyor; 12 KB'lik gereksiz bağlam).
+#   2. ARŞİV kayıtları YAPISAL olarak dışarıda. Sınırı körü körüne yükseltmek
+#      arşivlenmiş 5 GÜNLÜK MERDİVENİ plan yazarına sokardı — model "5. gün
+#      yatır-çık" yazabilirdi (korpusta aynı hata Faz O3'te ölçülmüştü).
+#   3. Seçim plan tipine bağlı, BEBEĞE değil → sabit ön-eke taşınıp
+#      prompt cache'ine girebiliyor (bkz. _build_cached_content).
+#
+# Prompt'ta AYRI blok olarak zaten geçen kayıtlar buraya ALINMAZ (çiftleme):
+#   bekleme_sureleri            → "BEKLEME SÜRELERİ VE KADEMELİ UZAKLAŞMA"
+#   kademeli_uzaklasma_13_gun   → aynı blok (kademeli_uzaklasma alanı)
+#   buyuk_cocuk_24_ay_ustu      → "YAŞA ÖZEL EK BÖLÜM" (yas_ozel_notlar)
+_ORTAK_KURALLAR = (
+    "egitim_oncesi_8_madde_checklist_kayit40",
+    "yas_alt_siniri (kayıt37)",
+    "yas_giris_ve_ust_sinir (ek 2026-06-09)",
+    "prematüre_düzeltme (kayıt40)",
+    "red_flags_kayit36_37_40",
+    "gece_beslenme_genel",
+    "oda_kosullari_kayit37",
+    "beslenme_uyku_iliskisi (kayıt36, kayıt37)",
+    "rutinler_kayit37",
+    "son_gunduz_uykusu_bitis_esnekligi (ek not 2026-05-26)",
+)
+# Yalnız EĞİTİM planında anlamlı olanlar (eğitim uygun değilse yazılmıyor).
+_EGITIM_KURALLARI = (
+    "bekleme_suresi_artis_esnekligi (ek 2026-08-25)",
+    "success_criteria_kayit36_38",
+    "aglama_ve_motivasyon (kayıt21, kayıt36 + ek 2026-08-07)",
+)
+
+# Plan tipi → seçilecek global_rules anahtarları (sıra prompt'taki sıradır).
+PLAN_TIPI_KURALLARI: dict[str, tuple[str, ...]] = {
+    "13_gun_dirençli": _ORTAK_KURALLAR + _EGITIM_KURALLARI,
+    "6_gun_buyuk_cocuk": _ORTAK_KURALLAR + _EGITIM_KURALLARI,
+    "1_ay_program": _ORTAK_KURALLAR + _EGITIM_KURALLARI,
+    # Eğitim uygun değil (3-5 ay): merdiven/bekleme/motivasyon anlatılmıyor.
+    "egitim_bekleme": _ORTAK_KURALLAR,
+}
+# Bilinmeyen plan tipi → ortak kurallar (sessizce boş bırakmaktansa güvenli taban).
+VARSAYILAN_KURALLAR = _ORTAK_KURALLAR
+
+
+def secili_global_kurallar(param: dict) -> dict:
+    """Bu plan için prompt'a girecek global_rules alt kümesi (sıralı).
+
+    Eksik anahtar SESSİZCE atlanır: KB'de bir kayıt yeniden adlandırılırsa plan
+    üretimi durmamalı. Ama fazlası da girmez — liste açık ve denetlenebilir."""
+    kurallar = param.get("global_rules") or {}
+    tip = (param.get("plan_secimi") or {}).get("tip") or ""
+    if not param.get("uygun_mu", True):
+        tip = "egitim_bekleme"
+    secim = PLAN_TIPI_KURALLARI.get(tip, VARSAYILAN_KURALLAR)
+    return {k: kurallar[k] for k in secim if k in kurallar}
+
+
 def _format_dict(d: dict, indent: int = 0) -> str:
     """Profil ya da parametre sözlüğünü okunabilir biçime çevir."""
     lines = []
@@ -112,6 +184,9 @@ def _build_user_prompt(param: dict) -> str:
     bir_ay_blok = _bir_ay_program_blok(param)
     yas_ozel_blok = _yas_ozel_blok(param)
     gun_basliklari = _gun_basliklari_blok(param)
+    # Faz P: kesme yok, SEÇİM var. Blok PROFIL'den ÖNCE duruyor çünkü içeriği
+    # yalnız PLAN TİPİNE bağlı (bebeğe değil) → cache'lenen sabit ön-eke girer.
+    global_kurallar = _format_dict(secili_global_kurallar(param))
     return f"""Aşağıdaki PARAMETRELERİ kullanarak anneye yönelik bir uyku eğitimi planı yaz.
 
 KESIN KURALLAR (BUNLARI İHLAL ETME):
@@ -149,6 +224,9 @@ I) EVRENSEL KESTİRME KURALI (HER YAŞTA GEÇERLİ — MUTLAKA YAZ): Bebek yaş�
 
 J) 24 SAATLİK TOPLAM UYKU İHTİYACI (MUTLAKA YAZ): YAŞ PARAMETRELERİ'ndeki toplam_uyku_24h değeri, bebeğin gündüz + gece toplam uyku ihtiyacıdır. "Günlük Program" bölümünde bu değeri AÇIKÇA belirt ve anneye şunu anlat: bebeğin yeterince uyuyup uymadığının ölçütü tek tek uyku süreleri değil, 24 saatteki TOPLAMDIR. Gündüz ve gece toplamı bu değerin altında kalıyorsa önce gündüz uykularını (kestirme kuralıyla), sonra gece yatış saatini öne çekerek tamamlayın. Bu sayıyı YAŞ PARAMETRELERİ'nden aynen al, uydurma veya yuvarlama yapma.
 
+TAVŞAN UYKUSU GLOBAL KURALLARI (bu plan tipi için seçilenler):
+{global_kurallar}
+
 PROFIL:
 {_format_dict(param['profile_summary'])}
 
@@ -180,9 +258,6 @@ GECE BESLENMESİ:
 BEKLEME SÜRELERİ VE KADEMELİ UZAKLAŞMA:
 {_format_dict(param['bekleme_sureleri'])}
 
-GLOBAL KURALLAR:
-{_format_dict(param['global_rules'])[:3000]}
-
 PLANIN İÇERMESİ GEREKEN BÖLÜMLER:
 1. ## Bebek Profili Özeti (yaş, beslenme, mevcut destek, oda durumu, kısa özet)
 2. ## Eğitim Uygunluğu (uygunsa "Uygun", değilse sebep ve hazırlık)
@@ -206,8 +281,15 @@ Markdown ile yaz, hiçbir görsel referans yok, hiçbir ders adı geçmesin.
 
 
 # Prompt caching ayracı: user promptu PROFIL'den önce ikiye bölünür.
-# Öncesi (İlayda kuralları + üslup + KESIN KURALLAR) HER planda birebir aynıdır → cache'lenir.
-# Sonrası (bu bebeğe özel PROFIL/parametreler) değişkendir → cache'lenMEZ.
+# Öncesi (İlayda kuralları + üslup + KESIN KURALLAR + SEÇİLİ GLOBAL KURALLAR)
+# bebeğe göre DEĞİŞMEZ → cache'lenir. Sonrası (bu bebeğe özel PROFIL/parametreler)
+# değişkendir → cache'lenMEZ.
+#
+# FAZ P: global kurallar bloğu ön-eke TAŞINDI. Önceden PROFIL'den SONRA duruyordu,
+# yani her plan için yeniden faturalanıyordu — oysa içeriği her bebekte aynıydı.
+# Artık ön-ekte: aynı plan tipinden ikinci plan üretildiğinde bu bölüm cache'ten
+# okunuyor (girdi fiyatının %10'u). Ön-ek plan TİPİNE göre değişir (13 günlük /
+# eğitim bekleme) → tip başına bir cache girdisi.
 _CACHE_SPLIT_MARKER = "\n\nPROFIL:\n"
 
 

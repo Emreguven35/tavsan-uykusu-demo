@@ -430,12 +430,21 @@ def yas_bandi_blok(bantlar: list[str], yas_ay: float | None = None) -> str:
 
     satirlar: list[str] = []
     tablo_bulundu = False
+    # FAZ P: aynı TABLO bandı iki kez yazılmasın.
+    # bant_coz geçiş dönemlerinde iki KB bucket'ı döndürüyor ("1 aylık" →
+    # 0-6_hafta + 7-12_hafta). İkisi FARKLI tablo bandına düşüyorsa (5.8 ay:
+    # 3-5 ay + 6-8 ay) iki blok DOĞRUDUR. Ama ikisi de AYNI tablo bandına
+    # düşüyorsa (0-3 ay) blok iki kez yazılıyor ve — alt bant çözümü temsili
+    # yaşa göre değiştiği için — aynı cevapta İKİ FARKLI pencere çıkıyordu
+    # ("1 aylık": 45-75 dk ve 60-90 dk). Tam da Faz P'nin kapattığı hata sınıfı.
+    yazilan_tablo_bantlari: set[str] = set()
     for band in bantlar:
         baslik = _humanize(band)
         bant_satirlari: list[str] = []
         # Bu bant tablodan çözülebildi mi? BANT BAŞINA tutulur: bir bant tablodan
         # gelirken diğerinin KB alanları yanlışlıkla elenmesin.
         bu_bant_tablodan = False
+        cozulmus: dict | None = None      # tablo okunamazsa None kalır (aşağıda kullanılıyor)
 
         # 1) Tablo (birincil sayısal kaynak)
         ay = _tablo_bant_ay(band, yas_ay)
@@ -443,6 +452,9 @@ def yas_bandi_blok(bantlar: list[str], yas_ay: float | None = None) -> str:
             try:
                 from engine import yas_bantlari
                 cozulmus = yas_bantlari.yas_bandi_getir(ay)
+                if cozulmus["id"] in yazilan_tablo_bantlari:
+                    continue          # bu tablo bandı zaten yazıldı (geçiş dönemi)
+                yazilan_tablo_bantlari.add(cozulmus["id"])
                 bant_satirlari.append(f"[{cozulmus['ad']} bandı — Tavşan Uykusu yaş tablosu]")
                 bant_satirlari += yas_bantlari.bant_ozet_satirlari(cozulmus)
                 if cozulmus.get("tek_uykuya_gecis_sartlari"):
@@ -465,8 +477,18 @@ def yas_bandi_blok(bantlar: list[str], yas_ay: float | None = None) -> str:
             bant_satirlari.append(f"[{baslik} bandı]")
 
         # 2) KB'den tamamlayıcı alanlar (tabloda olmayanlar)
+        # Faz P: kapsam artık BANTA GÖRE hesaplanıyor. 0-3 ay bandı yatma vakti
+        # ve gündüz uykusunu bitirme saatini de tablodan veriyor; KB'den tekrar
+        # yazılırsa aynı cevapta iki farklı sayı kümesi çıkar (çözülen hata).
+        kapsam = _TABLO_KAPSAMINDAKI_ALANLAR
+        if bu_bant_tablodan and cozulmus is not None:
+            try:
+                from engine import yas_bantlari as _yb
+                kapsam = _yb.tablo_kapsamindaki_kb_alanlari(cozulmus)
+            except Exception:                        # eski tablo → statik kapsam
+                pass
         for alan, etiket in YAS_PARAM_ETIKET.items():
-            if bu_bant_tablodan and alan in _TABLO_KAPSAMINDAKI_ALANLAR:
+            if bu_bant_tablodan and alan in kapsam:
                 continue
             bulunan = _param_deger(buckets, band, alan) if buckets else None
             if bulunan is None:
@@ -694,11 +716,22 @@ def build_corpus() -> list[dict]:
         })
 
     # 3) yaş bucket'ları — yalnızca AÇIKLAYICI metin alanları (sayısal tablolar HARİÇ)
+    #
+    # ARŞİV KURALI (Faz P): anahtarında "ARSIV" geçen bucket ALANLARI korpusa
+    # GİRMEZ — global_rules'daki kuralın aynısı. Somut vaka: 0-3 ay yaş tablosu
+    # tekleştirildiğinde (yas_bantlari.json master oldu) KB'deki 0-6_hafta,
+    # 7-12_hafta ve 3_ay bucket'larının sayısal alanları çakışır hâle geldi;
+    # silinmeyip ARSIV_ önekiyle işaretlendiler. Retrieval onları getirirse
+    # aynı cevapta iki farklı sayı kümesi çıkar — kapatılan hata tam olarak budur.
     for band, bucket in kb.get("yas_buckets", {}).items():
         if not isinstance(bucket, dict):
             continue
+        if "ARSIV" in band.upper():
+            continue
         band_h = _humanize(band)
         for fk, fv in bucket.items():
+            if "ARSIV" in fk.upper():
+                continue
             if _is_descriptive_text(fv):
                 label = f"{band_h} — {_humanize(fk)}"
                 units.append({

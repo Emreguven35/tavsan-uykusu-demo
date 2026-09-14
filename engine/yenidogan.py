@@ -48,7 +48,9 @@ class YenidoganHatasi(RuntimeError):
 # =============================================================================
 def _bolum() -> dict:
     bolum = yas_bantlari.tablo().get("yenidogan_ritim")
-    if not isinstance(bolum, dict) or not bolum.get("alt_bantlar"):
+    # Faz P: alt_bantlar artık bu bölümde DEĞİL, 0-3 ay bandının içinde.
+    # Bölümün geçerliliği niteliksel içerikten (uyku sinyalleri) anlaşılır.
+    if not isinstance(bolum, dict) or not bolum.get("uyku_sinyalleri"):
         raise YenidoganHatasi(
             "data/yas_bantlari.json içinde 'yenidogan_ritim' bölümü yok/bozuk")
     return bolum
@@ -71,7 +73,16 @@ def yenidogan_mi(ay: float) -> bool:
 
 
 def alt_bantlar() -> list[dict]:
-    return [dict(b) for b in _bolum()["alt_bantlar"]]
+    """Yenidoğan alt bantları — TEK KAYNAK: 0-3 ay bandının içi (Faz P).
+
+    Önceden bu liste yenidogan_ritim altında AYRI duruyordu ve `bantlar`
+    listesindeki 0-2_ay bandıyla çakışıyordu (40-80 dk vs 30-60/45-75/60-90);
+    canlı cevapta iki küme yan yana çıkıyordu. Artık tek yerde."""
+    bantlar = yas_bantlari.alt_bantlar()
+    if not bantlar:
+        raise YenidoganHatasi(
+            "yas_bantlari.json > bantlar > 0-2_ay > alt_bantlar bulunamadı")
+    return bantlar
 
 
 def alt_bant(ay: float) -> dict:

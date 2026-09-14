@@ -9,66 +9,68 @@
   },
   "yas_buckets": {
     "0-6_hafta": {
-      "uyaniklik_penceresi": {
+      "ARSIV_uyaniklik_penceresi": {
         "from_visual_yas_tablosu": "45-60 Dakika",
         "from_visual_master_tablo (0-2 ay)": "40 Dakika - 1 Saat 20 Dakika",
         "from_audio_decision_tree": "yok",
         "RESMI_DEGER_genel_kullanim": "40-60 Dakika"
       },
-      "uyku_sayisi": {
+      "ARSIV_uyku_sayisi": {
         "from_visual": "4-6 ve üzeri",
         "RESMI_DEGER": "4-6+"
       },
-      "yatma_vakti": "21:00 - 23:00",
-      "toplam_uyku_24h": "14-17 Saat",
-      "gunduz_uyku_total": "4 - 8 Saat",
-      "gunduz_uyku_bitirme": "20:00",
-      "gece_uyku": "9-12 Saat",
+      "ARSIV_yatma_vakti": "21:00 - 23:00",
+      "ARSIV_toplam_uyku_24h": "14-17 Saat",
+      "ARSIV_gunduz_uyku_total": "4 - 8 Saat",
+      "ARSIV_gunduz_uyku_bitirme": "20:00",
+      "ARSIV_gece_uyku": "9-12 Saat",
       "egitim_uygunlugu": false,
       "egitim_uygunlugu_aciklama": "Eğitim 5+ ay (kademeli kavram gelişimi) sonrası verilir. Bu yaşta sadece saat planlaması yapılır.",
       "ilgili_dersler": [],
       "ilgili_gorseller": [
         "01_yas_tablolari/00_06_haftalik.jpeg",
         "02_ozet_master_tablolar/MASTER_TABLO_yasa_gore.jpeg"
-      ]
+      ],
+      "_ARSIV_NOTU": "ARŞİV (Faz P, 2026-09-14): bu değer data/yas_bantlari.json > bantlar > 0-2_ay bandına taşındı ve tablo TEK KAYNAK oldu. Burada tarihsel referans olarak duruyor; korpusa GİRMEZ ve chat bağlamına yazılmaz."
     },
     "7-12_hafta": {
-      "uyaniklik_penceresi": {
+      "ARSIV_uyaniklik_penceresi": {
         "from_visual_yas_tablosu": "60-90 Dakika",
         "from_visual_master_tablo (0-2 ay)": "40 Dakika - 1 Saat 20 Dakika",
         "RESMI_DEGER_genel_kullanim": "60-90 Dakika"
       },
-      "uyku_sayisi": {
+      "ARSIV_uyku_sayisi": {
         "from_visual": "4 ve üzeri",
         "RESMI_DEGER": "4+"
       },
-      "yatma_vakti": "19:00 - 22:00",
-      "toplam_uyku_24h": "14-17 Saat",
-      "gunduz_uyku_total": "4 - 7 Saat",
-      "gunduz_uyku_bitirme": "20:00",
-      "gece_uyku": "9-12 Saat",
+      "ARSIV_yatma_vakti": "19:00 - 22:00",
+      "ARSIV_toplam_uyku_24h": "14-17 Saat",
+      "ARSIV_gunduz_uyku_total": "4 - 7 Saat",
+      "ARSIV_gunduz_uyku_bitirme": "20:00",
+      "ARSIV_gece_uyku": "9-12 Saat",
       "egitim_uygunlugu": false,
       "ilgili_dersler": [],
       "ilgili_gorseller": [
         "01_yas_tablolari/07_12_haftalik.jpeg"
-      ]
+      ],
+      "_ARSIV_NOTU": "ARŞİV (Faz P, 2026-09-14): bu değer data/yas_bantlari.json > bantlar > 0-2_ay bandına taşındı ve tablo TEK KAYNAK oldu. Burada tarihsel referans olarak duruyor; korpusa GİRMEZ ve chat bağlamına yazılmaz."
     },
     "3_ay": {
-      "uyaniklik_penceresi": {
+      "ARSIV_uyaniklik_penceresi": {
         "from_visual_yas_tablosu": "90 Dakika",
         "from_visual_master_tablo (3-5 ay)": "1 Saat 30 Dakika - 2 Saat 15 Dakika",
         "from_audio (kayıt47, 3-5 ay aralığı)": "1.5 - 2.25 Saat",
         "RESMI_DEGER_genel_kullanim": "90 Dakika"
       },
-      "uyku_sayisi": {
+      "ARSIV_uyku_sayisi": {
         "from_visual": "3-5",
         "RESMI_DEGER": "3-5"
       },
-      "yatma_vakti": "19:00 - 22:00",
-      "toplam_uyku_24h": "14-17 Saat",
-      "gunduz_uyku_total": "4-7 Saat",
-      "gunduz_uyku_bitirme": "17:30 - 20:30",
-      "gece_uyku": "10-12 Saat",
+      "ARSIV_yatma_vakti": "19:00 - 22:00",
+      "ARSIV_toplam_uyku_24h": "14-17 Saat",
+      "ARSIV_gunduz_uyku_total": "4-7 Saat",
+      "ARSIV_gunduz_uyku_bitirme": "17:30 - 20:30",
+      "ARSIV_gece_uyku": "10-12 Saat",
       "egitim_uygunlugu": false,
       "egitim_uygunlugu_aciklama": "Eğitim ALMAZ. Saat planlaması yapılabilir.",
       "if_min_total_uyku_not_filled": "+30 dakika kestirme uyku ZORUNLU (kayıt47)",
@@ -77,7 +79,8 @@
       ],
       "ilgili_gorseller": [
         "01_yas_tablolari/03_aylik.jpeg"
-      ]
+      ],
+      "_ARSIV_NOTU": "ARŞİV (Faz P, 2026-09-14): bu değer data/yas_bantlari.json > bantlar > 0-2_ay bandına taşındı ve tablo TEK KAYNAK oldu. Burada tarihsel referans olarak duruyor; korpusa GİRMEZ ve chat bağlamına yazılmaz."
     },
     "4_ay": {
       "uyaniklik_penceresi": {
@@ -715,7 +718,7 @@
       "kaynak_2": "İlayda yeni 0-6 hafta tablosu (2026-09-14): uyanıklık 45-60 dk, gece 9-12 saat, gündüz 4-8 saat, yatma vakti 21:00-23:00, gündüz uykusunu bitirme 20:00",
       "kaynak_3": "İlayda yenidoğan ritim rehberi alt bantları (2026-09-14): 0-1 ay 30-60 dk, 1-2 ay 45-75 dk, 2-3 ay 60-90 dk — üç değer de 0-2_ay bandının 40-80 dk aralığıyla birebir örtüşmüyor",
       "fark": "Üç kaynak da farklı. Yeni tablo KB'nin yas_buckets['0-6_hafta'] değerleriyle örtüşüyor (görsel yaş tablosu); yas_bantlari.json ise MASTER tablodan geliyor ve Faz Y'de bilinçli olarak onun üstüne yazıyor. Yani çakışma YENİ DEĞİL, yeni tablo eski görsel tabloyu teyit ediyor. Yatma vakti ve gündüz uykusunu bitirme saati ise yas_bantlari.json'da HİÇ YOK — yeni alan.",
-      "karar": "BEKLEMEDE — İlayda'ya soruldu (2026-09-14). Karar gelene kadar yas_bantlari.json DEĞİŞTİRİLMEDİ; motor 0-2_ay bandını (40-80 dk, 8-10 saat, 5-7 saat) kullanmaya devam ediyor. Yenidoğan ritim rehberi ise İlayda'nın açıkça verdiği alt bant pencerelerini (30-60/45-75/60-90) kullanır — rehber katı program üretmediği için iki değer kümesi çakışmadan yan yana durabiliyor."
+      "karar": "KAPANDI (Faz P, 2026-09-14). data/yas_bantlari.json TEK MASTER yapıldı. 0-2_ay bandı '0-3 ay' olarak yeniden etiketlendi; yenidoğan alt bantları (0-1 ay 30-60 dk, 1-2 ay 45-75 dk, 2-3 ay 60-90 dk) bandın İÇİNE alındı ve yas_bandi_getir yaşa göre doğru alt bandı çözüyor. Görsel 0-6 hafta tablosunun diğer değerleri de banda yazıldı: 24 saat toplam 14-17 saat, gece 9-12 saat, gündüz 4-8 saat, uyku sayısı 4-6+, yatma vakti 21:00-23:00, gündüz uykusunu bitirme 20:00. Eski MASTER değerleri (40-80 dk / 8-10 saat / 5-7 saat / 4-5 uyku / 15-18 saat) ARTIK GEÇERSİZ. KB yas_buckets'taki aynı alanlar ARSIV_ önekiyle işaretlendi ve korpustan çıkarıldı."
     }
   ],
   "premium_plan_engine_decision_logic": {

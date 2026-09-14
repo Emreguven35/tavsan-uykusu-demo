@@ -83,9 +83,17 @@ check("1e) Bant alt sınırları kendi bandına düşer (çakışma yok)",
 # =============================================================================
 # 2) İLAYDA TABLOSU — bant bant birebir doğrulama
 # =============================================================================
-# İlayda'nın RESMİ tablosu (v1.1). (ay, ww, uyku_sayisi, gunduz_toplam, gece, toplam)
+# İlayda'nın RESMİ tablosu (v1.3). (ay, ww, uyku_sayisi, gunduz_toplam, gece, toplam)
+#
+# FAZ P: 0-3 ay bandı TEKLEŞTİRİLDİ. Önceki değerler (40-80 dk / 4-5 uyku /
+# 5-7 saat gündüz / 8-10 saat gece / 15-18 saat toplam) MASTER tablodan
+# geliyordu ve görsel 0-6 hafta tablosuyla çakışıyordu; canlı cevapta iki küme
+# yan yana çıkıyordu. Artık tek kaynak: görsel tablonun değerleri banda yazıldı
+# ve pencere ay ay ALT BANTLARDAN çözülüyor (aşağıda madde 2b).
+# Bant düzeyindeki pencere alt bantların ZARFIDIR [30, 90]; 1 aylık bebek için
+# yas_bandi_getir(1) 1-2 ay alt bandını (45-75) döndürür — 2b bunu kilitliyor.
 BEKLENEN = [
-    (1,  [40, 80],    [4, 5], [300, 420],  [480, 600], [900, 1080]),  # 0-2 ay  15-18s
+    (0,  [30, 60],    [4, 6], [240, 480],  [540, 720], [840, 1020]),  # 0-3 ay (0-1 alt bandı) 14-17s
     (4,  [90, 135],   [3, 4], [240, 300],  [600, 660], [840, 960]),   # 3-5 ay  14-16s
     (7,  [120, 180],  [3, 3], [180, 240],  [600, 660], [840, 840]),   # 6-8 ay  14s
     (10, [180, 240],  [2, 2], [120, 180],  [600, 720], [840, 840]),   # 9-12 ay 14s
@@ -103,6 +111,50 @@ for ay, ww, n, gunduz, gece, toplam in BEKLENEN:
         _hatalar.append(f"{ay} ay ({b['id']}): {got} != {(ww, n, gunduz, gece, toplam)}")
 check("2) Tüm bantların değerleri İlayda RESMİ tablosuyla birebir aynı",
       not _hatalar, str(_hatalar))
+
+# --- 2b) FAZ P: 0-3 ay TEK KAYNAK — alt bant çözümü --------------------------
+# Çakışmanın kökü: pencere üç ayrı yerde yazılıydı (tablo 40-80, KB bucket
+# 45-60, rehber 30-60/45-75/60-90). Artık TEK yer: bandın içindeki alt_bantlar.
+_ALT_BEKLENEN = {0.0: [30, 60], 0.9: [30, 60], 1.0: [45, 75], 1.9: [45, 75],
+                 2.0: [60, 90], 2.9: [60, 90]}
+_alt_hata = [f"{ay} ay → {yb.yas_bandi_getir(ay)['uyaniklik_penceresi_dk']} != {bek}"
+             for ay, bek in _ALT_BEKLENEN.items()
+             if yb.yas_bandi_getir(ay)["uyaniklik_penceresi_dk"] != bek]
+check("2b) 0-3 ayda pencere ALT BANTTAN çözülüyor (30-60 / 45-75 / 60-90)",
+      not _alt_hata, str(_alt_hata))
+
+check("2c) Alt bant kimliği çözülmüş banda taşınıyor (chat 'hangi alt bant' diyebilsin)",
+      yb.yas_bandi_getir(1.5).get("alt_bant", {}).get("ad") == "1-2 ay",
+      str(yb.yas_bandi_getir(1.5).get("alt_bant")))
+
+check("2d) 3 ay ve üstünde alt bant YOK (yalnız 0-3 ay bandında var)",
+      yb.yas_bandi_getir(4).get("alt_bant") is None
+      and yb.yas_bandi_getir(8).get("alt_bant") is None, "")
+
+# Yatma vakti ve gündüz bitirme artık TABLODA (önceden yalnız KB bucket'ındaydı).
+_b03 = yb.yas_bandi_getir(1)
+check("2e) Yatma vakti ve gündüz uykusunu bitirme saati TABLODA (0-3 ay)",
+      _b03.get("yatma_vakti_dk") == [1260, 1380]
+      and _b03.get("gunduz_uyku_bitirme_dk") == 1200,
+      f"{_b03.get('yatma_vakti_dk')} / {_b03.get('gunduz_uyku_bitirme_dk')}")
+
+# Bant düzeyindeki değer alt bantların ZARFI olmalı — aksi halde "0-3 ay için
+# 40-80 dakika" gibi hiçbir alt banda uymayan bir sayı geri gelir.
+_ham03 = next(x for x in yb.tablo()["bantlar"] if x["id"] == "0-2_ay")
+_alt_hepsi = [a["uyaniklik_penceresi_dk"] for a in _ham03["alt_bantlar"]]
+check("2f) Bant düzeyindeki pencere alt bantların ZARFI",
+      _ham03["uyaniklik_penceresi_dk"] == [min(a[0] for a in _alt_hepsi),
+                                           max(a[1] for a in _alt_hepsi)],
+      f"{_ham03['uyaniklik_penceresi_dk']} vs {_alt_hepsi}")
+
+# ESKİ DEĞERLER GERİ GELMESİN (regresyon alarmı).
+_eski = ([40, 80], [4, 5], [300, 420], [480, 600], [900, 1080])
+_simdi = (_ham03["uyaniklik_penceresi_dk"], _ham03["gunduz_uyku_sayisi"],
+          _ham03["gunduz_uyku_toplam_dk"], _ham03["gece_uykusu_dk"],
+          _ham03["toplam_gunluk_uyku_dk"])
+check("2g) Eski (çakışan) MASTER değerleri geri gelmedi",
+      _simdi != _eski, str(_simdi))
+
 
 # v1.1 düzeltmeleri tek tek (regresyon olursa hangisi bozuldu görülsün).
 check("2a1) 3-5 ay gündüz uykusu ARALIK: 4-5 saat (eskiden 'min 4 saat')",

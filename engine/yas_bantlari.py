@@ -123,6 +123,30 @@ def _pencere_devral(b: dict) -> tuple[list[int], str | None]:
 DEFAULT_PENCERE = (120, 180)
 
 
+def alt_bantlar(bant_id: str = "0-2_ay") -> list[dict]:
+    """Bir bandın alt bantları (yoksa boş). 0-3 ay dışında kullanılmıyor.
+
+    TEK KAYNAK: alt bantlar yas_bantlari.json > bantlar > <id> > alt_bantlar
+    altındadır. engine/yenidogan da buradan okur; ikinci bir kopya YOKTUR."""
+    b = next((x for x in _tablo()["bantlar"] if x["id"] == bant_id), None)
+    return [dict(a) for a in ((b or {}).get("alt_bantlar") or [])]
+
+
+def _alt_bant_sec(b: dict, ay: float) -> dict | None:
+    """Yaşa karşılık gelen alt bant (yarı açık: [ay_min, ay_max)). Yoksa None.
+
+    Üst sınırı aşan yaş SON alt banda düşer — bant zaten yaşı kapsıyorsa
+    (ör. 2.99 ay) sınır yuvarlamasından dolayı boş dönmemeli."""
+    alt = b.get("alt_bantlar") or []
+    if not alt:
+        return None
+    ay = max(0.0, float(ay))
+    for a in alt:
+        if a["ay_min"] <= ay < a["ay_max"]:
+            return a
+    return alt[-1] if ay >= alt[-1]["ay_max"] else alt[0]
+
+
 def yas_bandi_getir(ay: float, tek_uyku: bool | None = None) -> dict:
     """`ay` aylık bebeğin ÇÖZÜLMÜŞ yaş bandı. Sayısal alanların hepsi doludur.
 
@@ -153,6 +177,21 @@ def yas_bandi_getir(ay: float, tek_uyku: bool | None = None) -> dict:
     if not ww:
         ww, ww_kaynak = _pencere_devral(b)
 
+    # FAZ P — ALT BANT ÇÖZÜMÜ (tek kaynak):
+    # 0-3 ay bandında pencere ay ay değişir (0-1 ay 30-60, 1-2 ay 45-75,
+    # 2-3 ay 60-90). Band düzeyindeki değer bunların ZARFIDIR [30, 90] ve tek
+    # başına kullanılırsa 1 aylık bebeğe 90 dakika denebilir. Bu yüzden bant
+    # çözülürken yaşa karşılık gelen ALT BANDIN penceresi üste yazılır.
+    #
+    # NEDEN BURADA: yas_bandi_getir plan motorunun, çizelge kurucusunun, chat
+    # bağlamının ve yenidoğan rehberinin ORTAK giriş noktası. Çözüm burada
+    # yapılınca dördü de aynı sayıyı görür — Faz P'nin çözdüğü çakışma
+    # ("45-75 dakika … gece 8-10 saat") tam olarak iki ayrı kaynağın yan yana
+    # gelmesiydi.
+    alt = _alt_bant_sec(b, ay)
+    if alt is not None and alt.get("uyaniklik_penceresi_dk"):
+        ww = alt["uyaniklik_penceresi_dk"]
+
     cozulmus: dict[str, Any] = {
         "id": b["id"],
         "ad": varyant_veri.get("ad") or b["ad"],
@@ -171,6 +210,17 @@ def yas_bandi_getir(ay: float, tek_uyku: bool | None = None) -> dict:
         "notlar": list(b.get("notlar") or []),
         "kestirme_protokolu": kestirme_protokolu(),
     }
+    # Alt bant çözüldüyse kimliği taşınır (mobil/chat "0-1 ay" diyebilsin).
+    if alt is not None:
+        cozulmus["alt_bant"] = dict(alt)
+    # Faz P: yatma vakti ve gündüz uykusunu bitirme saati artık TABLODA.
+    # Önceden yalnız KB bucket'ında vardı ve tabloyla çakışabiliyordu.
+    if b.get("yatma_vakti_dk"):
+        cozulmus["yatma_vakti_dk"] = list(b["yatma_vakti_dk"])
+    if b.get("gunduz_uyku_bitirme_dk") is not None:
+        cozulmus["gunduz_uyku_bitirme_dk"] = int(b["gunduz_uyku_bitirme_dk"])
+    if b.get("gunduz_uyku_sayisi_ust_acik"):
+        cozulmus["gunduz_uyku_sayisi_ust_acik"] = True
     if b.get("tek_uykuya_gecis_sartlari"):
         cozulmus["tek_uykuya_gecis_sartlari"] = b["tek_uykuya_gecis_sartlari"]
         cozulmus["varsayilan_varyant"] = b.get("varsayilan_varyant")
@@ -443,9 +493,16 @@ def bant_ozet_satirlari(bant: dict) -> list[str]:
     ww_not = ""
     if bant.get("uyaniklik_penceresi_kaynak"):
         ww_not = f"  (komşu bandan devralındı: {bant['uyaniklik_penceresi_kaynak']})"
+    elif bant.get("alt_bant"):
+        # 0-3 ayda pencere ay ay değişir; hangi alt banttan geldiği söylenmezse
+        # anne "0-3 ay için 45-75 dakika" diye genelliyor (ölçüldü).
+        ww_not = f"  ({bant['alt_bant']['ad']} alt bandı)"
+    sayi = _sayi_aralik(bant["gunduz_uyku_sayisi"], bant["gunduz_uyku_sayisi_sabit"])
+    if bant.get("gunduz_uyku_sayisi_ust_acik"):
+        sayi += " (üstüne de çıkabilir)"
     satirlar = [
         f"- Uyanıklık penceresi: {_aralik(bant['uyaniklik_penceresi_dk'])}{ww_not}",
-        f"- Gündüz uyku sayısı: {_sayi_aralik(bant['gunduz_uyku_sayisi'], bant['gunduz_uyku_sayisi_sabit'])}",
+        f"- Gündüz uyku sayısı: {sayi}",
         f"- Gündüz toplam uyku: {_aralik(bant['gunduz_uyku_toplam_dk'])}",
         f"- Gece uykusu: {_aralik(bant['gece_uykusu_dk'])}",
     ]
@@ -453,8 +510,35 @@ def bant_ozet_satirlari(bant: dict) -> list[str]:
     if toplam[0]:
         satirlar.append(
             f"- 24 saatlik TOPLAM uyku ihtiyacı (gündüz + gece): {_aralik(toplam)}")
+    # Faz P: bu iki alan artık TABLODA (0-3 ay bandı). Tabloda varsa buradan
+    # verilir ve chatbot KB bucket'ından TEKRAR yazmaz (_TABLO_KAPSAMINDAKI_ALANLAR).
+    if bant.get("yatma_vakti_dk"):
+        lo, hi = bant["yatma_vakti_dk"]
+        satirlar.append(f"- Yatma vakti: {_saat(lo)} - {_saat(hi)}")
+    if bant.get("gunduz_uyku_bitirme_dk") is not None:
+        satirlar.append(
+            f"- Gündüz uykusunu bitirme saati: {_saat(bant['gunduz_uyku_bitirme_dk'])}")
     satirlar += [f"- {n}" for n in bant.get("notlar", [])]
     return satirlar
+
+
+def _saat(dk: int) -> str:
+    """1260 → '21:00' (gün başından itibaren dakika → duvar saati)."""
+    return f"{int(dk) // 60 % 24:02d}:{int(dk) % 60:02d}"
+
+
+def tablo_kapsamindaki_kb_alanlari(bant: dict) -> set[str]:
+    """Bu bant için tablonun ZATEN verdiği KB bucket alan adları.
+
+    chatbot.yas_bandi_blok bunları KB'den TEKRAR yazmaz — Faz P'nin çözdüğü
+    çakışmanın (aynı cevapta iki farklı sayı kümesi) geri gelme yolu budur."""
+    alanlar = {"uyaniklik_penceresi", "uyku_sayisi", "gunduz_uyku_total",
+               "gece_uyku", "toplam_uyku_24h"}
+    if bant.get("yatma_vakti_dk"):
+        alanlar.add("yatma_vakti")
+    if bant.get("gunduz_uyku_bitirme_dk") is not None:
+        alanlar.add("gunduz_uyku_bitirme")
+    return alanlar
 
 
 def bant_metni(bant_tanimi: dict, varyant: str | None = None) -> tuple[str, str]:
@@ -478,6 +562,23 @@ def bant_metinleri() -> list[dict]:
     birimler: list[dict] = []
 
     for b in _tablo()["bantlar"]:
+        # FAZ P: alt bantlı bantta (0-3 ay) HER ALT BANT ayrı birim olur.
+        # Tek birim üretilseydi metnin başlığı bandın ay_min'ine (0 ay) göre
+        # çözülür ve "1 aylık bebeğim ne kadar uyanık kalmalı" sorusu 0-1 ay
+        # penceresini getirirdi. Ayrı birimler retrieval'ın doğru alt bandı
+        # bulmasını sağlar; sayılar yine TEK kaynaktan (bu tablodan) geliyor.
+        if b.get("alt_bantlar"):
+            for a in b["alt_bantlar"]:
+                orta = (a["ay_min"] + a["ay_max"]) / 2
+                cozulmus = yas_bandi_getir(orta)
+                baslik = f"{a['ad']} uyku tablosu ({b['ad']} bandı içinde)"
+                govde = "\n".join(bant_ozet_satirlari(cozulmus))
+                birimler.append({
+                    "chunk_id": f"yas_bandi:{b['id']}.{a['id']}",
+                    "label": baslik,
+                    "text": f"{baslik} — {a['ad']} bebekler için:\n{govde}",
+                })
+            continue
         varyantlar = list((b.get("varyantlar") or {}).keys()) or [None]
         for v in varyantlar:
             baslik, metin = bant_metni(b, v)

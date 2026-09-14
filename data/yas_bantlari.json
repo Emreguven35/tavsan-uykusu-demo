@@ -1,8 +1,9 @@
 {
-  "version": "1.2",
+  "version": "1.3",
   "guncelleme": "2026-09-14",
   "kaynak": "RESMİ yaş bandı tablosu (Faz Y). Plan motorunun TEK sayısal kaynağıdır.",
   "surum_notlari": {
+    "1.3": "0-3 ay TEK KAYNAK (Faz P). 0-2_ay bandı 0-3 ay olarak yeniden etiketlendi ve yenidoğan alt bantları (0-1 ay 30-60 dk, 1-2 ay 45-75 dk, 2-3 ay 60-90 dk) BANDIN İÇİNE alındı; yas_bandi_getir artık yaşa göre doğru alt bandın penceresini çözüyor. Görsel 0-6 hafta tablosunun diğer değerleri de bu banda yazıldı: 24 saat toplam 14-17 saat, gece 9-12 saat, gündüz 4-8 saat, uyku sayısı 4-6+, yatma vakti 21:00-23:00, gündüz uykusunu bitirme 20:00. ÖNCEKİ DEĞERLER (40-80 dk / 8-10 saat / 5-7 saat / 4-5 uyku / 15-18 saat) ARTIK GEÇERSİZ. KB yas_buckets 0-6_hafta, 7-12_hafta ve 3_ay kayıtlarındaki çakışan sayısal alanlar ARŞİVLENDİ.",
     "1.2": "0-3 ay YENİDOĞAN RİTİM REHBERİ'nin sayısal kaynağı eklendi (yenidogan_ritim): ay ay uyanıklık penceresi, uyku sinyalleri, mini rutin sırası, gece/gündüz ayrımı, güvenli uyku kuralları ve atak haftaları tablosu. Bu yaşta uyku EĞİTİMİ üretilmez, katı çizelge kurulmaz. `bantlar` listesi ve 0-2_ay bandının değerleri DEĞİŞMEDİ — yeni tabloyla çakışan değerler onay beklediği için korundu (bkz. master_knowledge_base.json > tutarsizlik_raporu).",
     "1.1": "Tavşan Uykusu yönteminin resmi tablosu: 3-5 ay gündüz 4-5 saat (üst sınır eklendi), 9-12 ay gündüz 2-3 saat (üst sınır eklendi), 18-24 ay uyanıklık penceresi 5-6 saat (artık devralınmıyor, tabloda verildi), her banda toplam_gunluk_uyku_dk (gündüz+gece) eklendi.",
     "1.0": "İlk sürüm."
@@ -35,30 +36,7 @@
   "yenidogan_ritim": {
     "aciklama": "0-3 ay YENİDOĞAN RİTİM REHBERİ'nin TEK sayısal kaynağı. Bu yaşta katı uyku programı ve yapılandırılmış uyku eğitimi UYGULANMAZ; buradaki pencereler saat çizelgesi kurmak için DEĞİL, anneye 'bebeğim ne kadar uyanık kalabilir' çerçevesi vermek içindir. Belirleyici olan uyku sinyalleridir.",
     "ust_sinir_ay": 3,
-    "not_bantlar_ile_iliski": "Bu alt bantlar `bantlar` listesindeki 0-2_ay bandının YERİNE GEÇMEZ. 0-2_ay bandı (uyanıklık 40-80 dk) plan motorunun çizelge kurucusu için geçerli olmaya devam eder; alt bantlar yalnız yenidoğan rehberinde kullanılır. İki kümenin çakışması master_knowledge_base.json > tutarsizlik_raporu'na kaydedildi ve karar beklemektedir.",
-    "alt_bantlar": [
-      {
-        "id": "0-1_ay",
-        "ad": "0-1 ay",
-        "ay_min": 0,
-        "ay_max": 1,
-        "uyaniklik_penceresi_dk": [30, 60]
-      },
-      {
-        "id": "1-2_ay",
-        "ad": "1-2 ay",
-        "ay_min": 1,
-        "ay_max": 2,
-        "uyaniklik_penceresi_dk": [45, 75]
-      },
-      {
-        "id": "2-3_ay",
-        "ad": "2-3 ay",
-        "ay_min": 2,
-        "ay_max": 3,
-        "uyaniklik_penceresi_dk": [60, 90]
-      }
-    ],
+    "not_bantlar_ile_iliski": "TEK KAYNAK (Faz P, 2026-09-14): alt bantlar artık `bantlar` listesindeki 0-2_ay bandının İÇİNDEDİR (bantlar[0].alt_bantlar) ve buradan KALDIRILMIŞTIR. engine/yenidogan onları banttan okur; yas_bandi_getir de yaşa göre doğru alt bandın penceresini çözer. Böylece rehber, çizelge kurucusu ve chat bağlamı aynı sayıyı kullanır — eski çakışma (40-80 dk vs 30-60/45-75/60-90) kapandı.",
     "mini_rutin_dk": [5, 10],
     "ritim_sabitleme_hafta": [6, 8],
     "uyku_sinyalleri": [
@@ -163,17 +141,28 @@
   "bantlar": [
     {
       "id": "0-2_ay",
-      "ad": "0-2 ay",
+      "ad": "0-3 ay",
       "ay_min": 0,
       "ay_max": 3,
-      "uyaniklik_penceresi_dk": [40, 80],
-      "gunduz_uyku_sayisi": [4, 5],
+      "uyaniklik_penceresi_dk": [30, 90],
+      "uyaniklik_penceresi_not": "Bant düzeyindeki bu aralık alt bantların ZARFIDIR. Bir bebeğin gerçek penceresi alt_bantlar'dan çözülür (yas_bandi_getir yaşa göre otomatik seçer); zarf yalnız bant genelini özetler.",
+      "alt_bantlar": [
+        {"id": "0-1_ay", "ad": "0-1 ay", "ay_min": 0, "ay_max": 1, "uyaniklik_penceresi_dk": [30, 60]},
+        {"id": "1-2_ay", "ad": "1-2 ay", "ay_min": 1, "ay_max": 2, "uyaniklik_penceresi_dk": [45, 75]},
+        {"id": "2-3_ay", "ad": "2-3 ay", "ay_min": 2, "ay_max": 3, "uyaniklik_penceresi_dk": [60, 90]}
+      ],
+      "gunduz_uyku_sayisi": [4, 6],
       "gunduz_uyku_sayisi_sabit": false,
-      "gunduz_uyku_toplam_dk": [300, 420],
-      "gece_uykusu_dk": [480, 600],
-      "toplam_gunluk_uyku_dk": [900, 1080],
+      "gunduz_uyku_sayisi_ust_acik": true,
+      "gunduz_uyku_toplam_dk": [240, 480],
+      "gece_uykusu_dk": [540, 720],
+      "toplam_gunluk_uyku_dk": [840, 1020],
+      "yatma_vakti_dk": [1260, 1380],
+      "gunduz_uyku_bitirme_dk": 1200,
       "notlar": [
-        "Uyanıklık penceresi 40 dakika ile 1 saat 20 dakika arasındadır."
+        "Uyanıklık penceresi ay ay değişir: 0-1 ayda 30-60 dakika, 1-2 ayda 45-75 dakika, 2-3 ayda 60-90 dakika.",
+        "Gündüz uyku sayısı 4-6'dır; bu yaşta 6'nın üzerine de çıkabilir.",
+        "Bu yaşta uyku EĞİTİMİ ve katı saat programı uygulanmaz; sayılar çizelge dayatmak için değil, anneye çerçeve vermek içindir. Belirleyici olan uyku sinyalleridir."
       ]
     },
     {
