@@ -35,6 +35,7 @@ except ImportError:
     HAS_ANTHROPIC = False
 
 from engine.config import CHATBOT_MODEL  # chatbot/RAG modeli (haiku — merkezi)
+from engine import llm_saglik              # LLM sağlık izleme (pasif katman)
 from engine.config import MODEL_NAME  # noqa: F401 — build_embeddings doc2query re-export
 
 MAX_TOKENS = 1024
@@ -1841,18 +1842,25 @@ CEVAP KURALLARI:{duygu_kurali}
 CEVAP:"""
 
     client = Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model=CHATBOT_MODEL,
-        max_tokens=MAX_TOKENS,
+    # LLM sağlık izleme (pasif katman): hata /health'in "llm" alanını anında
+    # "error"a çeker. Akış DEĞİŞMEZ — istisna aynen yukarı gider.
+    try:
+        response = client.messages.create(
+            model=CHATBOT_MODEL,
+            max_tokens=MAX_TOKENS,
         # Sabit system prompt'a cache_control ekli. NOT: Sistem prompt'u ~80 token,
         # Haiku 4.5 minimum cache eşiği 4096 token → bu blok şu an cache TETİKLEMEZ
         # (no-op, hata vermez). Asıl değişken maliyet RAG context'i olup soruya göre
         # değiştiğinden cache'lenemez. Marker yapısal doğruluk + ileride system büyürse
         # otomatik devreye girsin diye burada. Çıktı birebir aynı kalır.
-        system=[{"type": "text", "text": SYSTEM_PROMPT,
-                 "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": user_prompt}],
-    )
+            system=[{"type": "text", "text": SYSTEM_PROMPT,
+                     "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+    except Exception as e:                       # noqa: BLE001 — kaydet, sonra yükselt
+        llm_saglik.kaydet_hata(e)
+        raise
+    llm_saglik.kaydet_basari()
 
     answer = response.content[0].text
     if not kisisel:                         # kişisel cevap PAYLAŞILAN cache'e YAZILMAZ

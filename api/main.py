@@ -27,6 +27,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 from engine import chatbot   # noqa: E402 — mevcut RAG/cache/LLM motoru
+from engine import llm_saglik  # noqa: E402 — /health LLM sağlık alanı
 from api import tts          # noqa: E402 — ElevenLabs + ses cache
 from api import avatar       # noqa: E402 — LiveAvatar LITE session token (görüntü katmanı)
 from api.config import get_settings   # noqa: E402 — merkezi env config
@@ -222,10 +223,26 @@ def health(detail: int = 0, x_api_key: str | None = Header(default=None,
             rt = None
 
     db_ok = db_healthy()
-    status = "ok" if (db_ok and rt is not None) else "degraded"
+
+    # LLM sağlığı — 2026-09-14'te Anthropic kredisi bitti, TÜM sohbet ve plan
+    # üretimi 400 almaya başladı ama /health LLM'e dokunmadığı için 200 dönmeye
+    # devam etti; UptimeRobot arızayı GÖRMEDİ. Artık görüyor.
+    #
+    # Yoklama ARKA PLANDA tetiklenir ve bu istek onu BEKLEMEZ: Railway
+    # healthcheck bu ucu kullanıyor, senkron bir LLM çağrısı yavaşlarsa
+    # konteyner sağlıksız sayılıp yeniden başlatılabilirdi — izleme aracı
+    # arızanın kendisine dönüşürdü.
+    llm_saglik.yoklamayi_tetikle()
+    llm_durum, llm_detay = llm_saglik.durum(detay=bool(detail))
+
+    # "disabled" (anahtar yok) ve "unknown" (henüz veri yok) ARIZA SAYILMAZ:
+    # ilki yerel/test ortamı, ikincisi taze başlatma. Yalnız "error" düşürür.
+    status = "ok" if (db_ok and rt is not None and llm_durum != "error") else "degraded"
     out = {
         "status": status,
         "db": "ok" if db_ok else "down",
+        # ok | error | unknown | disabled  — UptimeRobot bu alana bakabilir.
+        "llm": llm_durum,
         "rag_mode": rt,                # "semantic" | "tfidf" | null
         "retrieval": rt,               # geriye dönük uyumluluk (eski alan adı)
         "model": chatbot.CHATBOT_MODEL,
@@ -245,6 +262,9 @@ def health(detail: int = 0, x_api_key: str | None = Header(default=None,
                 "process_start": _SUREC_BASLANGIC,
                 "corpus_breakdown": chatbot.yuklu_birim_dagilimi(),
                 "embedding_model": chatbot.EMB_MODEL_NAME,
+                # Hata sınıfı burada: 'credit'/'auth' insan müdahalesi ister,
+                # 'overloaded'/'rate_limit' kendiliğinden geçer.
+                "llm_saglik": llm_detay,
             }
     return out
 

@@ -15,6 +15,7 @@ except ImportError:
     HAS_ANTHROPIC = False
 
 from engine.config import PLAN_MODEL  # plan üretici modeli (sonnet — merkezi)
+from engine import llm_saglik              # LLM sağlık izleme (pasif katman)
 # 16384 eski 1 aylık program (28 gün) içindi; o yol artık kapalı (BIR_AY_PROGRAM_AKTIF)
 # ve herkes 13 günlük plan alıyor. Faz O2 ölçümü: gerçek çıktı 7167-7474 token.
 # 12288 = ~%64 pay. Süreyi ETKİLEMEZ (max_tokens rezervasyon değil, tavandır);
@@ -327,12 +328,18 @@ def plan_uret(param: dict, usage_sink: dict | None = None) -> str:
         return _fallback_plan(param)
 
     client = Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model=PLAN_MODEL,
-        max_tokens=MAX_TOKENS,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": _build_cached_content(param)}],
-    )
+    # LLM sağlık izleme (pasif katman) — akışı DEĞİŞTİRMEZ, istisna aynen yükselir.
+    try:
+        response = client.messages.create(
+            model=PLAN_MODEL,
+            max_tokens=MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": _build_cached_content(param)}],
+        )
+    except Exception as e:                       # noqa: BLE001 — kaydet, sonra yükselt
+        llm_saglik.kaydet_hata(e)
+        raise
+    llm_saglik.kaydet_basari()
     if usage_sink is not None:
         usage_sink["model"] = PLAN_MODEL
         usage_sink["usage"] = _usage_ozet(response)

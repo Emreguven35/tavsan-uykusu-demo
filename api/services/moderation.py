@@ -27,6 +27,7 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from engine import llm_saglik              # LLM sağlık izleme (pasif katman)
 from api.services import usage
 
 logger = logging.getLogger("tavsan.moderation")
@@ -308,12 +309,17 @@ def classify(text: str) -> dict | None:
                      "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": text[:2000]}],
         )
+        llm_saglik.kaydet_basari()        # LLM sağlık izleme (pasif katman)
         usage.kaydet(usage.SERVIS_ANTHROPIC, usage.OP_MODERATION, model=MODEL,
                      usage=usage.anthropic_usage(resp),
                      duration_ms=int((time.perf_counter() - _t0) * 1000))
         raw = resp.content[0].text
         return _parse_verdict(raw)
     except Exception as e:                # timeout/ağ/kota/parse → fail-open
+        # Moderasyon fail-open çalışır (hata kullanıcıya YANSIMAZ) — tam da bu
+        # yüzden sağlık izleyicisine BİLDİRİLMESİ önemli: kredi bitse bile bu
+        # yol sessizce None döner ve arıza başka hiçbir yerden görünmez.
+        llm_saglik.kaydet_hata(e)
         logger.warning("Haiku moderasyon hatası (fail-open): %s", e)
         return None
 
