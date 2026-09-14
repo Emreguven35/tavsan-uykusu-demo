@@ -1,8 +1,9 @@
 {
-  "version": "1.1",
-  "guncelleme": "2026-08-07",
+  "version": "1.2",
+  "guncelleme": "2026-09-14",
   "kaynak": "RESMİ yaş bandı tablosu (Faz Y). Plan motorunun TEK sayısal kaynağıdır.",
   "surum_notlari": {
+    "1.2": "0-3 ay YENİDOĞAN RİTİM REHBERİ'nin sayısal kaynağı eklendi (yenidogan_ritim): ay ay uyanıklık penceresi, uyku sinyalleri, mini rutin sırası, gece/gündüz ayrımı, güvenli uyku kuralları ve atak haftaları tablosu. Bu yaşta uyku EĞİTİMİ üretilmez, katı çizelge kurulmaz. `bantlar` listesi ve 0-2_ay bandının değerleri DEĞİŞMEDİ — yeni tabloyla çakışan değerler onay beklediği için korundu (bkz. master_knowledge_base.json > tutarsizlik_raporu).",
     "1.1": "Tavşan Uykusu yönteminin resmi tablosu: 3-5 ay gündüz 4-5 saat (üst sınır eklendi), 9-12 ay gündüz 2-3 saat (üst sınır eklendi), 18-24 ay uyanıklık penceresi 5-6 saat (artık devralınmıyor, tabloda verildi), her banda toplam_gunluk_uyku_dk (gündüz+gece) eklendi.",
     "1.0": "İlk sürüm."
   },
@@ -29,6 +30,134 @@
       "uyandirilir": true,
       "tum_bantlarda_gecerli": true,
       "aciklama": "Bebek yaşına uygun gündüz toplam uyku MİNİMUMUNU tamamlayamazsa ilave 30 dakikalık bir kestirme uykusu yaptırılır. 30 dakika dolunca bebek uyandırılır. Bu kestirmeden uyandıktan 1 SAAT sonra bile gece uykusuna geçilebilir — gece uykusu gecikse dahi minimum gündüz uykusu önceliklidir."
+    }
+  },
+  "yenidogan_ritim": {
+    "aciklama": "0-3 ay YENİDOĞAN RİTİM REHBERİ'nin TEK sayısal kaynağı. Bu yaşta katı uyku programı ve yapılandırılmış uyku eğitimi UYGULANMAZ; buradaki pencereler saat çizelgesi kurmak için DEĞİL, anneye 'bebeğim ne kadar uyanık kalabilir' çerçevesi vermek içindir. Belirleyici olan uyku sinyalleridir.",
+    "ust_sinir_ay": 3,
+    "not_bantlar_ile_iliski": "Bu alt bantlar `bantlar` listesindeki 0-2_ay bandının YERİNE GEÇMEZ. 0-2_ay bandı (uyanıklık 40-80 dk) plan motorunun çizelge kurucusu için geçerli olmaya devam eder; alt bantlar yalnız yenidoğan rehberinde kullanılır. İki kümenin çakışması master_knowledge_base.json > tutarsizlik_raporu'na kaydedildi ve karar beklemektedir.",
+    "alt_bantlar": [
+      {
+        "id": "0-1_ay",
+        "ad": "0-1 ay",
+        "ay_min": 0,
+        "ay_max": 1,
+        "uyaniklik_penceresi_dk": [30, 60]
+      },
+      {
+        "id": "1-2_ay",
+        "ad": "1-2 ay",
+        "ay_min": 1,
+        "ay_max": 2,
+        "uyaniklik_penceresi_dk": [45, 75]
+      },
+      {
+        "id": "2-3_ay",
+        "ad": "2-3 ay",
+        "ay_min": 2,
+        "ay_max": 3,
+        "uyaniklik_penceresi_dk": [60, 90]
+      }
+    ],
+    "mini_rutin_dk": [5, 10],
+    "ritim_sabitleme_hafta": [6, 8],
+    "uyku_sinyalleri": [
+      "Esneme",
+      "Bakışın donuklaşması, dalgın dalgın boşluğa bakma",
+      "Huzursuzlanma, mızmızlanma",
+      "Gözleri ovuşturma, kulak çekiştirme",
+      "Çevreye ilgisini kaybetme, başını çevirip bakışını kaçırma",
+      "Hareketlerin yavaşlaması, ani sakinleşme"
+    ],
+    "mini_rutin_sirasi": [
+      "Alt değiştirme",
+      "Tulum giydirme veya kundaklama",
+      "Ortamı loşlaştırma",
+      "Beyaz gürültüyü açma",
+      "Kucakta sakinleştirme"
+    ],
+    "gece_gunduz_ayrimi": {
+      "gunduz": [
+        "Oda loş olsun ama zifiri karanlık olmasın",
+        "Ev sesleri devam etsin, sessizliğe gerek yok",
+        "Bebek uyandığında konuşun, göz teması kurun, oyun kurun",
+        "Güne her gün yakın bir saatte başlayın, perdeleri açın"
+      ],
+      "gece": [
+        "Oda zifiri karanlık olsun",
+        "Beslenme ve alt değiştirme sessiz ve düşük ışıkta yapılsın",
+        "Göz teması ve oyun kurulmasın, konuşulmasın",
+        "İş biter bitmez bebek yatağına geri bırakılsın"
+      ]
+    },
+    "guvenli_uyku": {
+      "kaynak": "NHS güvenli uyku rehberi",
+      "kurallar": [
+        "Bebek her uykuda SIRTÜSTÜ yatırılır",
+        "Yatak sert ve düz olmalıdır",
+        "Yatakta yastık, yorgan, battaniye, yatak koruyucu ve oyuncak bulunmaz",
+        "İlk 6 ay ebeveynle AYNI ODADA, AYRI YATAKTA uyunur",
+        "Oda aşırı ısıtılmaz, bebek fazla giydirilmez",
+        "Bebeğin yanında sigara içilmez",
+        "Bebek koltukta, kanepede ya da ebeveyn yatağında yalnız bırakılmaz"
+      ]
+    },
+    "atak_haftalari": {
+      "uyari": "Bilimsel kesinliği kanıtlanmış bir gelişim testi DEĞİLDİR. Her bebek her atağı yaşamaz. Huzursuzluk mutlaka atak olarak yorumlanmamalı; önce hastalık, büyüme atağı, beslenme problemi ve uyanıklık süreleri değerlendirilmelidir.",
+      "referans_tarih": "TAHMİNİ DOĞUM TARİHİ (beklenen 40 haftalık doğum tarihi). Prematüre bebekte tablo erkenlik kadar kayar.",
+      "tolerans_hafta": 1,
+      "haftalar": [
+        {
+          "sira": 1,
+          "hafta": 5,
+          "konu": "Duyuların keskinleşmesi, uyanıklığın artması"
+        },
+        {
+          "sira": 2,
+          "hafta": 8,
+          "konu": "Örüntüleri fark etme, ellerini keşfetme"
+        },
+        {
+          "sira": 3,
+          "hafta": 12,
+          "konu": "Geçişleri ve akışkan hareketi fark etme, sesini keşfetme"
+        },
+        {
+          "sira": 4,
+          "hafta": 19,
+          "konu": "Olaylar arasında bağ kurma, nesneye uzanma"
+        },
+        {
+          "sira": 5,
+          "hafta": 26,
+          "konu": "Mesafe ve ayrılık kavramı, ayrılık kaygısının başlaması"
+        },
+        {
+          "sira": 6,
+          "hafta": 37,
+          "konu": "Sınıflandırma, neden-sonuç ilişkisi"
+        },
+        {
+          "sira": 7,
+          "hafta": 46,
+          "konu": "Sıralama, adım adım iş yapma"
+        },
+        {
+          "sira": 8,
+          "hafta": 55,
+          "konu": "Program kurma, kendi kararını uygulamak isteme"
+        },
+        {
+          "sira": 9,
+          "hafta": 64,
+          "konu": "İlkeler, kural sınama ve inatlaşma"
+        },
+        {
+          "sira": 10,
+          "hafta": 75,
+          "konu": "Sistemler, benlik ve kimlik duygusu"
+        }
+      ]
     }
   },
   "bantlar": [

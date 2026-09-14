@@ -791,9 +791,82 @@ SELECT content, top_score, created_at
 
 ## Plan `content` şeması (resmî)
 
+### `type` — HANGİ EKRAN açılacak (Faz 0-3)
+
+Plan artık tek bir çıktı türü değil. **Mobil `days` doluluğuna değil, `type`
+alanına bakmalıdır.**
+
+| `type` | Ne zaman | `days` | `schedule` | Üretim |
+|---|---|---|---|---|
+| `egitim_plani` | Düzeltilmiş yaş ≥ 5 ay, eğitim uygun | **dolu** (5 aşama) | dolu | Claude |
+| `yenidogan_ritim` | Düzeltilmiş yaş **< 3 ay** | boş | **boş** | deterministik (LLM yok) |
+| `egitim_bekleme` | Eğitim uygun değil (3-5 ay, doktor onayı gereken durum) | boş | dolu | Claude |
+
+> Faz 0-3 öncesi üretilmiş planlarda `type` **yoktur**; alan gelmiyorsa
+> `egitim_plani` varsayın (o dönemde tek tür buydu).
+
+### `yenidogan_ritim` — 0-3 ay ritim rehberi
+
+**Bu yaşta uyku eğitimi ÜRETİLMEZ.** 0-3 ayda katı uyku programı veya
+yapılandırılmış uyku eğitimi uygulanmaz; 13 günlük merdiven yerine bir **ritim
+rehberi** döner. `schedule` ve `days` bilerek boştur, `night_wake_protocol` ve
+`kestirme_protokolu` **hiç eklenmez** — ikisi de eğitim protokolüdür.
+
+```jsonc
+{
+  "type": "yenidogan_ritim",
+  "headline": "Deniz için yenidoğan ritim rehberi — 1-2 ay, uyanıklık penceresi 45 dakika - 1 saat 15 dakika",
+  "days": [], "schedule": [],
+  "yenidogan": {
+    "alt_bant": {"id": "1-2_ay", "ad": "1-2 ay", "uyaniklik_penceresi_dk": [45, 75]},
+    "uyaniklik_penceresi": "45 dakika - 1 saat 15 dakika",
+    "tum_alt_bantlar": [{"ad": "0-1 ay", "uyaniklik_penceresi": "30 dakika - 1 saat"}, ...],
+    "uyku_sinyalleri": ["Esneme", "Bakışın donuklaşması, ...", ...],
+    "mini_rutin": {"sure": "5-10 dakika", "sure_dk": [5, 10],
+                   "sira": ["Alt değiştirme", "Tulum giydirme veya kundaklama",
+                            "Ortamı loşlaştırma", "Beyaz gürültüyü açma",
+                            "Kucakta sakinleştirme"]},
+    "gece_gunduz_ayrimi": {"gunduz": [...], "gece": [...]},
+    "guvenli_uyku": {"kaynak": "NHS güvenli uyku rehberi", "kurallar": [...]},
+    "ritim_sabitleme": {"baslangic_hafta": [6, 8], "metin": "..."}
+  },
+  "egitim_baslangic": {"alt_sinir_ay": 5, "kalan_gun": 113,
+                       "tahmini_tarih": "2027-01-05", "aciklama": "..."},
+  "uygun_mu": false,
+  "generated_with": "deterministik",
+  "markdown": "..."          // aynı içeriğin metin hâli (eski istemciler için)
+}
+```
+
+Davranış garantileri:
+
+- **Adaptasyon ÇALIŞMAZ.** `/plans/adapt` bu yaşta `adjusted=false`,
+  `shift_minutes=0` ve açıklayıcı bir `reasons` döner; çizelge üretilmez.
+  (Üretilseydi rehbere fiilen bir saat programı basılmış olurdu.)
+- **Bildirim gitmez** — zamanlayıcı boş `schedule`'dan blok çıkaramaz.
+- `GET /plans/today` rehberi her gün **yeniden üretir** (deterministik ve
+  ücretsiz), böylece bebek büyüdükçe alt bant 0-1 → 1-2 → 2-3 ay otomatik kayar.
+- Bebek 3 ayı geçtiğinde rehber **olduğu gibi kalır** ve
+  `"yenidogan_suresi_doldu": true` eklenir. Sunucu kendiliğinden ücretli bir
+  eğitim planı üretmez; mobil bu bayrağı görüp kullanıcıya "yeni planınızı
+  oluşturalım mı?" kartını göstermeli ve onay gelirse `POST /plans/generate`
+  çağırmalıdır (`restart_program_suggested` ile aynı desen).
+
+### `egitim_bekleme` — eğitim henüz uygun değil
+
+3-5 ay arası bebeklerde (ve doktor onayı gereken durumlarda) eğitim planı
+yazılmaz; günlük program, ön hazırlık ve bekleyiş notu döner. `days` boştur.
+
+> **Düzeltilmiş hata (Faz 0-3):** bu durumda plan metninde `## Eğitim Planı`
+> bölümü hiç yazılmadığı için `build_days` `DayParseError` yükseltiyor, iki
+> denemenin ardından **502** dönüyordu — yani **0-5 ay arasındaki her bebekte
+> plan üretimi hata veriyordu**. Artık eğitim uygun değilken gün bölümü
+> aranmıyor.
+
 ```jsonc
 {
   "headline": "Elif için 9 ay programı — 2 kısa uyku, 20:00 yatış",
+  "type": "egitim_plani",
   "schedule": [
     {"time": "07:00", "end": "07:00", "type": "wake",  "title": "Sabah uyanışı",
      "key": "wake", "start_minute": 420, "end_minute": 420},
@@ -839,7 +912,8 @@ Garantiler:
 - Ayrıştırma başarısız olursa plan KAYDEDİLMEZ: üretim reddedilip yeniden
   ürettirilir (2 deneme, sonra **502**). Boş `days` dönmez.
 
-`days` alanı `/plans/generate`, `/plans/adapt`, `/plans/today`, `GET /plans` ve
+`days` alanı **`type == "egitim_plani"` olan** planlarda `/plans/generate`,
+`/plans/adapt`, `/plans/today`, `GET /plans` ve
 `GET /plans/{date}` yanıtlarının hepsinde doludur. Faz O öncesi üretilmiş
 planlarda alan yoktu; okuma yolunda markdown'dan bir kez türetilip DB'ye yazılır
 (2026-09-08 ölçümü: üretimdeki 357 planın 357'si ayrışıyor). Çok eski bir plan

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from api.models import Baby, SleepLog, SleepPlan, User
 from api.services import plan_adapter
 from api.services import usage
-from engine import plan_generator, plan_gunleri, yas_bantlari
+from engine import plan_generator, plan_gunleri, yas_bantlari, yenidogan
 from engine.parameter_engine import hesapla_yas_ay, load_kb, parametre_uret, yas_bucket_sec
 
 logger = logging.getLogger("tavsan.plan_service")
@@ -29,6 +29,16 @@ logger = logging.getLogger("tavsan.plan_service")
 # Her deneme ~130 sn ve ayrı bir Sonnet faturası; ikiden fazlası hem pahalı hem
 # de anlamsız — biçim iki kez tutmuyorsa sorun prompt'ta, tekrarda değil.
 PLAN_DAYS_MAX_DENEME = 2
+
+# ---------------------------------------------------------------------------
+# content["type"] — mobil bu alana bakarak HANGİ EKRANI açacağını bilir.
+# ---------------------------------------------------------------------------
+# Faz 0-3 öncesi bu alan YOKTU çünkü tek bir çıktı türü vardı (eğitim planı).
+# Artık üç tür var ve ikisinde `days` boştur; mobil `days` doluluğuna değil bu
+# alana bakmalıdır.
+TYPE_EGITIM = "egitim_plani"        # 5+ ay, 13 günlük merdiven — days DOLU
+TYPE_YENIDOGAN = "yenidogan_ritim"  # 0-3 ay, ritim rehberi     — days BOŞ, schedule BOŞ
+TYPE_BEKLEME = "egitim_bekleme"     # eğitim uygun değil (3-5 ay, doktor onayı vb.)
 
 
 class PlanError(RuntimeError):
@@ -141,6 +151,12 @@ def ensure_current_schema(db: Session, plan: SleepPlan | None) -> SleepPlan | No
     kez yükseltilip DB'ye yazılır (değişiklik yoksa yazılmaz)."""
     if plan is None:
         return None
+    # Yenidoğan rehberinde yükseltilecek bir şey YOK: çizelge, gün bölümleri,
+    # gece uyanma protokolü ve kestirme kuralı bu yaşta BİLEREK boştur. Aşağıdaki
+    # geriye uyumluluk doldurmaları buraya uygulanırsa rehbere bir eğitim
+    # protokolü enjekte edilir — tam da engellemeye çalıştığımız şey.
+    if is_yenidogan(plan):
+        return plan
     content = dict(plan.content or {})
     eski = content.get("schedule") or []
     yeni = plan_adapter.normalize_schedule(eski)
@@ -205,9 +221,26 @@ def generate_content(baby: Baby, req_overrides: dict | None,
         param = parametre_uret(profile)                 # deterministik parametreler
     except Exception as e:
         raise PlanError(str(e)) from e
+
+    # --- 0-3 AY: EĞİTİM PLANI DEĞİL, YENİDOĞAN RİTİM REHBERİ -----------------
+    # İlayda kuralı: bu yaşta katı program ve yapılandırılmış eğitim UYGULANMAZ.
+    # LLM'e hiç gidilmez (maliyet yok) ve merdiven metni üretilemez — bu yaşa bir
+    # eğitim tekniğinin sızması yapısal olarak imkânsız.
+    if yenidogan.yenidogan_mi(param["yas"]["duzeltilmis_ay"]):
+        return _yenidogan_content(baby, param, dogum_haftasi)
+
     used_claude = bool(os.getenv("ANTHROPIC_API_KEY")) and plan_generator.HAS_ANTHROPIC
     tip = param["plan_secimi"]["tip"]
     gunler = int(param["plan_secimi"]["gunler"])
+
+    # Eğitim uygun DEĞİLSE ortada bir merdiven yoktur: prompt 6. kuralı gereği
+    # plan yazılmaz, yalnız bekleyiş notu + hazırlık verilir. Böyle bir metinde
+    # "## Eğitim Planı" bölümü ve gün başlıkları BULUNMAZ, dolayısıyla days
+    # ARANMAZ. (Bu kontrol yokken 3-5 aylık her bebekte build_days DayParseError
+    # yükseltiyor, iki deneme sonunda PlanError'a dönüyor ve router 502
+    # veriyordu — yani eğitime henüz uygun olmayan bebeğin ailesi plan yerine
+    # hata görüyordu. 0-3 ay yukarıda rehbere ayrıldı; kalan aralık burası.)
+    gun_bolumu_gerekli = bool(param["uygun_mu"])
 
     # Gün bölümleri ayrıştırılamazsa plan REDDEDİLİR ve yeniden üretilir: eğitim
     # ekranının sessizce boş kalmasının sebebi buydu (başlık biçimi LLM'e bağlıydı,
@@ -229,6 +262,9 @@ def generate_content(baby: Baby, req_overrides: dict | None,
                          model=_kullanim.get("model"), usage=_kullanim["usage"],
                          user_id=baby.user_id,
                          duration_ms=int((time.perf_counter() - _t0) * 1000))
+        if not gun_bolumu_gerekli:
+            days = []                 # eğitim yok → merdiven yok → days boş
+            break
         try:
             days = plan_gunleri.build_days(markdown, tip, gunler)
             break
@@ -252,8 +288,11 @@ def generate_content(baby: Baby, req_overrides: dict | None,
         tek_uyku=tek_uyku_bayragi(param))
 
     return {
+        # Mobil hangi ekranı açacağını BU alandan bilir (days doluluğundan değil).
+        "type": TYPE_EGITIM if param["uygun_mu"] else TYPE_BEKLEME,
         "markdown": markdown,                       # KALIR (geriye uyum + detay metni)
         # Yapısal gün bölümleri — istemci markdown'ı regex'lemez (bkz. plan_gunleri).
+        # Eğitim uygun değilse BOŞTUR (merdiven yok), bkz. gun_bolumu_gerekli.
         "days": days,
         "headline": plan_adapter.headline(baby.name, param["bucket"], schedule),
         "bucket": param["bucket"],
@@ -271,6 +310,64 @@ def generate_content(baby: Baby, req_overrides: dict | None,
         "adapted": False,
         "night_wake_protocol": dict(plan_adapter.NIGHT_WAKE_PROTOCOL),
     }
+
+
+def _yenidogan_content(baby: Baby, param: dict, dogum_haftasi: int | None) -> dict:
+    """0-3 ay YENİDOĞAN RİTİM REHBERİ içeriği (LLM YOK, tamamen deterministik).
+
+    Eğitim planından farkları — bunlar kasıtlıdır, eksiklik değildir:
+      • `days` BOŞ: bu yaşta kademeli uzaklaşma merdiveni uygulanmaz.
+      • `schedule` BOŞ: katı saat çizelgesi kurulmaz; belirleyici uyku
+        sinyalleridir. Çizelge üretilseydi adaptasyon onu her gün kaydırır ve
+        yenidoğana fiilen bir program dayatılırdı.
+      • `kestirme_protokolu` YOK: "30 dk kestirme yaptır, sonra uyandır"
+        müdahalesi yapılandırılmış bir uyku yönetimidir; 0-3 aya verilmez."""
+    yas = param["yas"]
+    kurallar = (param.get("global_rules") or {}).get("yenidogan_uyku_0_3_ay") or {}
+    try:
+        rehber = yenidogan.ritim_rehberi(yas)
+    except yenidogan.YenidoganHatasi as e:
+        raise PlanError(str(e)) from e
+
+    egitim = yenidogan.egitim_uygunluk_tarihi(
+        baby.birth_date.isoformat(), yas["duzeltilmis_ay"])
+    markdown = yenidogan.rehber_markdown(
+        rehber, baby.name or "Bebeğiniz", yas, kurallar=kurallar, egitim=egitim)
+
+    return {
+        "type": TYPE_YENIDOGAN,
+        "markdown": markdown,
+        "days": [],
+        "schedule": [],
+        "headline": yenidogan.headline(baby.name or "Bebeğiniz", rehber),
+        "bucket": param["bucket"],
+        "yas": yas,
+        "yas_bandi": param["yas_bandi"],
+        # Rehberin yapısal gövdesi — mobil bunu kendi ekranında gösterir.
+        "yenidogan": rehber,
+        "egitim_baslangic": egitim,
+        "plan_secimi": {"tip": TYPE_YENIDOGAN, "gunler": 0,
+                        "aciklama": "0-3 ay: uyku eğitimi uygulanmaz, ritim rehberi verilir."},
+        "uygun_mu": False,
+        "uyarilar": param["uyarilar"],
+        "generated_with": "deterministik",
+        "dogum_haftasi": int(dogum_haftasi or 40),
+        "baseline_night_wakes": baby.night_wakes,
+        "adapted": False,
+        # night_wake_protocol EKLENMEZ: 45 dk direnç / 15 dk rutin molası bir
+        # EĞİTİM protokolüdür. Bu yaşta ağlayan bebek kucağa alınır.
+    }
+
+
+def is_yenidogan(plan: SleepPlan | dict | None) -> bool:
+    """Plan (ya da içeriği) yenidoğan ritim rehberi mi?
+
+    Adaptasyon, çizelge kaydırma ve şema yükseltme yollarının hepsi buna bakar:
+    rehberde kaydırılacak çizelge YOKTUR ve üretilmesi de yanlış olur."""
+    if plan is None:
+        return False
+    content = plan if isinstance(plan, dict) else (plan.content or {})
+    return (content or {}).get("type") == TYPE_YENIDOGAN
 
 
 def _adaptation_meta(result: dict, summary: dict, adjusted: bool, shift: int,
@@ -292,7 +389,24 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
     """Adaptasyon motorunu koştur, sonucu bugünün planı olarak upsert et.
 
     regenerate_required (yaş bandı ihlali) → çizelgeyi kaydırmak yerine planı
-    TAM YENİDEN ÜRETİR."""
+    TAM YENİDEN ÜRETİR.
+
+    Yenidoğan rehberi ADAPTE EDİLMEZ (0-3 ayda katı program yok): rehber bugüne
+    taşınır ve adaptasyon sonucu "hiçbir şey yapılmadı" olarak döner. Bu kontrol
+    savunma amaçlıdır — /plans/adapt bu yaştaki bir bebek için çağrılırsa
+    plan_adapter boş çizelgeyi yaş bandından DOLDURUR ve rehbere fiilen bir
+    saat programı basardı."""
+    if is_yenidogan(base_plan):
+        plan = _yenidogan_bugune_tasi(db, user, baby, base_plan, today)
+        return plan, {
+            "adjusted": False, "shift_minutes": 0, "regenerate_required": False,
+            "regression_detected": False, "restart_program_suggested": False,
+            "kestirme": None, "toplam_uyku": None,
+            "reasons": ["0-3 ay yenidoğan ritim rehberi adapte edilmez: bu yaşta "
+                        "katı uyku programı uygulanmaz, kaydırılacak çizelge yok."],
+            "schedule": [],
+        }
+
     base_content = dict(base_plan.content or {})
     dogum_haftasi = base_content.get("dogum_haftasi", 40)
     _, params, yas_ay = bucket_params(baby, dogum_haftasi)
@@ -353,6 +467,54 @@ def already_adapted_today(plan: SleepPlan | None) -> bool:
     return bool(plan is not None and (plan.content or {}).get("adapted"))
 
 
+def _yenidogan_bugune_tasi(db: Session, user: User, baby: Baby,
+                           base_plan: SleepPlan, today: date) -> SleepPlan:
+    """Yenidoğan rehberini bugüne taşı — adaptasyon YOK, LLM çağrısı YOK.
+
+    Bebek hâlâ 0-3 aydaysa rehber YENİDEN ÜRETİLİR: üretimi deterministik ve
+    bedava olduğu için alt bant (0-1 → 1-2 → 2-3 ay) ve uyanıklık penceresi
+    bebek büyüdükçe kendiliğinden güncellenir; bayat pencere gösterilmez.
+
+    Bebek 3 ayı geçtiyse rehber OLDUĞU GİBİ kalır ve `yenidogan_suresi_doldu`
+    bayrağı eklenir. Burada sessizce eğitim planı ÜRETİLMEZ: o üretim ücretli
+    bir Sonnet çağrısıdır ve bir GET isteğinin yan etkisi olamaz — mobil bayrağı
+    görüp kullanıcıya "yeni planınızı oluşturalım mı?" kartını gösterir
+    (restart_program_suggested ile aynı desen)."""
+    content = dict(base_plan.content or {})
+    dogum_haftasi = content.get("dogum_haftasi", 40)
+    yas = hesapla_yas_ay(baby.birth_date.isoformat(), int(dogum_haftasi or 40))
+    guncel_bant = yenidogan.alt_bant(yas["duzeltilmis_ay"])["id"]
+
+    # GEREKSİZ YAZIM YOK: bugünün rehberi zaten güncelse dokunma.
+    # (already_adapted_today burada işe yaramıyor — rehberde `adapted` hep False
+    # kalıyor; bu kontrol olmadan HER GET /plans/today bir DB yazımı tetiklerdi,
+    # çünkü `egitim_baslangic.kalan_gun` her gün değişiyor.)
+    bugunku = plan_for_date(db, user, baby, today)
+    if is_yenidogan(bugunku):
+        b_icerik = bugunku.content or {}
+        if yenidogan.yenidogan_mi(yas["duzeltilmis_ay"]):
+            guncel = ((b_icerik.get("yenidogan") or {}).get("alt_bant")
+                      or {}).get("id") == guncel_bant
+        else:                       # yaşlanmış rehber: bayrak bir kez yazılır
+            guncel = bool(b_icerik.get("yenidogan_suresi_doldu"))
+        if guncel:
+            return bugunku
+
+    if yenidogan.yenidogan_mi(yas["duzeltilmis_ay"]):
+        try:
+            content = _yenidogan_content(baby, parametre_uret(
+                profile_from_baby(baby, None, dogum_haftasi)), dogum_haftasi)
+        except Exception as e:                  # rehber üretilemezse eskisi kalsın
+            logger.warning("Yenidoğan rehberi tazelenemedi (baby=%s): %s", baby.id, e)
+        content["base_plan_id"] = str(base_plan.id)
+    else:
+        content["yenidogan_suresi_doldu"] = True
+        content["base_plan_id"] = str(base_plan.id)
+        logger.info("Yenidoğan rehberi yaşlandı (baby=%s, %.1f ay) — yeni plan önerilecek",
+                    baby.id, yas["duzeltilmis_ay"])
+    return upsert_plan(db, user, baby, today, content)
+
+
 def ensure_today_plan(db: Session, user: User, baby: Baby,
                       today: date | None = None) -> SleepPlan | None:
     """Bugünün planını döndür; gerekiyorsa lazy adaptasyonu ÇALIŞTIR.
@@ -375,6 +537,11 @@ def ensure_today_plan(db: Session, user: User, baby: Baby,
     base_plan = bugunku or latest_plan(db, user, baby)
     if base_plan is None:
         return None                                   # hiç plan üretilmemiş
+
+    # 2) Yenidoğan rehberi ADAPTE EDİLMEZ — kaydırılacak çizelge yoktur ve
+    #    üretilmesi bu yaşa program dayatmak olur (bkz. _yenidogan_content).
+    if is_yenidogan(base_plan):
+        return _yenidogan_bugune_tasi(db, user, baby, base_plan, today)
 
     logs = recent_logs(db, user, baby, today)
     if logs:

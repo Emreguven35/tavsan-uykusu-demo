@@ -996,6 +996,30 @@ MEDIKAL_TERIMLER = (
     "hasta", "ilaç", "reflü", "kolik", "nöbet", "ateş", "alerji", "kusma",
     "ishal", "astım", "epilepsi", "nefes", "solunum", "kalp", "doktor",
 )
+# FAZ 0-3 — YENİDOĞAN VE GELİŞİM ALANI: 0-3 ay içeriğiyle birlikte KB'ye uyku
+# DIŞI gelişim bilgisi de girdi (global_rules.gelisim_0_3_ay ve
+# atak_haftalari_wonder_weeks). Bu sorular artık gerçekten ALAN İÇİDİR.
+# Sözlüğe alınmazlarsa "tummy time nedir" gibi cümleler hiçbir uyku terimi
+# içermediği için K4'e (kapsam dışı) düşer ve KB'de cevabı DURDUĞU HÂLDE anne
+# kapıdan çevrilirdi (ölçüldü). Yaş geçen sorular zaten _alan_sinyali'nden
+# geçiyor; buradaki asıl kazanç yaş GEÇMEYEN gelişim sorularıdır.
+GELISIM_TERIMLERI = (
+    # Yenidoğan ritmi
+    "yenidoğan", "yeni doğan", "uyku sinyal", "güvenli uyku", "sırtüstü",
+    "sırt üstü", "beşik ölümü", "ani bebek ölüm", "mini rutin",
+    # Gelişim basamakları
+    "gelişim", "beceri", "basamak", "milestone", "tummy time", "tummytime",
+    "karın üstü", "karnı üstü", "baş kontrol", "boyun kontrol",
+    # TÜRKÇE ÜNLÜ DEĞİŞİMİ TUZAĞI (bkz. UYKU_ALANI_KOKLERI'ndeki "ağl" notu):
+    # "gülümse" kökü "gülümsüyor" biçimini YAKALAMAZ (gülümse + üyor → gülümsüyor).
+    # Gerçek anne cümlesi "bebeğim gülümsüyor mu olmalı" bu yüzden alan dışı
+    # kalıyordu. Kökler çekimli biçimi de kapsayacak kadar kısa tutuldu.
+    "gülüms", "gülüyor mu", "göz teması", "ses çıkar", "agul", "gığılda",
+    "takip ediyor mu", "refleks", "moro", "irkil", "kavra", "emme refleksi",
+    "düz kafa", "kafası düz",
+    # Atak haftaları
+    "atak", "atağ", "wonder week", "sıçrama dönem", "gelişim atağ",
+)
 # FAZ E — MOTİVASYON/DUYGU ALANI: ağlama, güven bağı ve eğitimde motive kalma
 # artık KB'de küratörlü bir bölüm (global_rules.aglama_ve_motivasyon). Yani bu
 # sorular gerçekten ALAN İÇİDİR ve K4'e (kapsam dışı) düşmemelidir.
@@ -1069,7 +1093,8 @@ def _alan_sinyali(soru: str, yas_ay: float | None) -> bool:
     low = tr_lower_safe(soru)
     return (any(k in low for k in UYKU_ALANI_KOKLERI)
             or any(k in low for k in MEDIKAL_TERIMLER)
-            or any(k in low for k in MOTIVASYON_TERIMLERI))
+            or any(k in low for k in MOTIVASYON_TERIMLERI)
+            or any(k in low for k in GELISIM_TERIMLERI))
 
 
 def _kapsam_disi_sinyali(soru: str) -> bool:
@@ -1205,7 +1230,8 @@ KAPSAM_DISI_MESAJ = (
     "Ben bebeğinizin uykusuyla ilgili konularda yardımcı olabiliyorum: "
     "uyku düzeni ve gündüz uykuları, uyanıklık pencereleri, gece uyanmaları, "
     "uyku ortamı ve rutinler, kendi kendine uykuya dalma, emzik ve gece "
-    "beslenmesi, uyku eğitimi ve regresyon dönemleri. "
+    "beslenmesi, uyku eğitimi ve regresyon dönemleri, 0-3 ay yenidoğan ritmi ve "
+    "güvenli uyku, bebeğinizin ilk aylardaki gelişim basamakları ve atak dönemleri. "
     "Sorunuzu bu başlıklardan biriyle ilişkilendirirseniz seve seve yardımcı olurum."
 )
 
@@ -1224,6 +1250,29 @@ Cevabında önce bu listeden o günün konumunu bul, sonra yaz; aralık sınırl
 Bilgi parçalarında 5 günlük bir gün numaralandırması geçiyorsa (ör. "3. gün oda ortası", "5. gün yatır-çık") \
 bu ESKİ programa aittir; cevabına TAŞIMA ve yukarıdaki 13 günlük eşlemeye çevir. \
 24 ay üstü büyük çocuk planı 6 günlüktür; yalnız yaş açıkça 24 ay üstüyse o plandan söz et. \
+0-3 AY KURALI (MUTLAK — DUYGUSAL TON BUNU GEVŞETMEZ): Bebek 3 aydan küçükse (düzeltilmiş yaş) uyku EĞİTİMİ \
+ANLATILMAZ. Bu yaşta 13 günlük merdiven, bekleme süreleri, yatır-çık, kademeli uzaklaşma ve katı saat programı \
+VERİLMEZ; "kendi kendine uyumalı" beklentisi KURULMAZ. Anne bu yaşta eğitim isterse: eğitimin 5. ayın dolmasıyla \
+başladığını, bunun bir eksiklik değil bebeğin gelişim dönemi gereği olduğunu söyle ve YERİNE ritim rehberini anlat — \
+yaşa uygun uyanıklık penceresi, saate değil uyku \
+sinyallerine bakma, 5-10 dakikalık mini rutin, gece/gündüz ayrımı ve güvenli uyku kuralları. Bu yaşta kucakta, \
+memede ya da sallanarak uyumanın NORMAL olduğunu söyle. Bu yaşta ağlayan bebek kucağa alınır; bekleme süresi \
+uygulanmaz. Anneyi asla eli boş gönderme. \
+0-3 AY UYANIKLIK PENCERESİ — AY AY DEĞİŞİR, TEK ARALIĞA İNDİRGEME: Yenidoğanda pencere üç alt banda ayrılır: \
+0-1 ay 30-60 dakika, 1-2 ay 45-75 dakika, 2-3 ay 60-90 dakika. Bebeğin ayına KARŞILIK GELEN aralığı seç ve yalnız \
+onu ver; üçünü tek bir "0-3 ay için şu kadar" aralığına BİRLEŞTİRME ve yanlış bandın sayısını verme (3 haftalık \
+bebek 0-1 ay bandındadır: 60-90 dakika DEĞİL, 30-60 dakika). Sorudan bebeğin ayı anlaşılmıyorsa üç bandı da \
+ayrı ayrı yaz ve anneye bebeğinin kaç aylık olduğunu sor. \
+GELİŞİM SORULARI (uyku dışı): Gelişim basamakları "kesinlikle yapmalı" diye DEĞİL, "bu dönemde görülmeye \
+BAŞLAYABİLECEK beceriler" diye anlatılır; her bebeğin hızının farklı olduğunu belirt, karşılaştırma yaptırma ve \
+kaygı büyütme. Tanı KOYMA. Doktora danışma kriterleri (beslenememe, seslere tepkisizlik, asimetrik hareket, aşırı \
+gevşek ya da kasılı olma, kazanılmış bir beceriyi kaybetme) sorulursa net söyle. 3 aydan küçük bebekte 38°C ve \
+üzeri ateş ACİLDİR — bu durumda gecikmeden doktora/acile başvurulmasını söyle, başka hiçbir öneriyle geçiştirme. \
+ATAK (WONDER WEEKS) SORULARI: Atak haftalarını anlatırken bunun bilimsel kesinliği kanıtlanmış bir gelişim testi \
+OLMADIĞINI, her bebeğin her atağı yaşamadığını ve huzursuzluğun mutlaka atak olarak yorumlanmaması gerektiğini \
+MUTLAKA belirt; önce hastalık, büyüme atağı, beslenme problemi ve uyanıklık sürelerinin değerlendirilmesi \
+gerektiğini söyle. Atak haftalarının TAHMİNİ DOĞUM TARİHİNDEN hesaplandığını, prematüre bebekte tablonun \
+kaydığını da ekle. \
 BEKLEME SÜRESİ ARTIŞI (KATI DAYATMA YOK): Bekleme sürelerinde standart ilerleme 5'er dakikalık artıştır \
 (5 → 10 → 15 → 20). Bu KATI bir kural DEĞİLDİR — çocuk çok dirençliyse artış 1 dakikaya, hatta 30 saniyeye \
 indirilebilir (5 → 6 → 7 → 8 gibi). Anne bir önceki geceden yalnızca 1 dakika fazla bekleyip bekleyemeyeceğini \
