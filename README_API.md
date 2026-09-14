@@ -1036,12 +1036,28 @@ chunk'larından ayrı** bir blokla geçilir:
 
 ```
 BEBEK VERİSİ (bu kullanıcının kendi kaydı):
-Elif, 16 aylık (kayıtlı başlangıç gece uyanma: 3; eğitim başlangıcı 2026-07-01;
-eğitim tamamlanma 2026-07-15). Son 3 gün: bugün şekerleme 1 (12:30-13:15);
-dün gece yatış 19:05 (planlanan 20:00'den 55dk erken), gece uyanma 1 kez
-(03:10, 25dk); önceki gün gece yatış 20:30 (planlanan 20:00'den 30dk geç).
+Elif, 16 aylık, 12-18 ay yaş bandı (kayıtlı başlangıç gece uyanma: 3; eğitim
+başlangıcı 2026-07-01; eğitim tamamlanma 2026-07-15). Son 3 gün: bugün şekerleme 1
+(12:30-13:15); dün gece yatış 19:05 (planlanan 20:00'den 55dk erken), gece uyanma
+1 kez (03:10, 25dk); önceki gün gece yatış 20:30 (planlanan 20:00'den 30dk geç).
 Bugünün planı: 07:00 uyanış, 12:30-15:00 uyku, 20:00 yatış.
 ```
+
+**Blok BEBEK KAYDI VARSA kurulur — log/plan şartı YOKTUR.** Profil satırı (ad, yaş,
+yaş bandı) `baby.birth_date`'ten hesaplanır; yaş bandı plan motoruyla aynı kaynaktan
+gelir (`data/yas_bantlari.json`, Faz Y). Log ve plan bölümleri opsiyoneldir: veri
+yoksa o satırlar yazılmaz, yalnız profil kalır. Henüz logu olmayan bebekte blok şöyle
+kısalır (uyku kaydının YOKLUĞU yazılır ki model olmayan saati uydurmasın):
+
+```
+BEBEK VERİSİ (bu kullanıcının kendi kaydı):
+Deniz, 11 aylık, 9-12 ay yaş bandı. Son 3 günde uyku kaydı girilmemiş.
+```
+
+> Eskiden blok **log ya da bugünün planı** varsa kurulurdu. Sonuç: yeni kayıt olan
+> anne ilk sorusunda "bebeğinizin adını ve kaç aylık olduğunu yazmanız gerek" cevabı
+> alıyordu — oysa iki bilgi de kayıtlıydı. Bloğun tamamı yerine yalnız log/plan
+> bölümleri koşullu hale getirildi.
 
 Sistem promptuna kural eklendi: *"Bebek verisi mevcutsa cevabını bu veriyle
 ilişkilendir — bebeğin adıyla, somut saatlerle konuş; veriyle metodolojiyi
@@ -1057,8 +1073,10 @@ yazar. Aksi halde bir bebeğin saatleri başka kullanıcıya cevap olarak döner
 
 Diğer davranışlar:
 - Bebek çağırana ait değilse **404** (varlık sızdırmaz — `get_owned_baby`).
-- Log **ve** bugünün planı yoksa bağlam bloğu eklenmez → mevcut genel metodoloji
-  cevabı korunur.
+- Bağlam bloğu bebek kaydı varsa **her zaman** eklenir; yalnız profil bile
+  kurulamıyorsa (adsız ve doğum tarihsiz kayıt) eklenmez → genel metodoloji cevabı.
+- `baby_id` verilen her istek cache'i bypass eder; logsuz bebek de buna dahildir
+  (bağlam artık her zaman kurulduğu için bypass da her zaman devrede).
 - Gece uyanmaları 12:00'den önceyse **bir önceki günün gecesine** yazılır.
 - KVKK: bebek verisi içeriği uygulama loguna yazılmaz (yalnız `bebek=var|yok`).
 

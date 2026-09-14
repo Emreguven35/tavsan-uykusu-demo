@@ -10,7 +10,10 @@ TASARIM:
 - HAFİF: üç sorgu (bebek, son 3 günün logları, bugünün planı). Sohbet gecikmesine
   eklenen yük ihmal edilebilir olmalı.
 - Motor (engine/chatbot.py) DB bilmez; bu modül ORM'den okuyup DÜZ METİN üretir.
-- Veri yoksa None döner → çağıran mevcut (genel metodoloji) davranışını sürdürür.
+- PROFİL HER ZAMAN GİRER: ad, yaş ve yaş bandı baby.birth_date'ten hesaplanır —
+  log ya da plan şartı YOKTUR. (Eskiden bloğun tamamı log/plan varlığına bağlıydı;
+  yeni kayıt olan anne ilk sorusunda "adını ve kaç aylık olduğunu yazın" cevabı
+  alıyordu.) Log ve plan bölümleri opsiyoneldir: veri yoksa o satırlar yazılmaz.
 - Zaman dilimi: loglar UTC, özet YEREL duvar saati (plan_adapter.TZ_OFFSET_MIN).
 """
 from __future__ import annotations
@@ -23,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from api.models import Baby, SleepLog, SleepPlan
 from api.services import plan_adapter
+from engine import yas_bantlari
 
 logger = logging.getLogger("tavsan.baby_context")
 
@@ -47,6 +51,27 @@ def _ay_hesapla(birth: date | None, bugun: date) -> int | None:
         return None
     return max(0, (bugun.year - birth.year) * 12 + (bugun.month - birth.month)
                - (1 if bugun.day < birth.day else 0))
+
+
+def _bant_adi(ay: int | None) -> str | None:
+    """Yaşa karşılık gelen yaş bandının insan-okur adı ('9-12 ay', '1-2 ay').
+
+    Kaynak plan motoruyla AYNI (yas_bantlari.json, Faz Y) — chat ile plan farklı
+    bant söylemesin. Bandın 'ad' alanı yerine ay_min/ay_max kullanılır: 'ad'
+    12-18 ay için varyant taşır ('12-18 ay (2 uyku)') ve bu bebeğin gerçekten
+    tek/çift uyku olduğunu bilmiyoruz. 0-3 ay bandında alt bant (0-1/1-2/2-3 ay)
+    daha bilgilendirici olduğu için o tercih edilir."""
+    if ay is None:
+        return None
+    try:
+        b = yas_bantlari.yas_bandi_getir(float(ay))
+    except Exception:            # tablo okunamazsa profil bandsız da yazılır
+        logger.warning("yaş bandı çözülemedi (ay=%s)", ay, exc_info=True)
+        return None
+    alt = b.get("alt_bant") or {}
+    if alt.get("ad"):
+        return str(alt["ad"])
+    return f"{int(b['ay_min'])}-{int(b['ay_max'])} ay"
 
 
 def _planlanan_yatis(plan: SleepPlan | None) -> int | None:
@@ -131,8 +156,16 @@ def build_baby_context(db: Session, baby: Baby, today: date | None = None,
                        tz: int = plan_adapter.TZ_OFFSET_MIN) -> str | None:
     """Bebek profili + son 3 gün log özeti + bugünün planı → düz metin blok.
 
-    Dönen None ise çağıran BAĞLAM EKLEMEZ (mevcut genel metodoloji davranışı):
-    ne log ne de bugünün planı varsa kişiselleştirecek veri yok demektir.
+    PROFİL SATIRI (ad, yaş, yaş bandı) KOŞULSUZDUR: bebek kaydı varsa blok kurulur.
+    Bu bilgi baby.birth_date'ten hesaplanır, log ya da plana bağlı değildir — yeni
+    kayıt olan annenin ilk sorusunda "bebeğinizin adını ve kaç aylık olduğunu
+    yazmanız gerek" cevabı almasının sebebi buydu.
+
+    Log ve plan bölümleri opsiyoneldir: veri yoksa o satırlar yazılmaz (ama uyku
+    kaydının YOKLUĞU yazılır — model olmayan saati uydurmasın).
+
+    Dönen None yalnız profil bile kurulamadığında (adsız, doğum tarihsiz kayıt)
+    gelir; o durumda çağıran mevcut genel metodoloji davranışını sürdürür.
     """
     today = today or (datetime.now(timezone.utc) + timedelta(minutes=tz)).date()
 
@@ -149,12 +182,18 @@ def build_baby_context(db: Session, baby: Baby, today: date | None = None,
             .order_by(SleepPlan.created_at.desc())
             .first())
 
-    if not kayitlar and plan is None:
-        return None                       # kişiselleştirecek veri yok
-
-    # --- Profil satırı ---
+    # --- Profil satırı (KOŞULSUZ) ---
+    # Bebek kaydının kendisi kişiselleştirilecek veridir; log/plan aranmaz.
     ay = _ay_hesapla(baby.birth_date, today)
-    profil = baby.name + (f", {ay} aylık" if ay is not None else "")
+    kimlik = [(baby.name or "").strip()]
+    if ay is not None:
+        kimlik.append(f"{ay} aylık")
+        bant = _bant_adi(ay)
+        if bant:
+            kimlik.append(f"{bant} yaş bandı")
+    profil = ", ".join(p for p in kimlik if p)
+    if not profil:
+        return None                  # ne ad ne doğum tarihi → yazacak profil yok
     ekler = []
     if baby.night_wakes is not None:
         ekler.append(f"kayıtlı başlangıç gece uyanma: {baby.night_wakes}")
@@ -187,6 +226,9 @@ def build_baby_context(db: Session, baby: Baby, today: date | None = None,
     if gun_ozetleri:
         satirlar.append(f"Son {LOOKBACK_DAYS} gün: " + "; ".join(gun_ozetleri) + ".")
     else:
+        # Log BÖLÜMÜ yazılmaz ama yokluğu tek cümleyle belirtilir: blok artık
+        # logsuz bebek için de kurulduğundan, "somut saatlerle konuş" kuralı
+        # modeli olmayan saati uydurmaya itmesin.
         satirlar.append(f"Son {LOOKBACK_DAYS} günde uyku kaydı girilmemiş.")
 
     plan_ozeti = _plan_ozeti(plan)

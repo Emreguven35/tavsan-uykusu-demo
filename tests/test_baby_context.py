@@ -2,21 +2,27 @@
 Bebek log bağlamı testleri (Faz 6.5) — DB gerçek (geçici SQLite), LLM MOCK'lu.
 
 Kapsam:
-  1-4. Bağlam derleme: profil satırı, gün etiketleri, planlanan yatışla kıyas,
-       gece uyanmasının doğru geceye yazılması, veri yoksa None
+  1-4. Bağlam derleme: profil satırı (ad/yaş/yaş bandı — log'dan BAĞIMSIZ),
+       gün etiketleri, planlanan yatışla kıyas, gece uyanmasının doğru geceye
+       yazılması, log/plan yokken profilin yine de girmesi
   5.   Prompt'a "BEBEK VERİSİ:" bloğu RAG chunk'larından AYRI giriyor
   6.   CACHE BYPASS: baby_id'li istek cache'e YAZMAZ ve cache'ten OKUMAZ
   7.   baby_id'siz istekte cache HÂLÂ çalışıyor
   8.   Endpoint: cevap bebek adı + somut saat içeriyor; başka kullanıcının
-       bebeği 404; log yoksa genel davranış korunur
+       bebeği 404; log/plan yokken de ad + yaş prompt'a giriyor (cache bypass'lı)
 
 Çalıştırma: python tests/test_baby_context.py
 """
 import os
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+
+try:                                    # cp1254 konsolda '→'/'İ' özeti patlatmasın
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -83,13 +89,25 @@ chatbot._cache_state.update({"loaded": False, "entries": [],
 chatbot.init_index()
 
 TZ = plan_adapter.TZ_OFFSET_MIN
-TODAY = datetime(2026, 8, 3).date()
+
+# TODAY SABİT DEĞİL: endpoint yolu (build_baby_context'in `today` varsayılanı)
+# GERÇEK bugünü kullanır. Sabit bir tarih yazılırsa fixture logları üç günlük
+# pencerenin dışında kalır ve 8b takvim ilerledikçe kalıcı olarak başarısız olur
+# (öyle de oldu). Fixture bu yüzden bugüne GÖRELİ kurulur.
+TODAY = (datetime.now(timezone.utc) + timedelta(minutes=TZ)).date()
 db = SessionLocal()
+
+
+def ay_once(n: int) -> "datetime.date":
+    """TODAY'den tam n ay önceki tarih (_ay_hesapla tam n döndürsün diye gün
+    numarası TODAY'i geçmez)."""
+    toplam = TODAY.year * 12 + (TODAY.month - 1) - n
+    return date(toplam // 12, toplam % 12 + 1, min(TODAY.day, 28))
 
 
 def utc_at(gun_farki: int, saat: int, dakika: int = 0) -> datetime:
     """Yerel (UTC+3) duvar saatini UTC datetime'a çevir."""
-    g = datetime(2026, 8, 3, tzinfo=timezone.utc) - timedelta(days=gun_farki)
+    g = datetime(TODAY.year, TODAY.month, TODAY.day, tzinfo=timezone.utc)         - timedelta(days=gun_farki)
     return g + timedelta(hours=saat, minutes=dakika) - timedelta(minutes=TZ)
 
 
@@ -98,11 +116,13 @@ db.add(u)
 db.commit()
 db.refresh(u)
 
+EGITIM_BASI = TODAY - timedelta(days=33)
+EGITIM_SONU = TODAY - timedelta(days=19)
 baby = Baby(user_id=u.id, name="Elif",
-            birth_date=datetime(2025, 4, 3).date(),     # 2026-08-03'te 16 aylık
+            birth_date=ay_once(16),                     # bugün 16 aylık
             night_wakes=3,
-            training_started_at=datetime(2026, 7, 1).date(),
-            training_completed_at=datetime(2026, 7, 15).date())
+            training_started_at=EGITIM_BASI,
+            training_completed_at=EGITIM_SONU)
 db.add(baby)
 db.commit()
 db.refresh(baby)
@@ -145,7 +165,7 @@ print("-----------------------")
 
 check("1) Profil: ad + ay + eğitim tarihleri",
       ctx is not None and "Elif" in ctx and "16 aylık" in ctx
-      and "2026-07-15" in ctx, str(ctx)[:200])
+      and EGITIM_SONU.isoformat() in ctx, str(ctx)[:200])
 
 check("2) Dün gece yatış 19:05 + planlanandan 55dk erken",
       "19:05" in ctx and "55dk erken" in ctx, str(ctx)[:300])
@@ -160,13 +180,42 @@ check("4) Bugün şekerleme 12:30-13:15",
 check("4b) Bugünün plan çizelgesi özeti var",
       "Bugünün planı" in ctx and "20:00 yatış" in ctx, str(ctx)[:400])
 
-# Veri yoksa None
+check("4d) Profilde yaş bandı var (12-18 ay)",
+      "12-18 ay yaş bandı" in ctx, str(ctx)[:200])
+
+# --- Log/plan YOKSA profil yine de girmeli (BUG: profil satırı log'a bağlıydı) ---
+# Yeni kayıt olan annenin durumu: bebek kaydı var, henüz log ve plan yok.
+yeni = Baby(user_id=u.id, name="Deniz",
+            birth_date=ay_once(11))                     # bugün 11 aylık
+db.add(yeni)
+db.commit()
+db.refresh(yeni)
+
+ctx_yeni = bctx.build_baby_context(db, yeni, today=TODAY)
+print("--- LOGSUZ/PLANSIZ BAĞLAM ---")
+print(ctx_yeni)
+print("-----------------------------")
+
+check("4c) Log ve plan yokken de bağlam KURULUYOR (ad + yaş + bant)",
+      ctx_yeni is not None and "Deniz" in ctx_yeni and "11 aylık" in ctx_yeni
+      and "9-12 ay yaş bandı" in ctx_yeni, str(ctx_yeni)[:200])
+
+check("4c2) Logsuz bağlamda plan bölümü YAZILMIYOR",
+      ctx_yeni is not None and "Bugünün planı" not in ctx_yeni, str(ctx_yeni)[:200])
+
+check("4c3) Logsuz bağlamda uyku kaydının YOKLUĞU belirtiliyor (uydurma freni)",
+      ctx_yeni is not None and "uyku kaydı girilmemiş" in ctx_yeni,
+      str(ctx_yeni)[:200])
+
+# Doğum tarihi olmayan kayıt: profil yalnız addan ibaret, yine de bağlam var
 bos = Baby(user_id=u.id, name="Bos")
 db.add(bos)
 db.commit()
 db.refresh(bos)
-check("4c) Log ve plan yoksa None (mevcut davranış korunur)",
-      bctx.build_baby_context(db, bos, today=TODAY) is None, "")
+_ctx_bos = bctx.build_baby_context(db, bos, today=TODAY)
+check("4c4) Doğum tarihi yoksa profil yalnız ad (yaş uydurulmuyor)",
+      _ctx_bos is not None and _ctx_bos.startswith("Bos.") and "aylık" not in _ctx_bos,
+      str(_ctx_bos)[:160])
 
 # =============================================================================
 # 5) Prompt bloğu: BEBEK VERİSİ, RAG chunk'larından AYRI
@@ -249,13 +298,19 @@ check("8d) Başka kullanıcının bebeği -> 404 (veri sızmaz)",
 r = c.post("/api/v1/chat", headers=H, json={"message": "uyku eğitimi nedir"})
 check("8e) baby_id'siz /chat çalışıyor", r.status_code == 200, r.text[:160])
 
-# Logu olmayan bebek → bağlam yok, istek yine başarılı
+# Logu/planı olmayan bebek → bağlam YİNE DE var (ad + yaş), istek başarılı.
+# Regresyon kilidi: beta'da ilk soruyu soran anne "adını ve kaç aylık olduğunu
+# yazmanız gerek" cevabı almamalı.
 PROMPTS.clear()
 r = c.post("/api/v1/chat", headers=H,
-           json={"message": "bebeğim gece uyanıyor", "baby_id": str(bos.id)})
+           json={"message": "bebeğim gece uyanıyor", "baby_id": str(yeni.id)})
 p = PROMPTS[-1] if PROMPTS else ""
-check("8f) Logsuz bebek → BEBEK VERİSİ bloğu YOK, istek 200",
-      r.status_code == 200 and "BEBEK VERİSİ" not in p, f"{r.status_code}")
+check("8f) Logsuz/plansız bebek → BEBEK VERİSİ bloğu VAR (ad + yaş), istek 200",
+      r.status_code == 200 and "BEBEK VERİSİ" in p and "Deniz" in p
+      and "11 aylık" in p, f"{r.status_code} {p[:300]}")
+check("8g) Logsuz bebekte de cache BYPASS (kişisel istek cache'lenmedi)",
+      r.status_code == 200 and r.json().get("cached") is False,
+      str(r.json().get("cached")))
 
 db.close()
 
