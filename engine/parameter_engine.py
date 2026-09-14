@@ -303,6 +303,25 @@ def on_hazirlik_belirle(profile: dict, yas: dict) -> list[dict]:
 # kod SİLİNMEDİ, ileride geri açılabilsin diye bayrakla kapatıldı.
 BIR_AY_PROGRAM_AKTIF = False
 
+# Büyük çocuk (24+ ay, 6 günlük) planı bayrağı — FAZ N-A, 2026-09-14.
+# YAŞ FARK ETMEKSİZİN herkes 13 günlük programa geçti. Gerekçe: kullanıcı elde
+# tutma — ailenin en az iki hafta uygulamada kalması hedefleniyor, 6 günlük plan
+# bunu kısaltıyordu.
+#
+# İKİ KATMANLI KAPATMA (bilerek):
+#   1. KB'de global_rules.egitim_plani_secimi.istisnalar BOŞALTILDI — asıl karar
+#      budur ve veri kaydıdır; geri açmak için kod dağıtmak gerekmez.
+#   2. Bu bayrak ikinci güvencedir: KB'ye yanlışlıkla bir istisna geri eklenirse
+#      bile motor onu UYGULAMAZ. Planı geri açmak için İKİSİ birden gerekir.
+# Merdiven tanımı (bekleme_sureleri_planla içindeki 6_gun_buyuk_cocuk dalı)
+# SİLİNMEDİ; plan_gunleri.asamalar hâlâ okuyabiliyor.
+#
+# Planın DEĞERLİ İÇERİĞİ kaybolmadı: motivasyon panosu, 5 oyuncak, pozitif
+# teşvik, bilinçaltına konuşma vb. global_rules.buyuk_cocuk_24_ay_ustu altına
+# taşındı ve 13 günlük plana "2 Yaş Üstü İçin Ek Öneriler" bölümü olarak giriyor
+# (bkz. yas_ozel_notlar).
+BUYUK_COCUK_PLANI_AKTIF = False
+
 # Kural okunamazsa kullanılacak son çare (KB bozuksa plan üretimi durmasın).
 _VARSAYILAN_PLAN = {
     "tip": "13_gun_dirençli",
@@ -324,21 +343,20 @@ def _plan_kurali(kb: dict | None = None) -> dict:
 
 
 def egitim_plani_secimi(profile: dict, yas: dict, kb: dict | None = None) -> dict:
-    """Eğitim planını seç. Dönen: 13_gun_dirençli (varsayılan) /
-    6_gun_buyuk_cocuk (24+ ay istisnası) / 1_ay_program (bayrak açıksa).
+    """Eğitim planını seç. Dönen: HER YAŞTA 13_gun_dirençli.
 
-    profile artık plan SÜRESİNİ etkilemez; yalnız 1 aylık program bayrağı
-    açıkken tercih alanına bakılır."""
+    (6_gun_buyuk_cocuk ve 1_ay_program bayrakla kapalı — bkz. BUYUK_COCUK_PLANI_AKTIF
+    ve BIR_AY_PROGRAM_AKTIF. Profil plan SÜRESİNİ etkilemez.)"""
     kural = _plan_kurali(kb)
 
-    # --- İstisnalar (şimdilik tek: 24+ ay büyük çocuk) ----------------------
-    # TODO(İlayda onayı bekliyor): Büyük çocuk planı kendine özel içerik taşıyor
-    # (motivasyon panosu, 5 oyuncak, pozitif teşvik). 24+ ay da 13 güne çekilecek
-    # mi soruldu; cevaba göre bu istisna KB'den kaldırılabilir — kod değişikliği
-    # gerekmez, global_rules.egitim_plani_secimi.istisnalar boşaltmak yeterli.
-    for istisna in kural.get("istisnalar") or []:
-        if istisna.get("kosul") == "duzeltilmis_ay >= 24" and yas["duzeltilmis_ay"] >= 24:
-            return dict(istisna["plan"])
+    # --- İstisnalar (FAZ N-A: hiçbiri uygulanmıyor) -------------------------
+    # KB'deki istisnalar listesi boşaltıldı; bayrak da kapalı. İkisi birden
+    # açılmadıkça bu döngü hiçbir şey yapmaz — kasıtlı ikinci güvence.
+    if BUYUK_COCUK_PLANI_AKTIF:
+        for istisna in kural.get("istisnalar") or []:
+            if (istisna.get("kosul") == "duzeltilmis_ay >= 24"
+                    and yas["duzeltilmis_ay"] >= 24):
+                return dict(istisna["plan"])
 
     varsayilan = dict(kural["varsayilan_plan"])
 
@@ -401,6 +419,60 @@ def gece_beslenme_planla(profile: dict, yas: dict) -> dict | None:
             "saatler": "Yok",
             "kural": "Gece beslenme tamamen kesilmiş olmalı. Su bile uyutmak amacıyla verilmez.",
         }
+
+
+# ---------------------------------------------------------------------------
+# Yaşa özel ek notlar — merdivenin ÜZERİNE eklenen içerik (FAZ N-A)
+# ---------------------------------------------------------------------------
+# 24+ ay çocuklar 6 günlük "büyük çocuk" planından 13 günlüğe alındı. O planın
+# SÜRESİ gitti ama İÇERİĞİ (motivasyon panosu, 5 oyuncak, pozitif teşvik,
+# bilinçaltına konuşma, yataktan çıkabilen çocuk, istek pazarlığı) bu yaşta hâlâ
+# değerli. Artık plana ayrı bir BÖLÜM olarak giriyor: merdiven değişmiyor,
+# üstüne bu yaşın gelişim düzeyine özel teknikler ekleniyor.
+#
+# Yaş eşiği KB'de DEĞİL burada: KB bölümü içeriği tutar, hangi yaşa verileceği
+# motor kararıdır (24 ay = 2 yaş, "2 Yaş Üstü İçin Ek Öneriler" başlığıyla aynı).
+YAS_OZEL_NOT_BOLUMLERI = (
+    # (alt_yas_ay, kb_anahtari, plan_bolum_basligi)
+    (24, "buyuk_cocuk_24_ay_ustu", "2 Yaş Üstü İçin Ek Öneriler"),
+)
+
+
+def yas_ozel_notlar(yas: dict, kb: dict | None = None) -> dict | None:
+    """Bu yaşa özel ek plan bölümü (yoksa None).
+
+    Dönen: {"baslik", "kb_anahtari", "alt_yas_ay", "maddeler": [{"konu","metin"}]}
+    Maddeler KB'den OKUNUR, kodda kopya tutulmaz — içerik tek yerde yaşasın."""
+    ay = yas.get("duzeltilmis_ay")
+    if ay is None:
+        return None
+    try:
+        kurallar = (kb or load_kb()).get("global_rules", {})
+    except Exception:                       # KB okunamadı → plan üretimi durmasın
+        return None
+
+    for alt_yas, anahtar, baslik in YAS_OZEL_NOT_BOLUMLERI:
+        if ay < alt_yas:
+            continue
+        bolum = kurallar.get(anahtar)
+        if not isinstance(bolum, dict) or not bolum:
+            continue
+        return {
+            "baslik": baslik,
+            "kb_anahtari": anahtar,
+            "alt_yas_ay": alt_yas,
+            "maddeler": [{"konu": _baslikla(k), "metin": v}
+                         for k, v in bolum.items() if isinstance(v, str) and v.strip()],
+        }
+    return None
+
+
+def _baslikla(anahtar: str) -> str:
+    """'bes_oyuncak_metodu' → 'Beş oyuncak metodu' benzeri okunur başlık.
+
+    KAPSAM gibi tamamı büyük anahtarlar olduğu gibi bırakılmaz, cümle
+    biçimine çevrilir; plan metninde alt başlık olarak görünüyor."""
+    return anahtar.replace("_", " ").strip().capitalize()
 
 
 def bekleme_sureleri_planla(plan_tipi: str) -> dict:
@@ -537,6 +609,8 @@ def parametre_uret(profile: dict) -> dict:
         "uyarilar": uyarilar,
         "on_hazirlik": on_hazirlik,
         "plan_secimi": plan_secimi,
+        # FAZ N-A: 24+ ay "büyük çocuk" içeriği merdivenin ÜZERİNE ek bölüm.
+        "yas_ozel_notlar": yas_ozel_notlar(yas, kb),
         "gece_beslenme": gece_beslenme,
         "bekleme_sureleri": bekleme,
         "profile_summary": profile,

@@ -63,6 +63,34 @@ Bu plan 4 haftaya yayılır ve "Eğitim Planı" bölümünü iki ayrı döneme a
 """
 
 
+def _yas_ozel_blok(param: dict) -> str:
+    """Yaşa özel ek bölüm talimatı (yoksa boş) — FAZ N-A.
+
+    24+ ay çocuklar artık 13 günlük programa tabi; 6 günlük "büyük çocuk"
+    planının İÇERİĞİ kaybolmasın diye plana ayrı bir bölüm olarak giriyor.
+    Maddeler KB'den geliyor (parameter_engine.yas_ozel_notlar), burada
+    kopyalanmıyor — içerik tek kaynakta kalsın."""
+    notlar = param.get("yas_ozel_notlar")
+    if not notlar or not notlar.get("maddeler"):
+        return ""
+    maddeler = "\n".join(f"- {m['konu']}: {m['metin']}" for m in notlar["maddeler"])
+    return f"""
+YAŞA ÖZEL EK BÖLÜM — ZORUNLU (BU PLANDA UYGULA):
+Bu çocuk {notlar['alt_yas_ay']} ayı (2 yaş) geçtiği için planın SONUNA \
+"## {notlar['baslik']}" başlıklı ayrı bir bölüm EKLE. Bu bölüm merdivenin YERİNE geçmez — \
+13 günlük program aynen uygulanır; bu bölüm onun ÜZERİNE eklenen, bu yaşın gelişim düzeyine \
+özel tekniklerdir. Aşağıdaki maddelerin HEPSİNİ bu bölümde anlat; hiçbirini atlama, \
+sayısal değerleri ve teknik adlarını (motivasyon panosu, beş oyuncak metodu, pozitif teşvik, \
+bilinçaltına konuşma) AYNEN koru. Maddeleri kendi cümlelerinle, anneye hitap ederek yaz.
+
+ÖNEMLİ: Bu bölümde GÜN NUMARASI KULLANMA. "Altıncı gün yatır-çık", "üçüncü gün oda ortası" gibi \
+ifadeler ESKİ 6 günlük büyük çocuk planına aittir ve ARTIK UYGULANMIYOR; gün↔aşama eşlemesinin \
+tek kaynağı yukarıdaki 13 günlük merdivendir. Bu bölümde yalnız TEKNİKLERİ anlat, aşama sayma.
+
+{maddeler}
+"""
+
+
 def _gun_basliklari_blok(param: dict) -> str:
     """Eğitim Planı bölümünde ZORUNLU olan gün başlıklarını birebir dayat.
 
@@ -82,6 +110,7 @@ def _gun_basliklari_blok(param: dict) -> str:
 
 def _build_user_prompt(param: dict) -> str:
     bir_ay_blok = _bir_ay_program_blok(param)
+    yas_ozel_blok = _yas_ozel_blok(param)
     gun_basliklari = _gun_basliklari_blok(param)
     return f"""Aşağıdaki PARAMETRELERİ kullanarak anneye yönelik bir uyku eğitimi planı yaz.
 
@@ -141,7 +170,7 @@ SEÇİLEN PLAN:
 - Tip: {param['plan_secimi']['tip']}
 - Gün sayısı: {param['plan_secimi']['gunler']}
 - Açıklama: {param['plan_secimi']['aciklama']}
-{bir_ay_blok}
+{bir_ay_blok}{yas_ozel_blok}
 YAŞ PARAMETRELERİ (bucket'tan):
 {_format_dict(param['parametreler'])}
 
@@ -163,6 +192,7 @@ PLANIN İÇERMESİ GEREKEN BÖLÜMLER:
 6. ## Gece Uyanmaları Protokolü
 7. ## Başarı Kriterleri
 8. ## Dikkat Edilmesi Gerekenler (kaçınılması gereken hatalar)
+9. (YALNIZ "YAŞA ÖZEL EK BÖLÜM" talimatı verildiyse) o bölüm — planın EN SONUNA, verilen başlıkla
 
 GÜN BAŞLIKLARI — BİÇİM SABİTTİR, DEĞİŞTİRME:
 "## Eğitim Planı" bölümünün içinde aşama başlıklarını AŞAĞIDAKİ SATIRLARIN BİREBİR AYNISI olarak yaz. Aynı sırayla, aynı sayıda, hepsi eksiksiz:
@@ -409,6 +439,23 @@ def _fallback_plan(param: dict) -> str:
     lines.append("- Bebeği uykudan uyandırıp gece beslemek (her zaman uykudayken)")
     lines.append("- Histerik ağlamayı bekleme süresiyle yönetmek (histerik anında doğrudan müdahale)")
     lines.append("")
+
+    # Bölüm 9: yaşa özel ek bölüm (FAZ N-A — 24+ ay büyük çocuk içeriği).
+    # Claude yolundaki başlıkla AYNI; ikisi ayrışmasın diye başlık param'dan gelir.
+    # Gün bölümlerinden SONRA yazılıyor ki days[-1].markdown'a yapışmasın
+    # (aynı gerekçe: genel kurallar gün bloklarından ÖNCE yazılıyor).
+    notlar = param.get("yas_ozel_notlar") or {}
+    if notlar.get("maddeler"):
+        lines.append(f"## {notlar['baslik']}")
+        lines.append("")
+        lines.append("Bu bölüm 13 günlük programın YERİNE geçmez; merdiven aynen "
+                     "uygulanır. Aşağıdakiler bu yaşın gelişim düzeyine özel ek "
+                     "tekniklerdir.")
+        lines.append("")
+        for m in notlar["maddeler"]:
+            lines.append(f"**{m['konu']}:** {m['metin']}")
+            lines.append("")
+
     lines.append("---")
     lines.append("")
     lines.append(f"*Bu plan {bebek_adi} için kişisel olarak üretildi. Sorularınız için Soru-Cevap bölümünü kullanın.*")

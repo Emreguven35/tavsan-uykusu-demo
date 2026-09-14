@@ -102,6 +102,12 @@ check("2c) Profilde yaklasim_tercihi HİÇ OLMASA da çalışıyor "
 # =============================================================================
 # 3) YAŞ SINIRLARI
 # =============================================================================
+#
+# FAZ N-A (2026-09-14): 24+ ay istisnası KALDIRILDI. Yaş fark etmeksizin herkes
+# 13 günlük programa tabidir. Gerekçe: kullanıcı elde tutma — ailenin en az iki
+# hafta uygulamada kalması hedefleniyor, 6 günlük plan bunu kısaltıyordu.
+# (Önceki beklenti: 24+ ay → 6_gun_buyuk_cocuk. Git diff'te değişim görünsün
+# diye eski kontroller silinmedi, TERSİNE çevrildi.)
 _yas_hata = []
 for _ay in [5, 5.1, 6, 8, 11.9, 12, 15, 18, 23.9]:
     t = sec(_ay, "sakin", "45 dakika")
@@ -110,16 +116,27 @@ for _ay in [5, 5.1, 6, 8, 11.9, 12, 15, 18, 23.9]:
 check("3) 24 ay ALTINDAKİ her yaş 13 günlük plan alıyor",
       not _yas_hata, str(_yas_hata))
 
-# 24+ ay istisnası KORUNUYOR (İlayda onayı bekleniyor — koda TODO düşüldü).
+# 24+ ay ARTIK İSTİSNA DEĞİL — 6 günlük plan hiçbir yaşta üretilmemeli.
 _buyuk_hata = [f"{ay} ay → {sec(ay, 'sakin', '45 dakika')}"
-               for ay in [24, 24.1, 30, 36, 48]
-               if sec(ay, "sakin", "45 dakika") != "6_gun_buyuk_cocuk"]
-check("3b) 24+ ay istisnası korunuyor → 6_gun_buyuk_cocuk",
+               for ay in [24, 24.1, 26, 30, 36, 48, 76]
+               if sec(ay, "sakin", "45 dakika") != "13_gun_dirençli"]
+check("3b) 24+ ay İSTİSNASI KALDIRILDI → herkes 13_gun_dirençli",
       not _buyuk_hata, str(_buyuk_hata))
 
-check("3c) 24 ay sınırı KESİN (23.9 → 13 gün, 24.0 → büyük çocuk)",
-      sec(23.9) == "13_gun_dirençli" and sec(24.0) == "6_gun_buyuk_cocuk",
+check("3c) 24 ay sınırında KIRILMA YOK (23.9 ve 24.0 aynı planı alıyor)",
+      sec(23.9) == sec(24.0) == "13_gun_dirençli",
       f"23.9={sec(23.9)} 24.0={sec(24.0)}")
+
+# Görevdeki üç test profili — ekranda "5/6 gün" görünen hata buydu.
+_profil_hata = [f"{ay} ay → {sec(ay)}" for ay in (26, 36, 76)
+                if sec(ay) != "13_gun_dirençli"]
+check("3c2) Görev profilleri (26 / 36 / 76 ay) 13 gün alıyor",
+      not _profil_hata, str(_profil_hata))
+
+# 6 günlük plan hiçbir yaşta üretilmiyor mu? (0-36 ay + büyük çocuk taraması)
+_alti_gun = [ay for ay in [x / 2 for x in range(10, 200)] if sec(ay) == "6_gun_buyuk_cocuk"]
+check("3c3) HİÇBİR yaşta 6_gun_buyuk_cocuk üretilmiyor (5-100 ay taraması)",
+      not _alti_gun, f"üreten yaşlar={_alti_gun[:10]}")
 
 check("3d) 24+ ayda mizaç/dayanma/tercih de ETKİSİZ",
       len({sec(30, m, d, t) for m in ("hassas", "sakin")
@@ -154,6 +171,80 @@ try:
           f"{_bir_ay.get('alt_yontem_tip')} / {_bir_ay.get('alt_yontem_gunler')}")
 finally:
     pe.BIR_AY_PROGRAM_AKTIF = False          # bayrağı geri kapat
+
+
+# =============================================================================
+# 4B) BÜYÜK ÇOCUK PLANI — bayrakla devre dışı (FAZ N-A)
+# =============================================================================
+check("4B) BUYUK_COCUK_PLANI_AKTIF bayrağı var ve KAPALI",
+      hasattr(pe, "BUYUK_COCUK_PLANI_AKTIF") and pe.BUYUK_COCUK_PLANI_AKTIF is False,
+      str(getattr(pe, "BUYUK_COCUK_PLANI_AKTIF", "bayrak yok")))
+
+# İKİ KATMANLI KAPATMA: KB'de istisna boş + bayrak kapalı. Bayrağı tek başına
+# açmak YETMEMELİ — KB'de istisna olmadığı için yine 13 gün dönmeli.
+pe.BUYUK_COCUK_PLANI_AKTIF = True
+try:
+    check("4B2) Bayrak açık ama KB istisnası boş → yine 13 gün (iki katmanlı kapatma)",
+          sec(76) == "13_gun_dirençli", sec(76))
+
+    # Kod SİLİNMEDİ: KB'ye istisna geri konur + bayrak açılırsa plan üretilebilmeli.
+    _sahte_kural = {
+        "varsayilan_plan": {"tip": "13_gun_dirençli", "gunler": 13, "aciklama": ""},
+        "istisnalar": [{"kosul": "duzeltilmis_ay >= 24",
+                        "plan": {"tip": "6_gun_buyuk_cocuk", "gunler": 6,
+                                 "aciklama": "geri açma denemesi"}}],
+    }
+    _geri = egitim_plani_secimi(
+        {"mizac": "sakin"}, yas(30),
+        {"global_rules": {"egitim_plani_secimi": _sahte_kural}})
+    check("4B3) KB istisnası + bayrak birlikte açılırsa plan GERİ GELİYOR (kod duruyor)",
+          _geri["tip"] == "6_gun_buyuk_cocuk" and _geri["gunler"] == 6,
+          str(_geri.get("tip")))
+finally:
+    pe.BUYUK_COCUK_PLANI_AKTIF = False       # bayrağı geri kapat
+
+check("4B4) Bayrak geri kapandı, 76 ay yine 13 gün",
+      sec(76) == "13_gun_dirençli", sec(76))
+
+
+# =============================================================================
+# 4C) BÜYÜK ÇOCUK İÇERİĞİ KAYBOLMADI — merdivenin ÜZERİNE ek bölüm
+# =============================================================================
+# 6 günlük planın SÜRESİ gitti ama İÇERİĞİ (motivasyon panosu, 5 oyuncak,
+# pozitif teşvik, bilinçaltına konuşma) 2 yaş üstünde hâlâ değerli.
+_notlar_24 = pe.yas_ozel_notlar(yas(26))
+_notlar_20 = pe.yas_ozel_notlar(yas(20))
+
+check("4C) 24 ay ALTINDA yaşa özel ek bölüm YOK",
+      _notlar_20 is None, str(_notlar_20))
+check("4C2) 24 ay ÜSTÜNDE '2 Yaş Üstü İçin Ek Öneriler' bölümü var",
+      _notlar_24 is not None and _notlar_24["baslik"] == "2 Yaş Üstü İçin Ek Öneriler",
+      str((_notlar_24 or {}).get("baslik")))
+
+import re as _re  # noqa: E402
+_metin_24 = " ".join(m["metin"] for m in (_notlar_24 or {}).get("maddeler", [])).lower()
+_KORUNACAK = ("motivasyon panosu", "beş oyuncak", "pozitif teşvik",
+              "bilinçaltına konuşma", "montessori", "kortizol")
+_kayip = [k for k in _KORUNACAK if k not in _metin_24]
+check("4C3) Büyük çocuk teknikleri KAYBOLMADI",
+      not _kayip, f"kayıp={_kayip}")
+
+# Ek bölüm merdivenin YERİNE geçmemeli: gün numarasını bir AŞAMAYA bağlamamalı.
+# Ham regexle "13 günlük" ve "ikinci günden itibaren direnç kısalır" gibi masum
+# ifadeler de yakalanıyordu; bu yüzden ÜRETİMDEKİ filtrenin kendisi kullanılıyor.
+# gun_asama_temizle bir cümleyi düşürüyorsa o cümle gerçek bir gün↔aşama
+# iddiasıdır (eski 6 günlük eşlemenin sızma yolu tam olarak budur).
+from engine.chatbot import gun_asama_temizle                      # noqa: E402
+
+_dusen = [c for m in (_notlar_24 or {}).get("maddeler", [])
+          for c in _re.split(r"(?<=[.!?])\s+", m["metin"])
+          if c.strip() and not gun_asama_temizle(c).strip()]
+check("4C4) Ek bölümde GÜN↔AŞAMA iddiası yok (merdiven tek kaynak)",
+      not _dusen, f"iddia içeren cümle={_dusen}")
+
+check("4C5) Ek bölüm 13 günlük programın YERİNE geçmediğini söylüyor",
+      "13 günlük kademeli program aynen uygulanır" in _metin_24
+      or "yerine geçmez" in _metin_24, _metin_24[:200])
 
 
 # =============================================================================
@@ -192,10 +283,20 @@ check("6b) KB varsayılan planı 13 günlük",
       and (_kural or {}).get("varsayilan_plan", {}).get("gunler") == 13,
       str((_kural or {}).get("varsayilan_plan")))
 
-check("6c) KB 24+ ay istisnasını kaydediyor",
-      any(i.get("plan", {}).get("tip") == "6_gun_buyuk_cocuk"
-          for i in (_kural or {}).get("istisnalar", [])),
+check("6c) KB'de istisna KALMADI (24+ ay kaldırıldı — FAZ N-A)",
+      (_kural or {}).get("istisnalar") == [],
       str((_kural or {}).get("istisnalar")))
+
+check("6c2) 6_gun_buyuk_cocuk devre dışı planlar arasında KAYITLI (silinmedi)",
+      "6_gun_buyuk_cocuk" in ((_kural or {}).get("devre_disi_planlar") or {}),
+      str(list(((_kural or {}).get("devre_disi_planlar") or {}).keys())))
+
+# Merdiven TANIMI silinmedi — bayrak açılırsa plan yeniden üretilebilmeli.
+from engine.plan_gunleri import asamalar as _asamalar             # noqa: E402
+
+_alti = _asamalar("6_gun_buyuk_cocuk")
+check("6c3) 6 günlük merdiven tanımı KORUNDU (geri açılabilir)",
+      len(_alti) == 5 and _alti[-1]["end"] == 6, str(_alti))
 
 # Motor GERÇEKTEN KB'den okuyor mu? KB'yi geçici değiştirip çıktının değiştiğini
 # gör — sabit kodlanmış olsaydı bu test kaldırdı.

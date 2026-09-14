@@ -195,13 +195,28 @@ _GUN_DESENI = re.compile(
 # 'oda\w*\s+ortas': odanın / odasının / odamızın ortası — transkriptte üçü de geçiyor.
 # 'uzaklaş': "üçüncü gün uzaklaşmayacağız, dördüncü gün uzaklaşacağız" da bir
 # gün↔aşama iddiasıdır (uzaklaşma = merdivende bir basamak ilerlemek).
+# FAZ N-A EKİ: 24+ ay çocuklar da 13 günlük programa geçti, yani ESKİ 6 GÜNLÜK
+# büyük çocuk numaralandırması (kayıt38) artık HİÇBİR yaşta geçerli değil ve
+# korpusta kalırsa aktif olarak yanlış. Ölçümde beş cümle filtreyi aşıyordu;
+# sebebi aşama sözcüğünün farklı çekimlenmesiydi:
+#   "Dördüncü güne geldiğimizde ... konumumuz KAPININ ORADA olmalı"  → 'kapıda' tutmuyor
+#   "birinci günde ... bekleme yeriniz ... YATAĞININ YANI"           → 'yatak yan' tutmuyor
+# Eklenenler: yatağın(ın)/yatağına yanı · kapının orada/orası/yanı · odanın içi.
 _ASAMA_DESENI = re.compile(
-    r"beşik yan|beşiğin yan|yatak yan|oda\w*\s+ortas|kapı(nın)? eşiğ|kapıya geç"
-    r"|kapıda|yatır.?\s?çık|yatırıp çık|yatırcık|yatır cık|yatırma ve çıkma"
-    r"|yatırmak ve çıkmak|uzaklaş", re.IGNORECASE)
+    r"beşik yan|beşiğin yan|yatak yan|yatağ\w*\s+yan|oda\w*\s+ortas"
+    r"|kapı(nın)? eşiğ|kapıya geç|kapıda|kapı\w*\s+(orada|oras\w*|yan\w*)"
+    r"|yatır.?\s?çık|yatırıp çık|yatırcık|yatır cık|yatırma ve çıkma"
+    r"|yatırmak ve çıkmak|yatağına\s+(kendisini\s+)?gönder|uzaklaş", re.IGNORECASE)
 # "beş günde yatır çık yaparız" gibi SÜRE iddiaları (gün numarası geçmese de).
+# FAZ N-A: 6 günlük planın "altıncı günü uygulamazsan eğitim bozulur" iddiası da
+# buraya girer — aşama sözcüğü geçmediği için _ASAMA_DESENI onu yakalamıyordu.
 _KAC_GUNDE_DESENI = re.compile(
-    r"(beş|5|on üç|13)\s*gün(de|ün)?\s*(sonra)?[^.!?]{0,30}(yatır|yatırcık)",
+    r"(beş|5|altı|6|on üç|13)\s*gün(de|ün|ü)?\s*(sonra)?[^.!?]{0,30}(yatır|yatırcık)"
+    # "altıncı günü uygulamazsak eğitim bozulur" — 6 günlük planın SON adımının
+    # kritik olduğu iddiası. Bekleme süresi ilerlemesini anlatan cümleler
+    # ("beşinci gün 20 dakika, altıncı gün 25") bu kalıba GİRMEZ ve korunur:
+    # tetiklemek için aynı cümlede bozulma/uygulamama ifadesi de geçmeli.
+    r"|(altıncı|beşinci)\s*gün[^.!?]{0,90}(bozul|uygulamasak|uygulamazsak|uygulamaz)",
     re.IGNORECASE)
 
 
@@ -1249,7 +1264,13 @@ numaralandırmasını kullanma. Aralık uçları DAHİLDİR; gün gün açık li
 Cevabında önce bu listeden o günün konumunu bul, sonra yaz; aralık sınırlarını kendin yorumlama. \
 Bilgi parçalarında 5 günlük bir gün numaralandırması geçiyorsa (ör. "3. gün oda ortası", "5. gün yatır-çık") \
 bu ESKİ programa aittir; cevabına TAŞIMA ve yukarıdaki 13 günlük eşlemeye çevir. \
-24 ay üstü büyük çocuk planı 6 günlüktür; yalnız yaş açıkça 24 ay üstüyse o plandan söz et. \
+YAŞ İSTİSNASI YOKTUR (FAZ N-A): 24 ay ve üzeri çocuklar da AYNI 13 günlük programa tabidir. \
+Eskiden 24 ay üstünde 6 günlük bir "büyük çocuk planı" uygulanıyordu; bu ARTIK UYGULANMIYOR ve \
+hiçbir yaşta 6 günlük plandan söz etme. Bilgi parçalarında 6 günlük bir numaralandırma geçiyorsa \
+(ör. "altıncı gün yatır-çık") cevabına TAŞIMA, yukarıdaki 13 günlük eşlemeye çevir. 2 yaş üstü \
+çocuklarda merdivenin ÜZERİNE eklenen teknikler vardır (motivasyon panosu, beş oyuncak metodu, \
+pozitif teşvik, bilinçaltına konuşma, yataktan çıkabilen çocuğu geri götürme); bunlar planın \
+süresini DEĞİŞTİRMEZ, ona eklenir. \
 0-3 AY KURALI (MUTLAK — DUYGUSAL TON BUNU GEVŞETMEZ): Bebek 3 aydan küçükse (düzeltilmiş yaş) uyku EĞİTİMİ \
 ANLATILMAZ. Bu yaşta 13 günlük merdiven, bekleme süreleri, yatır-çık, kademeli uzaklaşma ve katı saat programı \
 VERİLMEZ; "kendi kendine uyumalı" beklentisi KURULMAZ. Anne bu yaşta eğitim isterse: eğitimin 5. ayın dolmasıyla \

@@ -561,29 +561,21 @@
       "anne_ruhsal_zorlanma_siniri": "Anne derin çaresizlik, tükenmişlik ya da kendine veya bebeğine zarar verme ima ediyorsa: bu bir uyku sorunu olarak ele alınmaz. Anneye duygusal destek verilir ve bir uzmandan (kendi doktoru, psikolog ya da psikiyatri uzmanı) yardım alması önerilir. Bu durumda uyku eğitimi tekniği anlatılmaz. Doğum sonrası dönemde bu duygular yaygındır ve destekle geçer."
     },
     "egitim_plani_secimi": {
-      "kural": "Tüm bebekler 13 günlük kademeli programa tabidir. Yaklaşım tercihi, mizaç ve ebeveynin ağlamaya dayanma sınırı plan SÜRESİNİ ETKİLEMEZ. Tek istisna 24 ay ve üzeri çocuklardır (büyük çocuk planı).",
+      "kural": "YAŞ FARK ETMEKSİZİN TÜM kullanıcılar 13 günlük kademeli programa tabidir. Yaklaşım tercihi, mizaç, ebeveynin ağlamaya dayanma sınırı ve YAŞ plan SÜRESİNİ ETKİLEMEZ. İstisna YOKTUR.",
       "varsayilan_plan": {
         "tip": "13_gun_dirençli",
         "gunler": 13,
         "aciklama": "13 günlük kademeli plan: yatak yanı 1-3 gün, oda ortası 4-6, kapı 7-9, eşik 10-12, yatır-çık 13."
       },
-      "istisnalar": [
-        {
-          "kosul": "duzeltilmis_ay >= 24",
-          "plan": {
-            "tip": "6_gun_buyuk_cocuk",
-            "gunler": 6,
-            "aciklama": "Büyük çocuk planı: 6 günlük (motivasyon panosu + 5 oyuncak + pozitif teşvik dahil)."
-          },
-          "durum": "ONAY BEKLİYOR — bu planın kendine özel içeriği olduğu için şimdilik korunuyor; 13 güne çekilip çekilmeyeceği sorulacak."
-        }
-      ],
+      "istisnalar": [],
       "etkilemeyen_alanlar": "yaklasim_tercihi, mizac, dayanma_siniri (crying_tolerance), deneyim, gece_uyanma, destek. Bu alanlar ön hazırlık ve uyarıları etkilemeye devam eder; yalnız plan SÜRESİNİ belirlemezler.",
       "devre_disi_planlar": {
         "1_ay_program": "Yaklaşım tercihiyle tetikleniyordu; tercih kaldırıldığı için erişilemez. Kod silinmedi, bayrakla (BIR_AY_PROGRAM_AKTIF) kapatıldı; ileride geri açılabilir. Açılırsa 3-4. hafta alt yöntemi 13 güne sabittir.",
-        "5_gun_standart": "Artık otomatik seçilmiyor. Merdiven tanımı (kademeli_uzaklasma_5_gun) referans olarak korunuyor."
+        "5_gun_standart": "Artık otomatik seçilmiyor. Merdiven tanımı (kademeli_uzaklasma_5_gun) referans olarak korunuyor.",
+        "6_gun_buyuk_cocuk": "24 ay ve üzeri çocuklarda otomatik seçiliyordu; FAZ N-A ile kaldırıldı (karar 2026-09-14). Gerekçe: kullanıcı elde tutma — çocuğun yaşı ne olursa olsun ailenin en az iki hafta uygulamada kalması hedefleniyor, 6 günlük plan bunu kısaltıyordu. Merdiven tanımı (bekleme_sureleri_planla içindeki 6_gun_buyuk_cocuk dalı) referans olarak KORUNUYOR ve kod BUYUK_COCUK_PLANI_AKTIF bayrağıyla kapatıldı; ileride geri açılabilir. Planın DEĞERLİ İÇERİĞİ kaybolmadı: global_rules.buyuk_cocuk_24_ay_ustu altına taşındı ve 13 günlük plana '2 Yaş Üstü İçin Ek Öneriler' bölümü olarak giriyor."
       },
-      "karar_tarihi": "2026-08-10"
+      "karar_tarihi": "2026-09-14",
+      "onceki_karar_tarihi": "2026-08-10"
     },
     "kademeli_uzaklasma_5_gun_ARSIV_ARTIK_UYGULANMIYOR": {
       "_durum": "ARŞİV — BU MERDİVEN ARTIK UYGULANMIYOR. Tüm bebekler 13 günlük kademeli programa tabidir (bkz. egitim_plani_secimi). Gün numaralarına göre konum sorulduğunda kademeli_uzaklasma_13_gun_dirençli kullanılır: 1-3 beşik yanı, 4-6 oda ortası, 7-9 kapı, 10-12 eşik, 13 yatır-çık. Bu kayıt yalnız tarihsel referanstır; anneye 5 günlük gün eşlemesi ANLATILMAZ.",
@@ -625,6 +617,25 @@
       "atak_tablosu_10_atak": "On atak, tahmini doğum tarihinden itibaren yaklaşık şu haftalarda beklenir: 1. atak 5. hafta (duyuların keskinleşmesi, uyanıklığın artması); 2. atak 8. hafta (örüntüleri fark etme, ellerini keşfetme); 3. atak 12. hafta (geçişleri ve akışkan hareketi fark etme, sesini keşfetme); 4. atak 19. hafta (olaylar arasında bağ kurma, nesneye uzanma); 5. atak 26. hafta (mesafe ve ayrılık kavramı, ayrılık kaygısının başlaması); 6. atak 37. hafta (sınıflandırma, neden-sonuç ilişkisi); 7. atak 46. hafta (sıralama, adım adım iş yapma); 8. atak 55. hafta (program kurma, kendi kararını uygulamak isteme); 9. atak 64. hafta (ilkeler, kural sınama ve inatlaşma); 10. atak 75. hafta (sistemler, benlik ve kimlik duygusu). Haftalar yaklaşıktır; önce ve sonrasında birer haftalık sapma olağandır.",
       "uykuya_etkisi_ve_ne_yapilir": "Atak dönemlerinde uykuların kısalması, gece uyanmalarının artması, yatışın zorlaşması, iştah değişikliği ve anneye daha çok yapışma görülebilir. Bu dönemler GEÇİCİDİR (birkaç gün ile birkaç hafta). Bu dönemde yapılması gereken: uyanıklık penceresini yaşa uygun tutmak, rutini bozmamak, yakınlık ihtiyacını karşılamak ve yeni destek alışkanlıkları (yeniden emzikle/memeyle uyutma gibi) EDİNDİRMEMEKtir. Atak bahanesiyle kurulmuş düzenden vazgeçilmez; atak geçtiğinde düzen kendiliğinden geri gelir.",
       "aciklanamayan_huzursuzlukta_sira": "Huzursuz bir bebekte değerlendirme sırası: önce hastalık belirtileri (ateş, kusma, ishal, kulak çekiştirme) ve gerekiyorsa doktor; sonra beslenme (yetersiz alım, gaz, reflü şüphesi); sonra büyüme atağı; sonra yaşa uygun olmayan uyanıklık süreleri ve aşırı yorgunluk; EN SON atak dönemi. Atak ilk açıklama olarak kullanılmaz."
+    },
+    "buyuk_cocuk_24_ay_ustu": {
+      "KAPSAM": "24 ay (2 yaş) ve üzeri çocuklarda 13 günlük kademeli program AYNEN uygulanır — merdiven, bekleme süreleri ve yatır-çık günü değişmez. Bu bölüm merdivenin YERİNE geçmez; onun ÜZERİNE eklenen, bu yaşın gelişim düzeyine özel tekniklerdir. Çocuk artık konuşulanı anlıyor, pazarlık ediyor ve yatağından kendi çıkabiliyor; eğitim bu üç gerçeğe göre desteklenir.",
+      "on_konusma_cocukla_anlasma": "Eğitim başlamadan ÖNCE çocukla açıkça konuşulur: 'Artık uykuyu öğreneceğiz. Ben senin odanda olacağım, bunu beraber başaracağız. Benim yanıma gelmek, benim yanımda yatmak için artık çok büyüdün; senin kendi yatağın var.' Bu konuşma çocuğu sürecin dışında bırakmaz, ortağı yapar. Bebeklerden farkı budur: büyük çocuğa NE OLACAĞI önceden anlatılır.",
+      "bes_oyuncak_metodu": "Beş oyuncak metodu: çocuğun daha önce hiç oynamadığı beş oyuncak alınır ve HER GÜN bir yenisi yatağına bırakılır. Bu oyuncaklar yataktan hiç çıkmaz — yalnızca UYKU OYUNCAĞIDIR. Amaç yatağı cazip bir yer hâline getirmektir; bir süre sonra çocuk onlarla oynamak için bile ağlamadan yatağına girmek ister. Oyuncakların güvenli olması gerekir: tüylü olmamalı, boncuk/çıkabilir göz taşımamalı, yutulabilecek ya da koparılabilecek parçası olmamalıdır.",
+      "yataga_cezbetme": "Yatağı çocuğun isteyeceği bir yer yapın: sevdiği bir çizgi film karakterinin nevresim takımı, o karakterden bir uyku arkadaşı ya da yatağa ait küçük bir ayrıcalık. 'Senin yatağın' fikri somut bir çekicilik taşımalı.",
+      "motivasyon_panosu": "Motivasyon panosu: akşam rutininin adımlarının (tuvalet, su içme, elleri yıkama, banyo, yatağa girme, ağlamadan uyuma) tek tek yer aldığı bir pano hazırlanır. Çocuk her adımı KENDİ tamamlar ve o adımın kapağını mıknatısla kapatır. Yalnız 'uyuma' adımı AÇIK BIRAKILIR: 'Şimdi yatıyoruz; sabah kalkınca bunu beraber kapatacağız, hatta sen kapatacaksın.' Sabah o kapağı kapatmak günün ilk başarısı olur. Pano rutini çocuğun kendi yönettiği bir göreve çevirir; kavga eksenini 'anne istiyor' olmaktan çıkarır.",
+      "pozitif_tesvik": "Pozitif teşvik: 'Ağlamadan, yatağından kalkmadan bütün gece uyuduğunda yarın seninle birlikte şunu yapacağız' gibi, çocuğun sevdiği ama HER ZAMAN verilmeyen bir şey söz verilir ve söz MUTLAKA tutulur. Bu ceza değil ödüllendirmedir: çocuğu mutlu ederseniz o da sizi mutlu eder. Teşvik ağlamayı ortadan kaldırmaz — ağlama süreçte yine yaşanır — ama çocuğun sürece katılma isteğini artırır.",
+      "bilincaltina_konusma": "Bilinçaltına konuşma: çocuk uykuya geçtikten yaklaşık 5 dakika sonra ona hafifçe dokunulur ve alçak sesle konuşulur: 'Ağlamadan uyuyabilirsin. Senin yanındayım. Seni çok seviyorum. Asla bırakmıyorum. Sen artık yatağında uyumayı öğreniyorsun.' Bu her gün tekrarlanır. Uykunun ilk evresinde zihin dinlenirken bilincin açık kaldığı düşünülür; amaç ağlamadan uyuma fikrini sakin bir anda vermektir.",
+      "yataktan_cikabilen_cocuk_montessori": "Çocuk yatağından kendi çıkabiliyorsa (Montessori yatak, açık yatak): her çıkışında sessizce alınıp yatağına geri götürülür ve ebeveyn o günkü merdiven konumuna geri döner. Bu yorulmadan, tartışmadan ve HER SEFERİNDE yapılır — tutarlılık tekniğin kendisidir. Park yatak kullanılıyorsa bu sorun yaşanmaz; çıkabildiği bir yatağa geçildiğinde eğitim bozulursa aynı program yeniden uygulanabilir. Yatağın içinde AYAĞA KALKMAK serbesttir, sürekli yatırmaya çalışmayın — yalnız yataktan ÇIKTIĞINDA geri götürün.",
+      "odada_oyuncak_ve_gezinme": "Uyku odasında görünür yerde oyuncak bulunmamalıdır; çocuk kalkıp oynamak isteyebilir. Direnç uzarsa (yaklaşık 45 dakika) çocuğun ODADAN ÇIKMADAN oda içinde birkaç dakika gezinmesine izin verilebilir: uzun uyanıklıkta salgılanan kortizol ancak hareketle atılır. Ama OYUN OYNAMASINA izin verilmez — 'oyun bitti, uyku saati' mesajı korunur. Oyuna yönelirse sakince alınıp yatağına yatırılır.",
+      "istek_pazarligi_yonetimi": "Büyük çocuk uykuyu ertelemek için istek üretir: su, tuvalet, ıslak mendil, kitap, şu oyuncak. Bir kez gerçek ihtiyaç karşılanır; sonrası için iletişim MİNİMUMA indirilir: 'Şimdi gözlerimi kapatacağım. Bir, iki, üç diyeceğim; tıp yapacağız ve uyuyacağız.' Bundan sonra konuşulmaz. Reddederken kural esnetilmez ama çocuk duyulur: 'O oyuncağın zamanı değil; uyandıktan sonra beraber oynayabiliriz.' Kararlılık ve tutarlılık tekniğin kendisidir — sonucun değişmediğini gören çocuk ertesi sefer çok daha hızlı uyum sağlar.",
+      "saldirgan_tepkiler": "Bu yaşta çocuk vurabilir, saçınızı çekebilir, burnunuzu sıkabilir. Sakin kalın, gerekirse bir adım geri durun ve uyuyor gibi yapmaya devam edin. Ağlama şiddetlenirse öpüp sarılın, gerekirse kucağa alın — ancak kucağa alma aralığını kademeli artırın (30 saniye, 1 dakika, 1,5 dakika, 2 dakika) ve sakinleşince yatağa geri yatırın. Kucağa almak yerine yatağına kadar eğilip sarılmak çoğu zaman daha iyi çalışır.",
+      "gunduz_uykusu_ve_gune_baslama": "2 yaş üstü çocukların çoğu öğlen uykusu yapmaz ve yapmaması tercih edilir; yaparsa gündüz uykusu en geç 14:30'da BİTMİŞ olmalıdır, aksi hâlde gece uykusu çok geçe kalır. Çocuk kreşe gidiyorsa bu saat konusunda kreşle işbirliği yapılır. Güne en geç 07:00-08:00 arasında başlanır; 09:00'a kesinlikle sarkmamalıdır.",
+      "gece_uyanmasi_ve_tuvalet": "Gece uyanmasında çocuğun yanına gitmeden önce yaklaşık 20 dakika beklenir; bu sürede çoğu çocuk kendi kendine uykuya geri döner. Dönmezse gidilir, sakinleştirilir ve o günkü merdiven konumundan beklemeye devam edilir. Tuvalet alıştırma dönemindeyse çocuğun uyanmasını beklemek yerine gece yarısına doğru (23:00-00:00 civarı) kaldırıp tuvaletini yaptırıp yatırmak tercih edilir; 4 yaş civarında tutma kasları geliştiğinde buna da gerek kalmaz.",
+      "gece_beslenmesi": "Bu yaşta gece uyandığında emzirme, biberon ya da mama VERİLMEZ. Gündüz emzirmeyi sürdürmek ebeveynin tercihidir ve bir anda kesilmesi istenmez; ama gece uyanmasına verilen yanıt beslenme olmamalıdır.",
+      "surec_beklentisi": "Büyük çocukta ilk gün direnç, inatlaşma ve pazarlık küçük bebeklerden daha uzun sürebilir — ilk gece uykuya geçiş saatler alabilir. Buna karşılık çocukların büyük çoğunluğunda direnç ikinci günden itibaren belirgin biçimde kısalır. Belirleyici olan tekniğin sertliği değil, ebeveynin tutarlılığı ve kararlılığıdır: çizilen pozitif sınırın değişmediğini gören çocuk sınırı sınamayı bırakır.",
+      "uyku_ogretilebilir": "Doğru uyku alışkanlığı ÖĞRETİLEBİLİR bir kavramdır ve öğretilmezse sorun kendiliğinden geçmez — 4, 5, hatta 6 yaşında da sürebilir. 'Büyüyünce geçer' beklentisi bu yaşta geçerli değildir; üst yaş sınırı yaklaşık 6 yaştır ve 2-3 yaş eğitim için geç DEĞİLDİR.",
+      "korku_dile_getirirse": "Bu yaştaki çocuk uykudan kaçmak için korku dile getirebilir ('karanlıktan korkuyorum', 'canavar var'). Korku görmezden GELİNMEZ: çocuğun yanında olunur, duygusu kabul edilir, ama uyku sınırı da korunur. Korku ısrarlı, yoğun ve gündüze taşıyorsa bir çocuk psikoloğuna/pedagoğa danışılması önerilir."
     }
   },
   "tutarsizlik_raporu": [

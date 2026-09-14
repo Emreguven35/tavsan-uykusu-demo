@@ -796,6 +796,12 @@ SELECT content, top_score, created_at
 Plan artık tek bir çıktı türü değil. **Mobil `days` doluluğuna değil, `type`
 alanına bakmalıdır.**
 
+> **DEĞER SABİTTİR: `"yenidogan_ritim"`.** Bu alanın 0-3 ay değeri
+> `yenidogan_ritim`'dir — `uyku_duzenlemesi` DEĞİL. Üretimde çalışan ve
+> `/health` üzerinden doğrulanan sürüm bu değeri döndürür; sunucu tarafındaki
+> sabit `api/services/plan_service.TYPE_YENIDOGAN`'dır. Mobil bu dizgiyi birebir
+> beklemelidir.
+
 | `type` | Ne zaman | `days` | `schedule` | Üretim |
 |---|---|---|---|---|
 | `egitim_plani` | Düzeltilmiş yaş ≥ 5 ay, eğitim uygun | **dolu** (5 aşama) | dolu | Claude |
@@ -851,6 +857,43 @@ Davranış garantileri:
   eğitim planı üretmez; mobil bu bayrağı görüp kullanıcıya "yeni planınızı
   oluşturalım mı?" kartını göstermeli ve onay gelirse `POST /plans/generate`
   çağırmalıdır (`restart_program_suggested` ile aynı desen).
+
+### `yas_ozel_notlar` — yaşa özel EK bölüm (Faz N-A)
+
+**Yaş istisnası kalktı:** 24 ay ve üzeri çocuklar da artık 13 günlük programa
+tabidir (`type: "egitim_plani"`, `days` 5 aşama, `gunler: 13`). Önceden bu yaşta
+6 günlük `6_gun_buyuk_cocuk` planı üretiliyor ve ekranda "5/6 gün" görünüyordu.
+
+Kaldırılan planın **içeriği kaybolmadı**: 2 yaş üstünde plana ek bir bölüm
+giriyor ve aynı içerik `content.yas_ozel_notlar` altında **yapısal** olarak da
+dönüyor.
+
+```jsonc
+{
+  "type": "egitim_plani",
+  "plan_secimi": {"tip": "13_gun_dirençli", "gunler": 13, ...},
+  "yas_ozel_notlar": {
+    "baslik": "2 Yaş Üstü İçin Ek Öneriler",
+    "kb_anahtari": "buyuk_cocuk_24_ay_ustu",
+    "alt_yas_ay": 24,
+    "maddeler": [
+      {"konu": "Bes oyuncak metodu", "metin": "..."},
+      {"konu": "Motivasyon panosu",  "metin": "..."},
+      {"konu": "Pozitif tesvik",     "metin": "..."},
+      {"konu": "Bilincaltina konusma", "metin": "..."}
+      // … 17 madde
+    ]
+  }
+}
+```
+
+- Düzeltilmiş yaş **24 ayın altındaysa alan `null`** gelir.
+- Aynı içerik `content.markdown` içinde de `## 2 Yaş Üstü İçin Ek Öneriler`
+  başlıklı bölüm olarak bulunur (eski istemciler için). Bu bölüm `days`
+  aşamalarının **dışındadır** — merdivenin yerine geçmez, üstüne eklenir.
+- Bölümde **gün numarası geçmez.** Gün↔aşama eşlemesinin tek kaynağı 13 günlük
+  merdivendir; eski 6 günlük numaralandırma (ör. "altıncı gün yatır-çık") hem
+  plandan hem chat korpusundan çıkarıldı.
 
 ### `egitim_bekleme` — eğitim henüz uygun değil
 
