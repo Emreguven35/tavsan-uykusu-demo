@@ -233,14 +233,23 @@ def generate_content(baby: Baby, req_overrides: dict | None,
     tip = param["plan_secimi"]["tip"]
     gunler = int(param["plan_secimi"]["gunler"])
 
-    # Eğitim uygun DEĞİLSE ortada bir merdiven yoktur: prompt 6. kuralı gereği
-    # plan yazılmaz, yalnız bekleyiş notu + hazırlık verilir. Böyle bir metinde
-    # "## Eğitim Planı" bölümü ve gün başlıkları BULUNMAZ, dolayısıyla days
-    # ARANMAZ. (Bu kontrol yokken 3-5 aylık her bebekte build_days DayParseError
-    # yükseltiyor, iki deneme sonunda PlanError'a dönüyor ve router 502
-    # veriyordu — yani eğitime henüz uygun olmayan bebeğin ailesi plan yerine
-    # hata görüyordu. 0-3 ay yukarıda rehbere ayrıldı; kalan aralık burası.)
-    gun_bolumu_gerekli = bool(param["uygun_mu"])
+    # --- Gün bölümleri: eğitim planında ZORUNLU, beklemede ÖNİZLEME -----------
+    # uygun_mu True  → merdiven bugün uygulanıyor. Ayrıştırma başarısızsa plan
+    #                  REDDEDİLİR ve yeniden üretilir (eğitim ekranı boş kalmasın).
+    # uygun_mu False → 3-5 ay. Merdiven bugün uygulanMIYOR ama metinde yazılı
+    #                  (anne 5. ayda ne olacağını görmek istiyor). days ÖNİZLEME
+    #                  olarak doldurulur; ayrıştırma başarısız olursa plan
+    #                  REDDEDİLMEZ — sadece önizleme eksik kalır, çünkü bugün
+    #                  uygulanacak bir şey yok. Bu asimetri kasıtlı: 502'yi geri
+    #                  getirmemek için bekleme yolunda ASLA PlanError yükselmez.
+    gun_bolumu_zorunlu = bool(param["uygun_mu"])
+
+    # Eğitimin açılacağı tarih PROMPT'A da verilir ki model kendi hesap
+    # yapmasın. Aynı sözlük hem prompt'a hem content'e gider — metindeki tarih
+    # ile mobilin gösterdiği tarih AYRIŞAMAZ.
+    if not gun_bolumu_zorunlu:
+        param["egitim_baslangic"] = yenidogan.egitim_uygunluk_tarihi(
+            baby.birth_date.isoformat(), param["yas"]["duzeltilmis_ay"])
 
     # Gün bölümleri ayrıştırılamazsa plan REDDEDİLİR ve yeniden üretilir: eğitim
     # ekranının sessizce boş kalmasının sebebi buydu (başlık biçimi LLM'e bağlıydı,
@@ -262,8 +271,16 @@ def generate_content(baby: Baby, req_overrides: dict | None,
                          model=_kullanim.get("model"), usage=_kullanim["usage"],
                          user_id=baby.user_id,
                          duration_ms=int((time.perf_counter() - _t0) * 1000))
-        if not gun_bolumu_gerekli:
-            days = []                 # eğitim yok → merdiven yok → days boş
+        if not gun_bolumu_zorunlu:
+            # ÖNİZLEME yolu: bir kez dene, olmazsa boş bırak ve DEVAM ET.
+            try:
+                days = _onizleme_isaretle(
+                    plan_gunleri.build_days(markdown, tip, gunler))
+            except plan_gunleri.DayParseError as e:
+                days = []
+                logger.warning("Eğitim önizlemesi ayrıştırılamadı (baby=%s): %s "
+                               "— plan yine de veriliyor (bugün uygulanacak bir "
+                               "merdiven yok)", baby.id, e)
             break
         try:
             days = plan_gunleri.build_days(markdown, tip, gunler)
@@ -287,12 +304,13 @@ def generate_content(baby: Baby, req_overrides: dict | None,
         yas_ay=param["yas"]["duzeltilmis_ay"],
         tek_uyku=tek_uyku_bayragi(param))
 
-    return {
+    uygun = bool(param["uygun_mu"])
+    content = {
         # Mobil hangi ekranı açacağını BU alandan bilir (days doluluğundan değil).
-        "type": TYPE_EGITIM if param["uygun_mu"] else TYPE_BEKLEME,
+        "type": TYPE_EGITIM if uygun else TYPE_BEKLEME,
         "markdown": markdown,                       # KALIR (geriye uyum + detay metni)
         # Yapısal gün bölümleri — istemci markdown'ı regex'lemez (bkz. plan_gunleri).
-        # Eğitim uygun değilse BOŞTUR (merdiven yok), bkz. gun_bolumu_gerekli.
+        # egitim_bekleme'de bunlar ÖNİZLEMEDİR: her kayıtta preview=true.
         "days": days,
         "headline": plan_adapter.headline(baby.name, param["bucket"], schedule),
         "bucket": param["bucket"],
@@ -300,7 +318,11 @@ def generate_content(baby: Baby, req_overrides: dict | None,
         # Faz Y — mobilin gösterdiği yapılandırılmış bant + evrensel kestirme kuralı.
         "yas_bandi": param["yas_bandi"],
         "kestirme_protokolu": param["kestirme_protokolu"],
-        "plan_secimi": param["plan_secimi"],
+        # plan_secimi `days` ile TUTARLI olmalı: beklemede merdiven bugün
+        # uygulanmıyor, bu yüzden kayıt "önizleme" olarak işaretlenir. Mobil
+        # aksi hâlde gunler=13'e bakıp "13 günlük program" rozeti basardı.
+        "plan_secimi": (dict(param["plan_secimi"]) if uygun
+                        else _onizleme_plan_secimi(param["plan_secimi"])),
         # FAZ N-A: 24+ ay "büyük çocuk" içeriği (motivasyon panosu, 5 oyuncak,
         # pozitif teşvik…). Merdiven değişmez; bu ek bölümdür. Yaş altındaysa None.
         "yas_ozel_notlar": param.get("yas_ozel_notlar"),
@@ -311,8 +333,42 @@ def generate_content(baby: Baby, req_overrides: dict | None,
         "dogum_haftasi": int(dogum_haftasi or 40),
         "baseline_night_wakes": baby.night_wakes,
         "adapted": False,
-        "night_wake_protocol": dict(plan_adapter.NIGHT_WAKE_PROTOCOL),
     }
+
+    if uygun:
+        # Gece uyanma protokolü (45 dk direnç / 15 dk rutin molası) bir EĞİTİM
+        # protokolüdür. Eğitime uygun OLMAYAN bebeğe verilmez — yenidoğan
+        # rehberindeki gerekçenin aynısı. 3-5 ayda gece uyanan bebek yatıştırılır.
+        content["night_wake_protocol"] = dict(plan_adapter.NIGHT_WAKE_PROTOCOL)
+    else:
+        # Eğitim ne zaman açılır? Tarih MOTORDAN gelir, LLM hesaplamaz.
+        # Ölçülen hata: prompt'ta doğum tarihi olduğu için model "doğum + 5 ay"
+        # yapıyordu; 34 haftalık prematürede bu DÜZELTİLMİŞ yaşa göre doğru
+        # tarihten 46 GÜN ERKEN çıkıyordu. Yukarıda param'a da konuldu →
+        # prompt'taki tarih ile buradaki AYNI sözlüktür, ayrışamaz.
+        content["egitim_baslangic"] = param["egitim_baslangic"]
+        # Merdiven metinde var ama BUGÜN UYGULANMAZ — mobil kilitli/soluk gösterir.
+        content["egitim_onizleme"] = True
+    return content
+
+
+def _onizleme_plan_secimi(secim: dict) -> dict:
+    """plan_secimi'nin önizleme biçimi — merdiven bugün uygulanmıyor.
+
+    `tip`/`gunler` KORUNUR (5. ayda hangi programın başlayacağını mobil
+    gösterebilsin) ama `onizleme: True` ile işaretlenir ve `gunler` yanında
+    "bugün uygulanmıyor" bilgisi taşınır."""
+    out = dict(secim or {})
+    out["onizleme"] = True
+    out["aciklama"] = (
+        "ÖNİZLEME — bu program bebek 5. ayını doldurduğunda başlayacak; "
+        "bugün uygulanmaz. " + str(out.get("aciklama") or "")).strip()
+    return out
+
+
+def _onizleme_isaretle(days: list[dict]) -> list[dict]:
+    """Her gün kaydına preview bayrağı koy (mobil kilitli/soluk gösterir)."""
+    return [{**g, "preview": True} for g in days]
 
 
 def _yenidogan_content(baby: Baby, param: dict, dogum_haftasi: int | None) -> dict:

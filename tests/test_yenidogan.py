@@ -176,9 +176,20 @@ check("4c) 5+ ay → egitim_plani",
       all(_tipler[g] == plan_service.TYPE_EGITIM for g in (170, 250)), _tipler)
 
 _egitim = _icerik(250)
-check("4d) Yalnız egitim_plani türünde days DOLU",
-      len(_egitim["days"]) == 5 and _icerik(130)["days"] == [],
-      f"egitim={len(_egitim['days'])}")
+_bekleme_130 = _icerik(130)
+# FAZ P3: egitim_bekleme'de days ARTIK DOLU — ama ÖNİZLEME olarak
+# (her kayıtta preview=true + content.egitim_onizleme=true). Karar onaylandı:
+# anne 5. ayda ne olacağını görsün, bugün uygulayacağını sanmasın.
+# Ayrıntılı kontroller tests/test_egitim_bekleme.py'de.
+check("4d) egitim_plani'nda days GERÇEK, egitim_bekleme'de ÖNİZLEME",
+      len(_egitim["days"]) == 5
+      and all("preview" not in d for d in _egitim["days"])
+      and len(_bekleme_130["days"]) == 5
+      and all(d.get("preview") is True for d in _bekleme_130["days"]),
+      f"egitim={len(_egitim['days'])} bekleme={len(_bekleme_130['days'])}")
+
+check("4e) YALNIZ yenidogan_ritim'de days BOŞ (merdiven hiç yok)",
+      _icerik(45)["days"] == [] and _icerik(20)["days"] == [], "")
 
 
 # =============================================================================

@@ -806,7 +806,7 @@ alanına bakmalıdır.**
 |---|---|---|---|---|
 | `egitim_plani` | Düzeltilmiş yaş ≥ 5 ay, eğitim uygun | **dolu** (5 aşama) | dolu | Claude |
 | `yenidogan_ritim` | Düzeltilmiş yaş **< 3 ay** | boş | **boş** | deterministik (LLM yok) |
-| `egitim_bekleme` | Eğitim uygun değil (3-5 ay, doktor onayı gereken durum) | boş | dolu | Claude |
+| `egitim_bekleme` | Düzeltilmiş yaş **3-5 ay** (ve doktor onayı gereken durumlar) | **önizleme** (`preview: true`) | dolu | Claude |
 
 > Faz 0-3 öncesi üretilmiş planlarda `type` **yoktur**; alan gelmiyorsa
 > `egitim_plani` varsayın (o dönemde tek tür buydu).
@@ -895,16 +895,70 @@ dönüyor.
   merdivendir; eski 6 günlük numaralandırma (ör. "altıncı gün yatır-çık") hem
   plandan hem chat korpusundan çıkarıldı.
 
-### `egitim_bekleme` — eğitim henüz uygun değil
+### `egitim_bekleme` — eğitim henüz uygun değil (3-5 ay)
 
-3-5 ay arası bebeklerde (ve doktor onayı gereken durumlarda) eğitim planı
-yazılmaz; günlük program, ön hazırlık ve bekleyiş notu döner. `days` boştur.
+Düzeltilmiş yaş **3-5 ay** arasındaki bebekler (ve doktor onayı gereken
+durumlar). Yenidoğan rehberi 3 ayda biter, eğitim alt sınırı 5. aydır — bu bant
+ikisinin arasıdır.
+
+**Anneye verilen asıl içerik: günlük program + ön hazırlık.** Eğitim merdiveni
+de döner ama **ÖNİZLEMEDİR** — bugün uygulanmaz.
+
+```jsonc
+{
+  "type": "egitim_bekleme",
+  "uygun_mu": false,
+  "egitim_onizleme": true,              // ← mobil kilitli/soluk göstersin
+  "egitim_baslangic": {
+    "alt_sinir_ay": 5,
+    "tahmini_tarih": "2026-10-14",      // düzeltilmiş yaş 5 ayı doldurduğu gün
+    "kalan_gun": 30,
+    "aciklama": "Uyku eğitimi düzeltilmiş yaşa göre 5. ayın dolmasıyla başlar. …"
+  },
+  "schedule": [ /* 5 blok — DOLU, bugün uygulanır */ ],
+  "days": [                              // ÖNİZLEME — bugün uygulanmaz
+    {"start": 1, "end": 3, "label": "Beşik yanı", "position": "…",
+     "markdown": "…", "preview": true},
+    {"start": 4, "end": 6, "…": "…", "preview": true}
+    // … 5 aşama, hepsinde preview: true
+  ],
+  "plan_secimi": {
+    "tip": "13_gun_dirençli", "gunler": 13,
+    "onizleme": true,                    // ← "13 günlük program" rozeti BASMA
+    "aciklama": "ÖNİZLEME — bu program bebek 5. ayını doldurduğunda başlayacak; bugün uygulanmaz. …"
+  }
+  // night_wake_protocol YOK — aşağıya bakın
+}
+```
+
+**Mobil için kurallar:**
+
+1. **`egitim_onizleme: true` ise eğitim ekranını kilitli/soluk göster.**
+   Başlık önerisi: *"5. ayda başlayacak program — önizleme"*. Kullanıcı bugün
+   uygulayacağını sanmamalı. `days[].preview` her kayıtta ayrıca işaretlidir.
+2. **`plan_secimi.onizleme: true` iken "13 günlük program" rozeti basma.**
+   `tip`/`gunler` bilerek korunuyor (5. ayda hangi programın başlayacağı
+   görünsün diye) ama bugünün programı değil.
+3. **`egitim_baslangic.tahmini_tarih` geri sayım için kullanılabilir.** Bu tarih
+   **motordan** gelir ve **düzeltilmiş yaşa** göredir; kendi tarafınızda
+   `doğum + 5 ay` hesabı YAPMAYIN — prematürede yanlış olur (ölçüldü: 34
+   haftalık bebekte naif hesap **46 gün erken** çıkıyor).
+4. **`night_wake_protocol` bu tipte GELMEZ.** 45 dk direnç / 15 dk rutin molası
+   bir *eğitim* protokolüdür; eğitime uygun olmayan bebeğe verilmez (yenidoğan
+   rehberindeki gerekçenin aynısı). Alanı zorunlu varsaymayın.
+5. `schedule` **doludur ve bugün uygulanır** — bu bandın asıl değeri saat
+   planlamasıdır.
 
 > **Düzeltilmiş hata (Faz 0-3):** bu durumda plan metninde `## Eğitim Planı`
 > bölümü hiç yazılmadığı için `build_days` `DayParseError` yükseltiyor, iki
 > denemenin ardından **502** dönüyordu — yani **0-5 ay arasındaki her bebekte
-> plan üretimi hata veriyordu**. Artık eğitim uygun değilken gün bölümü
-> aranmıyor.
+> plan üretimi hata veriyordu**.
+>
+> **Faz P3 eki:** merdiven artık önizleme olarak ayrıştırılıyor. Ayrıştırma
+> başarısız olursa **plan yine verilir** (`days: []`), 502 dönmez — bugün
+> uygulanacak bir merdiven olmadığı için önizlemenin eksik kalması planı
+> geçersiz kılmaz. `egitim_plani` tipinde ise ayrıştırma hatası hâlâ planı
+> reddettirir (eğitim ekranı boş kalmasın).
 
 ```jsonc
 {

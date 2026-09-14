@@ -164,6 +164,47 @@ tek kaynağı yukarıdaki 13 günlük merdivendir. Bu bölümde yalnız TEKNİKL
 """
 
 
+def _egitim_baslangic_blok(param: dict) -> str:
+    """Eğitim uygun değilken (3-5 ay) zorunlu bekleme + önizleme talimatı.
+
+    NEDEN VAR — ölçülmüş hata: prompt PROFIL bölümünde doğum tarihini taşıyor ve
+    model "eğitim ne zaman başlar" sorusunu KENDİ hesaplıyordu (doğum + 5 ay).
+    Zamanında doğanda doğru çıkıyor ama PREMATÜREDE yanlış: 34 haftalık bir
+    bebekte düzeltilmiş yaşa göre doğru tarihten 46 GÜN ERKEN bir tarih üretildi.
+    Tarih artık motordan (parameter/plan_service) geliyor ve modele hesap
+    yapmaması AÇIKÇA söyleniyor — "sayısal değerler LLM'den gelmez" kuralının
+    tarih ayağı."""
+    eb = param.get("egitim_baslangic")
+    if not eb:
+        return ""
+    return f"""
+EĞİTİM HENÜZ UYGUN DEĞİL — BEKLEME + ÖNİZLEME (BU PLANDA UYGULA):
+Bu bebek {eb['alt_sinir_ay']}. ayını DOLDURMADI, bu yüzden eğitim BUGÜN başlamaz.
+
+EĞİTİMİN AÇILACAĞI TARİH (MOTORDAN GELDİ — AYNEN KULLAN):
+- Tahmini tarih: {eb['tahmini_tarih']}
+- Kalan gün: {eb['kalan_gun']}
+- {eb['aciklama']}
+
+TARİH KURALI (KESİN): Kendin TARİH HESAPLAMA, gün/ay EKLEME ÇIKARMA, doğum \
+tarihinden yola çıkarak "şu ayda dolar" gibi bir sonuç ÜRETME. Yukarıdaki \
+tahmini tarihi ve kalan gün sayısını AYNEN yaz. Bebek prematüreyse bu tarih \
+düzeltilmiş yaşa göre hesaplanmıştır; takvim yaşından yapılan hesap YANLIŞ olur.
+
+"## Eğitim Planı" bölümünü YAZ — ama ÖNİZLEME olarak. Bölümün EN BAŞINA şu \
+uyarıyı koy (kalın, göz ardı edilemez): bu programın bebek \
+{eb['alt_sinir_ay']}. ayını doldurduğunda ({eb['tahmini_tarih']} civarı) \
+BAŞLAYACAĞINI, BUGÜN UYGULANMAYACAĞINI açıkça söyle. Gün başlıklarını aşağıdaki \
+zorunlu biçimde yaz (anne 5. ayda ne olacağını görebilsin), ama her gün \
+anlatımının bugün değil İLERİDE uygulanacağı anlaşılsın. "Bugün şunu yapın" \
+kipini bu bölümde KULLANMA.
+
+Bu dönemde anneye asıl verilecek olan: günlük program (saat düzeni) ve ÖN \
+HAZIRLIK. Ön hazırlığı somut ve uygulanabilir yaz — bu dönem boşa geçen zaman \
+değil, eğitimin temelidir.
+"""
+
+
 def _gun_basliklari_blok(param: dict) -> str:
     """Eğitim Planı bölümünde ZORUNLU olan gün başlıklarını birebir dayat.
 
@@ -184,6 +225,7 @@ def _gun_basliklari_blok(param: dict) -> str:
 def _build_user_prompt(param: dict) -> str:
     bir_ay_blok = _bir_ay_program_blok(param)
     yas_ozel_blok = _yas_ozel_blok(param)
+    bekleme_blok = _egitim_baslangic_blok(param)
     gun_basliklari = _gun_basliklari_blok(param)
     # Faz P: kesme yok, SEÇİM var. Blok PROFIL'den ÖNCE duruyor çünkü içeriği
     # yalnız PLAN TİPİNE bağlı (bebeğe değil) → cache'lenen sabit ön-eke girer.
@@ -196,7 +238,7 @@ KESIN KURALLAR (BUNLARI İHLAL ETME):
 3. Profesyonel ama sıcak Türkçe yaz.
 4. MARKA KURALI: Plan "Tavşan Uykusu" yöntemi adına konuşur. Cevapta KİŞİ ADI (danışmanın ya da bir eğitmenin adı), görsel referansı, ders/kayıt adı ya da "şu kayıtta anlatıldığı gibi" türü kaynak atfı GEÇMEZ. Yönteme atıf gerekiyorsa "Tavşan Uykusu yönteminde" de.
 5. Net, uygulanabilir adımlar ver — soyut tavsiye değil.
-6. Eğer eğitim uygun değilse, sebebini açıkça yaz ve plan yazma; sadece bekleyiş notu ve hazırlık önerileri ver.
+6. Eğer eğitim uygun değilse (5. ayı doldurmamış bebek), sebebini açıkça yaz ve eğitimin BUGÜN başlamayacağını belirt. Bu durumda "EĞİTİM HENÜZ UYGUN DEĞİL — BEKLEME + ÖNİZLEME" talimatına uy: günlük program + ön hazırlık asıl içeriktir, eğitim planı bölümü ÖNİZLEME olarak yazılır.
 7. Anneye doğrudan ve nazik bir dille hitap et; emir kipi değil öneri kipi kullan (aşağıdaki ÜSLUP KURALI'na uy).
 8. Açıkça belirtilmemiş bilgi varsa UYDURMA — "İlerleyen günlerde detaylanacak" veya "danışmanlık sürecinde belirlenecek" diyebilirsin.
 9. GÜNE BAŞLAMA SAATİ NOTU: Günlük program tablosunda güne başlama saati "KATI saat" olarak belirtildiğinde, tablonun hemen altına şu içerikte bir not ekle: "Not: Bu katı saat kuralı eğitim sürecine özeldir. Eğitim başarıyla tamamlandıktan sonra güne başlama saati 07:00'a kadar esnetilebilir." (Saat değerini bebeğin yaşına ve plana göre uyarlayabilirsin, ama eğitim sonrası esneme imkanı mutlaka belirtilmeli.)
@@ -249,7 +291,7 @@ SEÇİLEN PLAN:
 - Tip: {param['plan_secimi']['tip']}
 - Gün sayısı: {param['plan_secimi']['gunler']}
 - Açıklama: {param['plan_secimi']['aciklama']}
-{bir_ay_blok}{yas_ozel_blok}
+{bir_ay_blok}{bekleme_blok}{yas_ozel_blok}
 YAŞ PARAMETRELERİ (bucket'tan):
 {_format_dict(param['parametreler'])}
 
@@ -409,10 +451,19 @@ def _fallback_plan(param: dict) -> str:
         lines.append(f"- {u}")
     lines.append("")
 
+    eb = param.get("egitim_baslangic")
     if not param["uygun_mu"]:
-        lines.append("> Eğitim verilemeyeceği için günlük program ve plan adımları bu rapora dahil edilmedi. Bekleyiş ve hazırlık önerileri için ön hazırlık bölümünü kontrol edin.")
-        if not param["on_hazirlik"]:
-            return "\n".join(lines)
+        if eb:
+            lines.append(
+                f"> **Eğitim bugün başlamıyor.** Bebeğiniz {eb['alt_sinir_ay']}. ayını "
+                f"doldurduğunda — tahminen **{eb['tahmini_tarih']}**, yaklaşık "
+                f"{eb['kalan_gun']} gün sonra — aşağıdaki program başlayabilir. "
+                "O güne kadar günlük program ve ön hazırlık uygulanır; "
+                "eğitim planı bölümü ÖNİZLEMEDİR.")
+        else:
+            lines.append("> Eğitim henüz uygun değil; bu dönemde günlük program "
+                         "ve ön hazırlık uygulanır.")
+        lines.append("")
 
     # Bölüm 3: Ön Hazırlık
     if param["on_hazirlik"]:
@@ -422,9 +473,9 @@ def _fallback_plan(param: dict) -> str:
             lines.append(f"- **{h['konu']}** ({h['sure']}): {h['aksiyon']}")
         lines.append("")
 
-    # Devam: sadece uygun ise
-    if not param["uygun_mu"]:
-        return "\n".join(lines)
+    # NOT: burada eskiden erken `return` vardı — eğitim uygun değilse günlük
+    # program bile yazılmıyordu. Artık 3-5 ay bandı günlük programı VE merdiven
+    # ÖNİZLEMESİNİ de alıyor; Claude yolu da öyle davranıyor, iki motor ayrışmasın.
 
     # Bölüm 4: Günlük Program
     lines.append("## Günlük Program (Saat Saat)")
@@ -464,6 +515,13 @@ def _fallback_plan(param: dict) -> str:
     # Bölüm 5: Eğitim Planı
     lines.append(f"## Eğitim Planı — {plan['gunler']} Günlük {plan['tip']}")
     lines.append("")
+    if eb:            # 3-5 ay: merdiven yazılır ama ÖNİZLEMEDİR
+        lines.append(
+            f"> ⚠️ **ÖNİZLEME — bu program bugün uygulanmaz.** Aşağıdaki günler "
+            f"bebeğiniz {eb['alt_sinir_ay']}. ayını doldurduğunda "
+            f"(tahminen {eb['tahmini_tarih']}) başlayacak. Şimdilik yalnızca "
+            "günlük programı ve ön hazırlığı uygulayın.")
+        lines.append("")
     lines.append(plan["aciklama"])
     lines.append("")
     # Tüm günler için geçerli genel kurallar gün bloklarından ÖNCE yazılır: gün
