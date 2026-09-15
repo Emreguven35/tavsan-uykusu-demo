@@ -95,8 +95,11 @@ def _plani_tazele(db: Session, user: User, baby_ids: set) -> bool:
     degisti = False
     for bid in baby_ids:
         baby = db.get(Baby, bid)
-        if baby is None or baby.birth_date is None:
+        if baby is None:
             continue
+        # Doğum tarihi kontrolü YOK: ensure_today_plan bantsız yolu da işliyor.
+        # Burada elemek, aynı bebek için batch ile GET /plans/today'in FARKLI
+        # plan üretmesi demek olurdu — ikisi tek kod yolunu paylaşmalı.
         try:
             onceki = plan_service.plan_for_date(
                 db, user, baby, datetime.now(timezone.utc).date())
