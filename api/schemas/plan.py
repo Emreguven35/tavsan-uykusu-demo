@@ -46,18 +46,28 @@ class PlanJobStatusResp(BaseModel):
 
 
 class PlanAdaptResp(BaseModel):
-    """POST /plans/adapt yanıtı (Faz 6.1) — kaydedilen plan + adaptasyon kararı.
+    """POST /plans/adapt yanıtı — kaydedilen plan + gün içi hesaplama kararı.
 
-    regenerate_required: yaş bandı ihlali nedeniyle plan TAM YENİDEN ÜRETİLDİ.
+    adjusted: bugünün çizelgesi değişmez ŞABLONDAN farklı mı (gerçek kayıtlara
+      göre yeniden hesaplandı mı).
+    regenerate_required: yaş bandı ihlali (bant atlama) nedeniyle plan TAM
+      YENİDEN ÜRETİLDİ.
     regression_detected: İlayda protokolü — eğitim bitiminden ≥13 gün sonra son 3
       gecenin ≥2'sinde 20dk+ süren gece uyanması (kendine dalamama) görüldü.
     restart_program_suggested: kullanıcıya "Programı baştan başlatalım mı?" kartı
       gösterilir. OTOMATİK HİÇBİR ŞEY ÜRETİLMEZ — onay gelirse mobil
-      POST /plans/generate çağırır ve training_started_at'i bugüne PATCH'ler."""
+      POST /plans/generate çağırır ve training_started_at'i bugüne PATCH'ler.
+
+    shift_minutes: KULLANIMDAN KALDIRILDI (v2/K1). Çizelgenin tamamını sabit bir
+      dakika kadar kaydırma kavramı yok; daima 0 döner. Eski mobil sürümler
+      kırılmasın diye alan korunuyor — yeni istemciler `adaptation` gövdesini
+      (varsayilan_bloklar, yeniden_hesaplanan_bloklar, uyarilar…) okumalıdır."""
     plan: PlanResp
     adjusted: bool
-    shift_minutes: int
+    shift_minutes: int = 0
     regenerate_required: bool
     regression_detected: bool
     restart_program_suggested: bool
     reasons: list[str]
+    # v2 — gün içi hesaplamanın tam izi (K4 şeması). Yenidoğan rehberinde None.
+    adaptation: dict[str, Any] | None = None

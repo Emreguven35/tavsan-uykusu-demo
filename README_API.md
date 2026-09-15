@@ -564,28 +564,57 @@ olarak raporlanır (`durum`: `yeterli` | `az` | `fazla` | `veri_yok`); gündüz
 
 | Endpoint | Açıklama |
 |---|---|
-| `POST /plans/adapt?baby_id=` | Son 3 günün kayıtlarına göre çizelgeyi kaydırır. Kayıt yoksa/plan yoksa **409**. |
-| `GET /plans/today?baby_id=` | Bugünün planı; yoksa en güncel plan bugüne adapte edilir (lazy). Hiç plan yoksa **404**. |
+| `POST /plans/adapt?baby_id=` | Bugünün çizelgesini kayıtlardan yeniden hesaplar (elle tetik). Kayıt yoksa/plan yoksa **409**. |
+| `GET /plans/today?baby_id=` | Bugünün planı; **her çağrıda** şablon + bugünün kayıtlarından yeniden hesaplanır. Hiç plan yoksa **404**. |
 
 **Tekillik:** `generate` ve `adapt` aynı güne yazarken o günün kaydını **günceller** (UPSERT) — satır yığılmaz.
 
-### Kurallar (deterministik, LLM yok)
+### Gün içi kayma motoru v2 (deterministik, LLM yok) — K1-K9
 
-İki **ayrı katman** vardır, karıştırılmamalıdır:
+> **v1'den ayrılık.** Eskiden çizelgenin tamamı son 3 günün **ortalama** sabah
+> uyanışına göre **±45 dk** kaydırılıyor, kaydırılmış çizelge **ertesi günün
+> tabanı** oluyor ve hesap günde **bir kez** çalışıp kilitleniyordu. Üçü de
+> kaldırıldı. `shift_minutes` alanı **kullanımdan kalktı** (daima `0`).
 
-1. **Günlük ritim kaydırma** (eğitim dışı dönem): gerçek uyanış plandakinden **≥30 dk**
-   saparsa çizelgenin tamamı sapma kadar kaydırılır, **maks ±45 dk**. Çizelge yaş
-   bandına aykırı düşerse kaydırma yapılmaz, plan **tam yeniden üretilir**
-   (`regenerate_required=true`). Faz Y'den sonra bandın üç ölçütü kontrol edilir:
-   gündüz uyku **sayısı**, son uyku ile yatış arası **uyanıklık penceresi**, ve
-   yatıştan sabah uyanışına **gece uykusu süresi**. Çizelgenin tamamı eşit
-   kaydığında bu üçü değişmez — yani günlük ±45 dk kaydırma **tek başına** yeniden
-   üretim tetiklemez; asıl tetikleyici bebeğin **bant atlamasıdır** (ör. 8 aylık
-   3 uykuluk çizelge, 9. ayda 2 uyku bandına düşer).
-2. **Regresyon protokolü** (İlayda): `training_completed_at` dolu **ve** üzerinden
-   **≥13 gün** geçmiş **ve** son 3 gecenin **≥2**'sinde **≥20 dk** süren `night_wake`
-   varsa → `regression_detected=true`, `restart_program_suggested=true`.
-   **Otomatik hiçbir şey üretilmez.**
+| # | Kural | Davranış |
+|---|---|---|
+| K1 | **Sabah hedefi sabittir** | Üretimde belirlenen uyanış saati `content.schedule_template` içinde saklanır ve eğitim boyunca **değişmez**. Gerçek uyanış onu asla güncellemez, yarına taşımaz. |
+| K2 | **Gün, o günün verisinden** | `content.schedule` her hesaplamada şablon + **bugünün** kayıtlarından kurulur. Yalnız bugünü bağlar; yarın yine K1 hedefinden başlar. |
+| K3 | **Gündüz kayması** | Her uyku kaydında, o uykudan **sonraki** bloklar gerçek uyanma + uyanıklık penceresiyle yeniden hesaplanır. Geçmiş bloklara dokunulmaz. |
+| K4 | **Yatış tavanı** | Yatış = son uyku bitişi + pencere. Bandın minimum gece uykusu sabah hedefine kadar sığmalıdır; tavan aşılırsa önce son gündüz uykusu kısaltılır/kaldırılır, sonra yatış tavana çekilir. Her müdahale `adaptation.uyarilar`a yazılır. |
+| K5 | **Gece uyanması ≠ sabah** | Sabah uyanışı = hedeften en fazla **90 dk önce** biten son gece uykusu, ya da açık `wake` kaydı. Daha erkeni **gece bölünmesi**dir (`adaptation.gece_bolunmeleri`), gün planını etkilemez. Sabit `04:00` alt sınırı **kaldırıldı**. Bir `sleep` kaydı ancak sabah hedefinden **önce başlamışsa** gece uykusu sayılır — 70 dk'lık bir kayıt sabah uyanışı sanılmaz. |
+| K6 | **Kayıt yoksa plana uydu** | Zamanı geçtiği hâlde kaydı olmayan blok "planlandığı gibi oldu" sayılır ve `adaptation.varsayilan_bloklar` içinde listelenir. Hiç kayıt yoksa çizelge şablonun **birebir aynısıdır**. |
+| K7 | **Varsayım bozulur** | Gerçek kayıt gelince (farklı saat, kısa uyku, `nap_skipped`, ya da uyanık geçen süre) blok gerçek veriye çevrilir ve K3 zinciri yeniden akar. Geçmişe dönük kayıtlar da aynı akışı tetikler. |
+| K8 | **Kilit yok** | Hesap her `GET /plans/today` **ve** her `POST /logs/batch` sonrasında koşar; idempotenttir (aynı kayıtlar → aynı çizelge) ve LLM çağırmaz. İçerik değişmediyse DB'ye **yazılmaz**. Yaş bandı ihlali (`regenerate_required`) korundu — ama kontrol artık **şablona** uygulanır, bugün bir uyku atlandı diye plan yeniden üretilmez. |
+| K9 | **Toplam uyku kontrolü** | Yeniden hesaplanan **günün** gündüz + gece toplamı bandın aralığıyla karşılaştırılır; eksikse kestirme/ilave uyku önerilir. Bu bir **öneri kartıdır, çizelgeyi bozmaz**. |
+
+**Regresyon protokolü** (İlayda) ayrı katmandır ve değişmedi: `training_completed_at`
+dolu **ve** üzerinden **≥13 gün** geçmiş **ve** son 3 gecenin **≥2**'sinde **≥20 dk**
+süren `night_wake` varsa → `regression_detected=true`, `restart_program_suggested=true`.
+**Otomatik hiçbir şey üretilmez.**
+
+### `content.adaptation` — gün hesabının izi
+
+```jsonc
+"adaptation": {
+  "hesaplandi_at": "2026-09-15T16:40:00+00:00",
+  "sabah_uyanis_hedef": "07:00",        // K1 — şablondaki sabit hedef
+  "sabah_uyanis_gercek": "08:00",       // bugün gerçekte kaçta kalktı
+  "sabah_uyanis_kaynak": "kayit",       // kayit | varsayilan | erken_uyanma
+  "varsayilan_bloklar": ["nap_1"],      // K6 — kaydı yok, plana uyduğu varsayıldı
+  "yeniden_hesaplanan_bloklar": ["nap_2", "nap_3", "bedtime"],
+  "atlanan_bloklar": [],                // K7 — nap_skipped ile düşürülenler
+  "yok_sayilan_kayitlar": [{"id": "…", "sebep": "tanınmayan kayıt tipi: 'xyz'"}],
+  "gece_bolunmeleri": [{"saat": "04:30", "dakika": 270, "sebep": "…"}],
+  "uyaniklik_penceresi_dk": 150,
+  "uyarilar": ["Bugün yatış saati bandın sınırına dayandı"],
+  "regenerate_required": false, "regression_detected": false,
+  "restart_program_suggested": false, "reasons": [...], "log_summary": {...}
+}
+```
+
+`schedule[]` eleman şeması **değişmedi** (`key,type,time,end,title,note,start_minute,end_minute`);
+yalnız `kaynak` (`kayit|plan|varsayilan`) ve gece bloğunda `gece_uykusu_dk` **eklendi**.
 
 ### Mobil sözleşmesi (yapılacaklar)
 
@@ -595,7 +624,15 @@ olarak raporlanır (`durum`: `yeterli` | `az` | `fazla` | `veri_yok`); gündüz
 - `restart_program_suggested=true` geldiğinde kullanıcıya *"Programı baştan başlatmak
   ister misiniz?"* kartı gösterilir. Onaylanırsa mobil: `POST /plans/generate` +
   `PATCH /babies/{id}` ile `training_started_at=bugün`.
-- Dashboard `GET /plans/today` çağırır (adaptasyonu tetikler).
+- Dashboard `GET /plans/today` çağırır (hesabı tetikler).
+- **YENİ (v2):** `POST /logs/batch` yanıtındaki **`plan_updated: true`** geldiğinde
+  mobil `plans/today` sorgusunu **invalidate etmelidir** — yoksa anne kaydı girer,
+  plan sunucuda değişir ama ekranda eski saatler kalır.
+- **YENİ (v2):** "bu uykuyu hiç yapmadı" için `type: "nap_skipped"` kaydı gönderilebilir
+  (`ended_at` gerekmez). Motor o uykuyu çizelgeden düşürür ve sonrakileri öne çeker.
+- **YENİ (v2):** `adaptation.varsayilan_bloklar` içindeki bloklar "kaydı yok, plana
+  uyduğu varsayıldı" demektir — mobil bunları soluk gösterip "böyle mi oldu?" diye
+  sorabilir. `adaptation.uyarilar` kullanıcıya gösterilmelidir.
 
 ## 6.2 Bildirimler (Expo Push)
 

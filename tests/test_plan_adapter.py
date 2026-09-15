@@ -1,26 +1,34 @@
 """
-Adaptif plan motoru testleri (Faz 6.1 + 6.1R) — LLM/DB/ağ YOK, tamamen deterministik.
+Gün içi kayma motoru testleri (v2 / K1-K9) — LLM/DB/ağ YOK, tamamen deterministik.
 
 İKİ AYRI KATMAN test edilir:
-  A) Günlük ritim kaydırma (eğitim dışı dönem)
+  A) Gün içi yeniden hesaplama (sabit sabah hedefi + bugünün kayıtları)
   B) Regresyon protokolü (İlayda — eğitim tamamlandıktan sonra)
 
+v1'DEN FARKLAR (bu dosyada güncellenen kontroller):
+  • 30 dk'lık ölü bant ve ±45 dk'lık kaydırma tavanı KALDIRILDI (1-4).
+  • Yaş bandı ihlali kontrolü artık GÜNLÜK çizelgeye değil ŞABLONA uygulanır (5).
+  • shift_schedule kaldırıldı; yerine recompute_day özdeşlik/idempotans testi (12).
+  • summarize_logs artık `avg_wake_minute` üretmez (11).
+Senaryo kapsamının tamamı için: tests/test_gun_ici_kayma.py
+
 Sabit log fixture'larıyla kural kapsamı:
-  1. Sapma < 30dk            → kaydırma YOK
-  2. Sapma +30dk             → +30 kaydırma
-  3. Sapma +90dk             → +45'e kırpılır (üst sınır)
-  4. Sapma -60dk             → -45'e kırpılır (alt sınır)
-  5. Yaş bandı ihlali        → regenerate_required (kaydırma YAPILMAZ)
+  1. Küçük sapma da güne yansır (ölü bant yok)  → K2
+  2. Uyanış 07:30 → zincir 07:30'dan             → K2/K3
+  3. +90 dk sapma kırpılmaz; yatış tavanı korunur → K4
+  4. Erken uyanış → gün erkene, yatış bandda      → K2/K4
+  5. ŞABLON yaş bandına aykırı → regenerate_required; atlanan uyku tetiklemez
   6. REGRESYON: 13 gün sınırı (12→false, 13→true), dalamama eşiği (1 gece→false,
      2 gece→true), training_completed_at boş→asla, 20dk eşiği, ended_at yoksa sayılmaz
-  7. adapt() regresyonu bayrak olarak döner; kaydırmayla aynı anda olabilir;
+  7. adapt() regresyonu bayrak olarak döner; gün hesabıyla aynı anda olabilir;
      45-15-45 protokol sabiti
-  8. Uyanış kaydı yok        → kaydırma yok, açıklayıcı reason
-  9. Çizelge kurucu          → uyanıklık penceresi mantığı + yatma aralığına kırpma
- 10. Parser'lar              → KB'nin tutarsız metin biçimleri
- 11. Log özeti               → gece uykusu bitişi = sabah uyanışı, şekerleme süresi
- 12. shift_schedule          → blok süreleri korunur
- 13. Geriye uyumluluk        → eski planda schedule yoksa türetilir
+  8. Uyanış kaydı yok → çizelge şablonun aynısı, bloklar 'varsayilan'  → K6
+  9. Çizelge kurucu   → uyanıklık penceresi mantığı + yatma aralığına kırpma
+ 10. Parser'lar       → KB'nin tutarsız metin biçimleri
+ 11. Log özeti        → gece uykusu bitişi = BUGÜNÜN uyanışı (ortalama yok) → K5
+ 12. recompute_day    → kayıt yoksa şablonla özdeş, idempotent            → K6/K8
+ 13. Geriye uyumluluk → eski planda schedule yoksa türetilir; v1 planı şablona
+                        yükseltilir                                       → K1
 
 Çalıştırma: python tests/test_plan_adapter.py
 """
@@ -83,71 +91,84 @@ def plan_with_schedule(wake_minute: int = 7 * 60, baseline_nw: int | None = 2) -
 
 
 # =============================================================================
-# 1) Sapma eşiğin altında → kaydırma yok
+# 1) Küçük sapma da güne yansır — v1'deki 30 dk ÖLÜ BANT kaldırıldı (K2)
 # =============================================================================
-plan = plan_with_schedule(7 * 60)                       # plan uyanış 07:00
-summary = pa.summarize_logs(wake_logs(7, 15), today=TODAY)   # gerçek 07:15 (+15dk)
-r = pa.adapt(plan, BUCKET_8AY, summary, today=TODAY)
-check("1) Sapma +15dk (<30) → kaydırma YOK",
-      r["adjusted"] is False and r["shift_minutes"] == 0,
-      f"adjusted={r['adjusted']} shift={r['shift_minutes']} reasons={r['reasons']}")
-
-# =============================================================================
-# 2) Sapma tam +30dk → kaydırılır
-# =============================================================================
-summary = pa.summarize_logs(wake_logs(7, 30), today=TODAY)   # 07:30
-r = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, summary, today=TODAY)
-check("2) Sapma +30dk → +30 kaydırma",
-      r["adjusted"] is True and r["shift_minutes"] == 30,
-      f"shift={r['shift_minutes']} bedtime={[b for b in r['schedule'] if b['key']=='bedtime']}")
-
-# İlk blok gerçekten kaydı mı?
+# v1: |sapma| < 30 dk → hiçbir şey yapılmaz. v2: gün gerçek uyanıştan hesaplanır,
+# eşik yoktur; plan gerçeğin 15 dk gerisinde donmaz.
+NOW = 23 * 60                                    # gün bitti → K6 etiketlemesi net
+plan = plan_with_schedule(7 * 60)                # şablon uyanış 07:00
+r = pa.adapt(plan, BUCKET_8AY, wake_logs(7, 15), today=TODAY, now_minute=NOW)
 _wake = next(b for b in r["schedule"] if b["key"] == "wake")
-check("2b) Kaydırma çizelgeye yansıdı (wake 07:30)",
-      _wake["time"] == "07:30", f"wake={_wake['time']}")
+check("1) Gerçek uyanış 07:15 → gün 07:15'ten hesaplanır (ölü bant yok)",
+      _wake["time"] == "07:15"
+      and r["adaptation"]["sabah_uyanis_kaynak"] == "kayit",
+      f"wake={_wake['time']} kaynak={r['adaptation']['sabah_uyanis_kaynak']}")
+check("1b) ŞABLON değişmedi (K1)",
+      pa.sabit_wake_minute(r["schedule_template"]) == 7 * 60,
+      pa.sabit_wake_minute(r["schedule_template"]))
 
 # =============================================================================
-# 3) Büyük pozitif sapma → +45'e kırpılır
+# 2) Uyanış 07:30 → tüm gün zinciri 07:30'dan akar
 # =============================================================================
-summary = pa.summarize_logs(wake_logs(8, 30), today=TODAY)   # 08:30 = +90dk
-r3 = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, summary, today=TODAY)
-# Kırpma İHLAL KONTROLÜNDEN ÖNCE uygulanır: +90 → +45; +45'lik yatış 19:45 olur ve
-# 18:00-20:00 aralığında kalır → kaydırma geçerli, yeniden üretim gerekmez.
+r = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, wake_logs(7, 30),
+             today=TODAY, now_minute=NOW)
+_wake = next(b for b in r["schedule"] if b["key"] == "wake")
+_nap1 = next(b for b in r["schedule"] if b["key"] == "nap_1")
+check("2) Uyanış 07:30 → wake 07:30, ilk uyku 07:30+pencere",
+      _wake["time"] == "07:30" and _nap1["time"] == "10:30",   # pencere 180 dk (KB)
+      f"wake={_wake['time']} nap_1={_nap1['time']}")
+check("2b) yeniden_hesaplanan_bloklar dolu",
+      "nap_1" in r["adaptation"]["yeniden_hesaplanan_bloklar"],
+      r["adaptation"]["yeniden_hesaplanan_bloklar"])
+
+# =============================================================================
+# 3) Büyük sapma ARTIK KIRPILMAZ (v1'deki ±45 dk tavanı kaldırıldı)
+# =============================================================================
+r3 = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, wake_logs(8, 30),
+              today=TODAY, now_minute=NOW)
+_wake3 = next(b for b in r3["schedule"] if b["key"] == "wake")
 _bed3 = next(b for b in r3["schedule"] if b["key"] == "bedtime")
-check("3) Sapma +90dk → +45'e kırpılır (yatış 19:45, sınır içinde)",
-      r3["adjusted"] is True and r3["shift_minutes"] == 45
-      and r3["regenerate_required"] is False and _bed3["time"] == "19:45",
-      f"shift={r3['shift_minutes']} bed={_bed3['time']} "
-      f"required={r3['regenerate_required']}")
-check("3b) Kırpma sebebi raporlanır",
-      any("kırpıldı" in s for s in r3["reasons"]), f"reasons={r3['reasons']}")
+check("3) Uyanış 08:30 (+90dk) → kırpma YOK, gün 08:30'dan",
+      _wake3["time"] == "08:30" and r3["regenerate_required"] is False,
+      f"wake={_wake3['time']} required={r3['regenerate_required']}")
+# K4 iki müdahaleden birini yapar: son uykuyu kısaltır/kaldırır, ya da yatışı
+# tavana kırpar. Hangisi olursa olsun tavan aşılmaz ve uyarı yazılır.
+_k4_uyari = [s for s in r3["reasons"]
+             if "sınırına dayandı" in s or "kısaltıldı" in s or "kaldırıldı" in s]
+check("3b) Yatış bandın TAVANINI aşmadı (K4) ve müdahale uyarıya yazıldı",
+      _bed3["start_minute"] <= 20 * 60 and _k4_uyari,
+      f"bed={_bed3['time']} reasons={r3['reasons']}")
 
 # =============================================================================
-# 4) Negatif sapma → -45'e kırpılır (alt sınır)
+# 4) Erken uyanış → gün erkene alınır, yatış da erkene (K2/K4)
 # =============================================================================
-summary = pa.summarize_logs(wake_logs(6, 0), today=TODAY)    # 06:00 = -60dk
-r4 = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, summary, today=TODAY)
+r4 = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, wake_logs(6, 0),
+              today=TODAY, now_minute=NOW)
 _bed4 = next(b for b in r4["schedule"] if b["key"] == "bedtime")
 _wake4 = next(b for b in r4["schedule"] if b["key"] == "wake")
-check("4) Sapma -60dk → -45'e kırpılır (uyanış 06:15, yatış 18:15)",
-      r4["adjusted"] is True and r4["shift_minutes"] == -45
-      and _wake4["time"] == "06:15" and _bed4["time"] == "18:15",
-      f"shift={r4['shift_minutes']} wake={_wake4['time']} bed={_bed4['time']}")
+check("4) Uyanış 06:00 (-60dk) → kırpma yok, wake 06:00",
+      _wake4["time"] == "06:00", f"wake={_wake4['time']} bed={_bed4['time']}")
+check("4b) Yatış bandın yatma aralığında kaldı",
+      18 * 60 <= _bed4["start_minute"] <= 20 * 60, _bed4["time"])
 
 # =============================================================================
-# 5) Yaş bandı ihlali → regenerate_required, kaydırma YAPILMAZ
+# 5) Yaş bandı ihlali → regenerate_required (kontrol artık ŞABLONA uygulanır)
 # =============================================================================
-# Yatışı zaten 19:45'e yakın bir plan kur (geç uyanış) + ileri sapma ver →
-# kaydırılmış yatış 20:00 sınırını aşar.
+# 09:00 uyanışlı şablon: son uyku ile yatış arası, bandın uyanıklık penceresi
+# aralığının DIŞINDA kalıyor → şablon geçersiz, plan yeniden üretilmeli.
 late_plan = {"schedule": pa.build_schedule(BUCKET_8AY, 9 * 60),   # 09:00 uyanış
              "baseline_night_wakes": 2}
 _late_bed = next(b for b in late_plan["schedule"] if b["key"] == "bedtime")
-summary = pa.summarize_logs(wake_logs(10, 0), today=TODAY)        # +60dk sapma
-r5 = pa.adapt(late_plan, BUCKET_8AY, summary, today=TODAY)
-check("5) Yaş bandı ihlali → regenerate_required, kaydırma yok",
-      r5["regenerate_required"] is True and r5["adjusted"] is False,
+r5 = pa.adapt(late_plan, BUCKET_8AY, wake_logs(10, 0), today=TODAY, now_minute=NOW)
+check("5) Şablon yaş bandına aykırı → regenerate_required",
+      r5["regenerate_required"] is True and r5["adaptation"] is None,
       f"base_bedtime={_late_bed['time']} required={r5['regenerate_required']} "
-      f"adjusted={r5['adjusted']} reasons={r5['reasons']}")
+      f"reasons={r5['reasons']}")
+check("5b) Bugünün uykusu atlansa bile yeniden üretim TETİKLENMEZ",
+      pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY,
+               wake_logs(7) + [FakeLog(pa.ATLANDI_TIPI, _utc(0, 10))],
+               today=TODAY, now_minute=NOW)["regenerate_required"] is False,
+      "atlanan uyku bant ihlali sayılmamalı")
 
 # =============================================================================
 # 6) REGRESYON PROTOKOLÜ (İlayda, Faz 6.1R)
@@ -207,29 +228,31 @@ check("6f) ended_at olmayan gece uyanması → sinyal sayılmaz",
 # =============================================================================
 # 7) adapt() regresyonu bayrak olarak döner; OTOMATİK ÜRETİM YOK
 # =============================================================================
-r7 = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, s_2fail,
-              training_completed_at=DONE_13, today=TODAY)
+_loglar_2fail = wake_logs(7, 10) + fail_night_logs(2)
+_loglar_1fail = wake_logs(7, 10) + fail_night_logs(1)
+
+r7 = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, _loglar_2fail,
+              training_completed_at=DONE_13, today=TODAY, now_minute=NOW)
 check("7) adapt: regression_detected + restart_program_suggested",
       r7["regression_detected"] is True and r7["restart_program_suggested"] is True
       and r7["regenerate_required"] is False,
       f"det={r7['regression_detected']} restart={r7['restart_program_suggested']} "
       f"required={r7['regenerate_required']}")
 
-r7b = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, s_1fail,
-               training_completed_at=DONE_13, today=TODAY)
+r7b = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, _loglar_1fail,
+               training_completed_at=DONE_13, today=TODAY, now_minute=NOW)
 check("7b) Eşik altı → bayrak YOK",
       r7b["regression_detected"] is False and r7b["restart_program_suggested"] is False,
       f"det={r7b['regression_detected']}")
 
-# 7c) Regresyon, günlük kaydırmadan BAĞIMSIZ katmandır (ikisi birlikte olabilir)
-s_shift_and_reg = pa.summarize_logs(wake_logs(7, 40) + fail_night_logs(2), today=TODAY)
-r7c = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, s_shift_and_reg,
-               training_completed_at=DONE_13, today=TODAY)
-check("7c) Kaydırma + regresyon aynı anda raporlanır",
-      r7c["adjusted"] is True and r7c["shift_minutes"] == 40
-      and r7c["regression_detected"] is True,
-      f"adjusted={r7c['adjusted']} shift={r7c['shift_minutes']} "
-      f"det={r7c['regression_detected']}")
+# 7c) Regresyon, gün içi hesaplamadan BAĞIMSIZ katmandır (ikisi birlikte olabilir)
+r7c = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY,
+               wake_logs(7, 40) + fail_night_logs(2),
+               training_completed_at=DONE_13, today=TODAY, now_minute=NOW)
+_wake7c = next(b for b in r7c["schedule"] if b["key"] == "wake")
+check("7c) Gün hesabı + regresyon aynı anda raporlanır",
+      _wake7c["time"] == "07:40" and r7c["regression_detected"] is True,
+      f"wake={_wake7c['time']} det={r7c['regression_detected']}")
 
 # 7d) 45-15-45 protokolü sabiti doğru
 _p = pa.NIGHT_WAKE_PROTOCOL
@@ -241,12 +264,18 @@ check("7d) 45-15-45 gece direnme protokolü sabiti",
 # 8) Uyanış kaydı yok → kaydırma yok + açıklayıcı sebep
 # =============================================================================
 logs8 = [FakeLog("feed", _utc(1, 13))]                      # yalnız besleme kaydı
-summary8 = pa.summarize_logs(logs8, today=TODAY)
-r8 = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, summary8, today=TODAY)
-check("8) Uyanış kaydı yok → kaydırma yok + sebep",
-      r8["adjusted"] is False and summary8["avg_wake_minute"] is None
-      and any("uyanış" in s.lower() for s in r8["reasons"]),
-      f"avg_wake={summary8['avg_wake_minute']} reasons={r8['reasons']}")
+r8 = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, logs8, today=TODAY,
+              now_minute=NOW)
+_sablon8 = plan_with_schedule(7 * 60)["schedule"]
+check("8) Uyanış kaydı yok → çizelge ŞABLONUN AYNISI, kaynak 'varsayilan' (K6)",
+      r8["adaptation"]["sabah_uyanis_kaynak"] == "varsayilan"
+      and [(b["key"], b["start_minute"]) for b in r8["schedule"]]
+      == [(b["key"], b["start_minute"]) for b in _sablon8],
+      f"kaynak={r8['adaptation']['sabah_uyanis_kaynak']} "
+      f"varsayilan={r8['adaptation']['varsayilan_bloklar']}")
+check("8b) Zamanı geçen bloklar 'varsayilan' işaretlendi (K6)",
+      set(r8["adaptation"]["varsayilan_bloklar"]) >= {"nap_1", "nap_2"},
+      r8["adaptation"]["varsayilan_bloklar"])
 
 # =============================================================================
 # 9) Çizelge kurucu — uyanıklık penceresi + yatma aralığına kırpma
@@ -292,9 +321,11 @@ for d in range(3):
     # Gece 20:00'de başlayıp ertesi sabah 06:40'ta biten uyku
     logs11.append(FakeLog("sleep", _utc(d + 1, 20), _utc(d, 6, 40)))
 summary11 = pa.summarize_logs(logs11, today=TODAY)
-check("11) Gece uykusu bitişi → sabah uyanışı (06:40)",
-      summary11["avg_wake_minute"] == 6 * 60 + 40,
-      f"avg_wake={summary11['avg_wake_minute']} (beklenen {6*60+40})")
+check("11) Gece uykusu bitişi → BUGÜNÜN uyanışı (06:40, ortalama DEĞİL)",
+      summary11["gunun_uyanisi"] == 6 * 60 + 40,
+      f"gunun_uyanisi={summary11['gunun_uyanisi']} (beklenen {6*60+40})")
+check("11c) avg_wake_minute artık ÜRETİLMEZ (K5 — ortalama kaldırıldı)",
+      "avg_wake_minute" not in summary11, list(summary11))
 
 logs11b = wake_logs(7) + [FakeLog("nap", _utc(1, 10), _utc(1, 11, 30))]
 summary11b = pa.summarize_logs(logs11b, today=TODAY)
@@ -303,25 +334,46 @@ check("11b) Şekerleme süresi ortalaması (90dk)",
       f"avg_nap={summary11b['avg_nap_minutes']} count={summary11b['avg_nap_count']}")
 
 # =============================================================================
-# 12) shift_schedule blok sürelerini korur
+# 12) recompute_day SAF ve ÖZDEŞ: kayıt yoksa sonuç şablonun aynısıdır (K6/K8)
 # =============================================================================
 orig = pa.build_schedule(BUCKET_8AY, 7 * 60)
-moved = pa.shift_schedule(orig, 30)
-_durs_ok = all(o["end_minute"] - o["start_minute"] == m["end_minute"] - m["start_minute"]
-               for o, m in zip(orig, moved))
-_shift_ok = all(m["start_minute"] - o["start_minute"] == 30 for o, m in zip(orig, moved))
-check("12) shift_schedule: süreler korunur, hepsi eşit kayar",
-      _durs_ok and _shift_ok, f"durs_ok={_durs_ok} shift_ok={_shift_ok}")
+_bos = pa.recompute_day(orig, None, 7 * 60, [], now_minute=0, gun=TODAY,
+                        bucket_params=BUCKET_8AY)
+check("12) Kayıt yokken çizelge ŞABLONLA BİREBİR aynı",
+      [(b["key"], b["start_minute"], b["end_minute"]) for b in _bos["schedule"]]
+      == [(b["key"], b["start_minute"], b["end_minute"]) for b in orig],
+      f"{[(b['key'], b['time']) for b in _bos['schedule']]}")
+_tekrar = pa.recompute_day(orig, None, 7 * 60, wake_logs(7, 25), now_minute=NOW,
+                           gun=TODAY, bucket_params=BUCKET_8AY)
+_tekrar2 = pa.recompute_day(orig, None, 7 * 60, wake_logs(7, 25), now_minute=NOW,
+                            gun=TODAY, bucket_params=BUCKET_8AY)
+check("12b) İdempotent: aynı girdi → aynı çizelge (K8)",
+      _tekrar["schedule"] == _tekrar2["schedule"], "")
+# Gündüz uykularının SÜRESİ şablondan gelir. Gece bloğunun süresi kasten
+# değişkendir: bitişi SABİT sabah hedefidir (K1), başlangıcı zincire bağlıdır.
+check("12c) Gündüz uykularının süreleri şablondan korunur",
+      [b["end_minute"] - b["start_minute"]
+       for b in _tekrar["schedule"] if b["type"] == "nap"]
+      == [b["end_minute"] - b["start_minute"] for b in orig if b["type"] == "nap"],
+      f"{[b['end_minute'] - b['start_minute'] for b in _tekrar['schedule']]}")
+_bed12 = next(b for b in _tekrar["schedule"] if b["key"] == "bedtime")
+check("12d) Gece bloğu SABİT sabah hedefinde biter (K1)",
+      _bed12["end_minute"] == 7 * 60 + 1440, _bed12["end"])
 
 # =============================================================================
 # 13) Geriye uyumluluk: eski planda 'schedule' yoksa yaş bandından türetilir
 # =============================================================================
 old_plan = {"markdown": "# eski plan", "bucket": "8_ay"}     # Faz 5R öncesi içerik
-summary13 = pa.summarize_logs(wake_logs(7, 45), today=TODAY)
-r13 = pa.adapt(old_plan, BUCKET_8AY, summary13, today=TODAY)
-check("13) Eski plan (schedule yok) → çizelge türetilir, motor çalışır",
+r13 = pa.adapt(old_plan, BUCKET_8AY, wake_logs(7, 45), today=TODAY, now_minute=NOW)
+check("13) Eski plan (schedule yok) → şablon türetilir, motor çalışır",
       len(r13["schedule"]) > 0 and any("türetildi" in s for s in r13["reasons"]),
       f"blocks={len(r13['schedule'])} reasons={r13['reasons'][:1]}")
+check("13b) v1 planı (schedule var, schedule_template yok) → şablona yükseltilir",
+      any("şablona yükseltildi" in s
+          for s in pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, [],
+                            today=TODAY, now_minute=NOW)["reasons"]),
+      pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, [], today=TODAY,
+               now_minute=NOW)["reasons"])
 
 # =============================================================================
 # 14) Çizelge şeması (mobil sözleşmesi) + headline
@@ -350,10 +402,13 @@ check("14e) headline tek cümlelik kişisel özet",
       "Elif" in _hl and "kısa uyku" in _hl and "yatış" in _hl, _hl)
 print(f"       headline: {_hl}")
 
-# Kaydırma sonrası headline'daki yatış saati de kayar
-_moved = pa.shift_schedule(_sch, 30)
-_hl2 = pa.headline("Elif", "9_ay", _moved)
-check("14f) Kaydırma headline'a yansır", _hl2 != _hl and "19:30" in _hl2, _hl2)
+# Gün yeniden hesaplanınca headline'daki yatış saati de değişir
+_gec = pa.recompute_day(_sch, None, 7 * 60, wake_logs(8, 0), now_minute=NOW,
+                        gun=TODAY, bucket_params=BUCKET_8AY)["schedule"]
+_hl2 = pa.headline("Elif", "9_ay", _gec)
+check("14f) Yeniden hesaplanan gün headline'a yansır",
+      _hl2 != _hl and next(b for b in _gec if b["key"] == "bedtime")["time"] in _hl2,
+      _hl2)
 
 # =============================================================================
 # 15) GERİYE UYUMLULUK: şema değişikliğinden ÖNCE üretilmiş planlar (Faz 6.5R)
@@ -400,18 +455,19 @@ def _eski_bicime_dusur(sch):
 
 
 _eski_plan = {"schedule": _eski_bicime_dusur(pa.build_schedule(BUCKET_8AY, 7 * 60))}
-_r15 = pa.adapt(_eski_plan, BUCKET_8AY,
-                pa.summarize_logs(wake_logs(7, 40), today=TODAY), today=TODAY)
-check("15g) Eski planla adapt: çizelge yükseltilir ve kaydırılır",
-      _r15["adjusted"] is True and _r15["shift_minutes"] == 40
+_r15 = pa.adapt(_eski_plan, BUCKET_8AY, wake_logs(7, 40), today=TODAY,
+                now_minute=NOW)
+_wake15 = next(b for b in _r15["schedule"] if b["key"] == "wake")
+check("15g) Eski planla adapt: çizelge yükseltilir ve gün yeniden hesaplanır",
+      _wake15["time"] == "07:40"
       and all(b.get("time") and b.get("title") for b in _r15["schedule"])
       and all(b["type"] != "night" for b in _r15["schedule"]),
-      f"adjusted={_r15['adjusted']} shift={_r15['shift_minutes']} "
+      f"wake={_wake15['time']} "
       f"blok={_r15['schedule'][0] if _r15['schedule'] else None}")
 
 # --- Özet --------------------------------------------------------------------
 print("\n" + "=" * 74)
-print("PLAN ADAPTER TEST SONUÇLARI (Faz 6.1)")
+print("PLAN ADAPTER TEST SONUÇLARI (gün içi kayma motoru v2 — K1-K9)")
 print("=" * 74)
 passed = 0
 for name, ok, detail in results:

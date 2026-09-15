@@ -9,7 +9,10 @@ class SleepLogIn(BaseModel):
     """Batch içindeki tek kayıt. client_id mobil SQLite satır kimliğidir (idempotency).
     NULL ise (mobil dışı kaynak) her zaman yeni kayıt olarak eklenir — muaf."""
     baby_id: uuid.UUID
-    type: str = Field(pattern="^(sleep|nap|wake|feed|night_wake)$")
+    # nap_skipped (v2/K7): "bu uykuyu HİÇ yapmadı". Gün içi kayma motoru bunu
+    # gördüğünde o uykuyu çizelgeden düşürür ve sonraki blokları öne çeker.
+    # ended_at bu tipte anlamsızdır; started_at "ne zaman uyuması gerekiyordu"dur.
+    type: str = Field(pattern="^(sleep|nap|wake|feed|night_wake|nap_skipped)$")
     started_at: datetime
     ended_at: datetime | None = None
     notes: str | None = None
@@ -38,6 +41,9 @@ class BatchResult(BaseModel):
     updated: int
     skipped: int                    # sahibi olunmayan baby_id vb. nedeniyle atlanan
     logs: list[SleepLogResp]
+    # v2/K8: bu senkron sonucunda BUGÜNÜN çizelgesi değişti mi. true ise mobil
+    # plans/today sorgusunu invalidate etmelidir.
+    plan_updated: bool = False
 
 
 class DaySummary(BaseModel):

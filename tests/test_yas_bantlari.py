@@ -494,94 +494,98 @@ check("7b) yas_ay yoksa KB yolu korunur (geriye uyumluluk)",
       _legacy[1]["time"] == "10:00" and len([x for x in _legacy if x["type"] == "nap"]) == 2,
       str([(x["key"], x["time"]) for x in _legacy]))
 
-# 7c) Günlük ±45 dk kaydırma tek başına yeniden üretim TETİKLEMEZ (çizelgenin
-#     tamamı kaydığında bant ölçütleri değişmez).
+# v2 NOTU (K1/K8): "günlük kaydırma" kavramı kaldırıldı. Yaş bandı ihlali
+# kontrolü artık GÜNLÜK çizelgeye değil DEĞİŞMEZ ŞABLONA uygulanır; dolayısıyla
+# günün nasıl geçtiği yeniden üretimi tetikleyemez, yalnız BANT ATLAMASI tetikler.
+GUN_BITTI = 23 * S                       # K6 etiketlemesi için "şu an"
+
+# 7c) Gerçek uyanış şablondan farklı → gün yeniden hesaplanır, üretim GEREKMEZ.
 _plan9 = {"schedule": pa.build_schedule({}, 7 * S, yas_ay=9)}
-_r = pa.adapt(_plan9, {}, pa.summarize_logs(wake_logs(7, 45), today=TODAY),
-              today=TODAY, yas_ay=9)
-check("7c) +45 dk kaydırma → kaydırılır, yeniden üretim gerekmez",
-      _r["adjusted"] is True and _r["shift_minutes"] == 45
-      and _r["regenerate_required"] is False,
-      f"shift={_r['shift_minutes']} required={_r['regenerate_required']} "
+_r = pa.adapt(_plan9, {}, wake_logs(7, 45), today=TODAY, now_minute=GUN_BITTI,
+              yas_ay=9)
+_w7c = next(b for b in _r["schedule"] if b["key"] == "wake")
+check("7c) Uyanış 07:45 → gün yeniden hesaplanır, yeniden üretim gerekmez",
+      _w7c["time"] == "07:45" and _r["regenerate_required"] is False,
+      f"wake={_w7c['time']} required={_r['regenerate_required']} "
       f"reasons={_r['reasons']}")
 
-# 7d) BANT DEĞİŞİMİ → yeniden üretim. 8 aylık çizelge (3 uyku) 10 aylık bantla
-#     (2 uyku) değerlendirilirse çizelge artık geçersizdir.
+# 7d) BANT DEĞİŞİMİ → yeniden üretim. 8 aylık şablon (3 uyku) 10 aylık bantla
+#     (2 uyku) değerlendirilirse şablon artık geçersizdir.
 _plan8 = {"schedule": pa.build_schedule({}, 7 * S, yas_ay=8)}
-_r_bant = pa.adapt(_plan8, {}, pa.summarize_logs(wake_logs(7, 45), today=TODAY),
-                   today=TODAY, yas_ay=10)
-check("7d) Bebek bant atladı (3 uyku çizelgesi, 2 uyku bandı) → regenerate_required",
-      _r_bant["regenerate_required"] is True and _r_bant["adjusted"] is False,
+_r_bant = pa.adapt(_plan8, {}, wake_logs(7, 45), today=TODAY,
+                   now_minute=GUN_BITTI, yas_ay=10)
+check("7d) Bebek bant atladı (3 uyku şablonu, 2 uyku bandı) → regenerate_required",
+      _r_bant["regenerate_required"] is True and _r_bant["adaptation"] is None,
       f"required={_r_bant['regenerate_required']} reasons={_r_bant['reasons']}")
 
-# 7d2) KAYMA KENDİLİĞİNDEN SINIRLIDIR: bant ölçütleri eşit kaydırmaya duyarsız
-#      olduğu için mutlak duvar saati sınırı uydurulmadı. Buna gerek de yok —
-#      summarize_logs sabah uyanışını yalnız MORNING_WINDOW (04:00-11:00) içinde
-#      arar, dolayısıyla çizelge 11:00'i geçecek şekilde kaydırılamaz.
-_gec_plan = {"schedule": pa.build_schedule({}, 10 * S + 30, yas_ay=9)}   # uyanış 10:30
-_r_gec = pa.adapt(_gec_plan, {},
-                  pa.summarize_logs([FakeLog("wake", _utc(d, 11, 30))    # 11:30 → pencere DIŞI
-                                     for d in range(3)], today=TODAY),
-                  today=TODAY, yas_ay=9)
-check("7d2) Sabah penceresi dışındaki (11:30) uyanış kaydı kaydırma üretmez",
-      _r_gec["adjusted"] is False and _r_gec["shift_minutes"] == 0,
-      f"shift={_r_gec['shift_minutes']} reasons={_r_gec['reasons']}")
+# 7d2) K5 ÜST SINIRI: gün ortasında basılan bir `wake` kaydı SABAH UYANIŞI
+#      sayılmaz. (v1'de böyle bir sınır yoktu; ölçülen hata, 12:00'daki "hâlâ
+#      uyanık" kaydının bütün günü oraya itmesiydi.)
+_r_gec = pa.adapt({"schedule": pa.build_schedule({}, 7 * S, yas_ay=9)}, {},
+                  [FakeLog("wake", _utc(0, 12))],       # 12:00 → hedef+90'ın dışı
+                  today=TODAY, now_minute=GUN_BITTI, yas_ay=9)
+_w_gec = next(b for b in _r_gec["schedule"] if b["key"] == "wake")
+check("7d2) Gün ortasındaki (12:00) uyanık kaydı sabah uyanışı SAYILMAZ",
+      _w_gec["time"] == "07:00"
+      and _r_gec["adaptation"]["sabah_uyanis_kaynak"] == "varsayilan",
+      f"wake={_w_gec['time']} kaynak={_r_gec['adaptation']['sabah_uyanis_kaynak']}")
 
-# Sınır içinde kalan kaydırma normal işler (kural fazla hassas değil).
+# Sabah toleransı içindeki uyanış normal işler (kural fazla hassas değil).
 _normal = {"schedule": pa.build_schedule({}, 7 * S, yas_ay=9)}
-_r_normal = pa.adapt(_normal, {}, pa.summarize_logs(wake_logs(7, 40), today=TODAY),
-                     today=TODAY, yas_ay=9)
-check("7d3) Sabah aralığı içindeki kaydırma yeniden üretim TETİKLEMEZ",
-      _r_normal["adjusted"] is True and _r_normal["regenerate_required"] is False,
-      f"shift={_r_normal['shift_minutes']} required={_r_normal['regenerate_required']}")
+_r_normal = pa.adapt(_normal, {}, wake_logs(7, 40), today=TODAY,
+                     now_minute=GUN_BITTI, yas_ay=9)
+check("7d3) Sabah toleransı içindeki uyanış yeniden üretim TETİKLEMEZ",
+      next(b for b in _r_normal["schedule"] if b["key"] == "wake")["time"] == "07:40"
+      and _r_normal["regenerate_required"] is False,
+      f"required={_r_normal['regenerate_required']}")
 
-# 7e) Kestirme kuralı adapt() çıktısına yansır.
-_naps_az = [FakeLog("nap", _utc(1, 10), _utc(1, 11)),        # 60 dk
-            FakeLog("nap", _utc(1, 14), _utc(1, 15))]        # 60 dk → toplam 120
-_sum_az = pa.summarize_logs(wake_logs(7) + _naps_az, today=TODAY)
-_r_kest = pa.adapt(_plan8, {}, _sum_az, today=TODAY, yas_ay=7)
+# 7e) Kestirme kuralı adapt() çıktısına yansır — ölçüt artık YENİDEN HESAPLANAN
+#     GÜNÜN kendisidir (3 günlük ortalama DEĞİL, K9).
+#     İki gerçek uyku 60'ar dk + üçüncü uyku ATLANDI → gündüz toplam 120 dk.
+_naps_az = [FakeLog("nap", _utc(0, 10), _utc(0, 11)),        # 60 dk
+            FakeLog("nap", _utc(0, 14), _utc(0, 15)),        # 60 dk
+            FakeLog(pa.ATLANDI_TIPI, _utc(0, 17))]           # 3. uyku yapılmadı
+_loglar_az = wake_logs(7, days=1) + _naps_az
+_r_kest = pa.adapt(_plan8, {}, _loglar_az, today=TODAY, now_minute=GUN_BITTI,
+                   yas_ay=7)
 check("7e) Gündüz toplam 120 dk (<180) → adapt kestirme gerekli der",
-      _sum_az["avg_day_sleep_minutes"] == 120.0
+      _r_kest["kestirme"]["gerceklesen_dk"] == 120
       and _r_kest["kestirme"]["gerekli"] is True
       and _r_kest["kestirme"]["eksik_dk"] == 60
       and any("kestirme" in s for s in _r_kest["reasons"]),
-      f"gunduz={_sum_az['avg_day_sleep_minutes']} kestirme={_r_kest['kestirme']}")
+      f"kestirme={_r_kest['kestirme']}")
 
-_naps_yeterli = [FakeLog("nap", _utc(1, 9), _utc(1, 10, 20)),    # 80
-                 FakeLog("nap", _utc(1, 13), _utc(1, 14, 20)),   # 80
-                 FakeLog("nap", _utc(1, 16), _utc(1, 16, 40))]   # 40 → 200
-_sum_yeterli = pa.summarize_logs(wake_logs(7) + _naps_yeterli, today=TODAY)
-_r_yeterli = pa.adapt(_plan8, {}, _sum_yeterli, today=TODAY, yas_ay=7)
+_naps_yeterli = [FakeLog("nap", _utc(0, 9), _utc(0, 10, 20)),    # 80
+                 FakeLog("nap", _utc(0, 13), _utc(0, 14, 20)),   # 80
+                 FakeLog("nap", _utc(0, 16), _utc(0, 16, 40))]   # 40 → 200
+_r_yeterli = pa.adapt(_plan8, {}, wake_logs(7, days=1) + _naps_yeterli,
+                      today=TODAY, now_minute=GUN_BITTI, yas_ay=7)
 check("7f) Gündüz toplam 200 dk (>180) → kestirme gerekmez",
-      _sum_yeterli["avg_day_sleep_minutes"] == 200.0
+      _r_yeterli["kestirme"]["gerceklesen_dk"] == 200
       and _r_yeterli["kestirme"]["gerekli"] is False,
-      f"gunduz={_sum_yeterli['avg_day_sleep_minutes']} "
-      f"kestirme={_r_yeterli['kestirme']['gerekli']}")
+      f"kestirme={_r_yeterli['kestirme']}")
 
-# 7e2) 24 saatlik toplam uyku değerlendirmesi adapt() çıktısına yansır (v1.1).
-#      Gece 20:00 yatış → 07:00 uyanış = 660 dk; gündüz 120 dk → toplam 780.
-#      6-8 ay ihtiyacı 840 dk → 60 dk eksik.
-_gece_loglar = [FakeLog("sleep", _utc(d + 1, 20), _utc(d, 7)) for d in range(3)]
-_sum_toplam = pa.summarize_logs(_naps_az + _gece_loglar, today=TODAY)
-_r_toplam = pa.adapt(_plan8, {}, _sum_toplam, today=TODAY, yas_ay=7)
+# 7e2) 24 saatlik toplam uyku değerlendirmesi adapt() çıktısına yansır.
+#      Gündüz 120 dk + hesaplanan gece 660 dk = 780. 6-8 ay ihtiyacı 840 → 60 eksik.
 check("7e2) adapt: 24 saatlik toplam uyku eksikse raporlanır",
-      _sum_toplam["avg_night_sleep_minutes"] == 660.0
-      and _r_toplam["toplam_uyku"]["gerceklesen_dk"] == 780
-      and _r_toplam["toplam_uyku"]["eksik_dk"] == 60
-      and _r_toplam["toplam_uyku"]["durum"] == "az"
-      and any("24 saatlik toplam" in s for s in _r_toplam["reasons"]),
-      f"gece={_sum_toplam['avg_night_sleep_minutes']} "
-      f"toplam={_r_toplam['toplam_uyku']}")
+      _r_kest["toplam_uyku"]["gerceklesen_dk"] == 780
+      and _r_kest["toplam_uyku"]["eksik_dk"] == 60
+      and _r_kest["toplam_uyku"]["durum"] == "az"
+      and any("24 saatlik toplam" in s for s in _r_kest["reasons"]),
+      f"toplam={_r_kest['toplam_uyku']}")
 
-# 7g) avg_day_sleep_minutes (gün başına toplam) ile avg_nap_minutes (uyku başına)
-#     karıştırılmamalı.
+# 7g) İSTATİSTİK katmanı: avg_day_sleep_minutes (gün başına toplam) ile
+#     avg_nap_minutes (uyku başına) karıştırılmamalı. Bu değerler artık çizelgeyi
+#     BELİRLEMEZ; chat bağlamı ve regresyon sayımı için üretilir.
+_sum_az = pa.summarize_logs(_loglar_az, today=TODAY)
 check("7g) avg_day_sleep_minutes gün TOPLAMI, avg_nap_minutes uyku ORTALAMASI",
       _sum_az["avg_day_sleep_minutes"] == 120.0
       and _sum_az["avg_nap_minutes"] == 60.0,
       f"gun={_sum_az['avg_day_sleep_minutes']} uyku={_sum_az['avg_nap_minutes']}")
 
 # 7h) yas_ay yoksa kestirme değerlendirmesi YAPILMAZ (sessiz varsayım yok).
-_r_bantsiz = pa.adapt(_plan8, BUCKET_8AY, _sum_az, today=TODAY)
+_r_bantsiz = pa.adapt(_plan8, BUCKET_8AY, _loglar_az, today=TODAY,
+                      now_minute=GUN_BITTI)
 check("7h) Bant çözülemezse kestirme None (uydurma değerlendirme yok)",
       _r_bantsiz["kestirme"] is None, str(_r_bantsiz["kestirme"]))
 

@@ -127,17 +127,35 @@ def upsert_plan(db: Session, user: User, baby: Baby, plan_date: date,
     """Aynı (user, baby, plan_date) varsa İÇERİĞİ GÜNCELLE, yoksa oluştur.
 
     Aynı güne plan yığılmasını önler. JSONB değişikliğinin görülmesi için content
-    YENİ bir sözlük olarak atanır."""
+    YENİ bir sözlük olarak atanır.
+
+    K8 (kilit kaldırıldı) hesaplamayı HER istekte çalıştırıyor. Bu yüzden içerik
+    gerçekten değişmediyse YAZILMAZ: aksi hâlde her GET /plans/today bir UPDATE
+    üretirdi. Karşılaştırma `adaptation.hesaplandi_at` hariç yapılır — o damga
+    "bu çizelge ne zaman hesaplandı"yı değil "en son ne zaman DEĞİŞTİ"yi gösterir."""
     plan = plan_for_date(db, user, baby, plan_date)
     if plan is None:
         plan = SleepPlan(user_id=user.id, baby_id=baby.id,
                          plan_date=plan_date, content=content)
         db.add(plan)
+    elif _ayni_icerik(plan.content, content):
+        return plan                          # değişmedi → DB'ye dokunma
     else:
         plan.content = dict(content)
     db.commit()
     db.refresh(plan)
     return plan
+
+
+def _ayni_icerik(a: dict | None, b: dict | None) -> bool:
+    """İki plan içeriği anlamlı olarak aynı mı? (zaman damgası yok sayılır)"""
+    def _sadelestir(c: dict | None) -> dict:
+        c = dict(c or {})
+        ad = c.get("adaptation")
+        if isinstance(ad, dict):
+            c["adaptation"] = {k: v for k, v in ad.items() if k != "hesaplandi_at"}
+        return c
+    return _sadelestir(a) == _sadelestir(b)
 
 
 # =============================================================================
@@ -161,6 +179,14 @@ def ensure_current_schema(db: Session, plan: SleepPlan | None) -> SleepPlan | No
     eski = content.get("schedule") or []
     yeni = plan_adapter.normalize_schedule(eski)
     degisti = yeni != eski
+
+    # K1/K2 — v1 planlarında DEĞİŞMEZ ŞABLON yok. İlk okumada mevcut çizelgeden
+    # bir kez türetilip kalıcı yazılır; bundan sonra günlük hesap hep bunu taban
+    # alır ve şablon bir daha değişmez. (v1'de bu alanın olmaması, dünün
+    # kaydırılmış çizelgesinin bugünün tabanı olmasının sebebiydi.)
+    if yeni and not content.get("schedule_template"):
+        content["schedule_template"] = yeni
+        degisti = True
 
     if yeni and not content.get("headline"):
         baby = db.get(Baby, plan.baby_id)
@@ -329,6 +355,10 @@ def generate_content(baby: Baby, req_overrides: dict | None,
         "uygun_mu": param["uygun_mu"],
         "uyarilar": param["uyarilar"],
         "generated_with": "claude" if used_claude else "fallback",
+        # K1 — ŞABLON: üretimde bir kez yazılır, eğitim boyunca DEĞİŞMEZ.
+        # Günlük çizelge her gün bundan türetilir; şablon asla güncellenmez.
+        "schedule_template": schedule,
+        # Bugünün çizelgesi. Kayıt geldikçe recompute_day yeniden yazar (K2/K3).
         "schedule": schedule,
         "dogum_haftasi": int(dogum_haftasi or 40),
         "baseline_night_wakes": baby.night_wakes,
@@ -429,26 +459,34 @@ def is_yenidogan(plan: SleepPlan | dict | None) -> bool:
     return (content or {}).get("type") == TYPE_YENIDOGAN
 
 
-def _adaptation_meta(result: dict, summary: dict, adjusted: bool, shift: int,
-                     required: bool) -> dict:
-    """Plan içeriğine gömülen adaptasyon izi (mobil/denetim için)."""
-    return {
-        "adjusted": adjusted,
-        "shift_minutes": shift,
+def _adaptation_meta(result: dict, summary: dict, required: bool) -> dict:
+    """Plan içeriğine gömülen adaptasyon izi (mobil/denetim için).
+
+    Gövde recompute_day'den gelir (K4 şeması: hesaplandi_at, sabah_uyanis_*,
+    varsayilan_bloklar, yeniden_hesaplanan_bloklar, yok_sayilan_kayitlar,
+    gece_bolunmeleri, uyarilar). Servis katmanı üstüne regresyon ve istatistik
+    özetini ekler."""
+    meta = dict(result.get("adaptation") or {})
+    meta.update({
         "regenerate_required": required,
         "regression_detected": result["regression_detected"],
         "restart_program_suggested": result["restart_program_suggested"],
         "reasons": result["reasons"],
         "log_summary": summary,
-    }
+    })
+    meta.setdefault("uyarilar", [])
+    return meta
 
 
 def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
-                   logs: list[SleepLog], today: date) -> tuple[SleepPlan, dict]:
-    """Adaptasyon motorunu koştur, sonucu bugünün planı olarak upsert et.
+                   logs: list[SleepLog], today: date,
+                   now_minute: int | None = None) -> tuple[SleepPlan, dict]:
+    """Gün içi kayma motorunu koştur, sonucu bugünün planı olarak upsert et.
 
-    regenerate_required (yaş bandı ihlali) → çizelgeyi kaydırmak yerine planı
-    TAM YENİDEN ÜRETİR.
+    K1/K2: taban artık base_plan.schedule_template'tir — DÜNÜN HESAPLANMIŞ
+    ÇİZELGESİ DEĞİL. Böylece bugünün sapması yarına taşınmaz.
+    regenerate_required (yaş bandı ihlali / bant atlama) → planı TAM YENİDEN
+    ÜRETİR (K8: bu mekanizma korundu).
 
     Yenidoğan rehberi ADAPTE EDİLMEZ (0-3 ayda katı program yok): rehber bugüne
     taşınır ve adaptasyon sonucu "hiçbir şey yapılmadı" olarak döner. Bu kontrol
@@ -458,25 +496,33 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
     if is_yenidogan(base_plan):
         plan = _yenidogan_bugune_tasi(db, user, baby, base_plan, today)
         return plan, {
-            "adjusted": False, "shift_minutes": 0, "regenerate_required": False,
-            "regression_detected": False, "restart_program_suggested": False,
+            "regenerate_required": False, "regression_detected": False,
+            "restart_program_suggested": False, "adaptation": None,
             "kestirme": None, "toplam_uyku": None,
             "reasons": ["0-3 ay yenidoğan ritim rehberi adapte edilmez: bu yaşta "
-                        "katı uyku programı uygulanmaz, kaydırılacak çizelge yok."],
-            "schedule": [],
+                        "katı uyku programı uygulanmaz, hesaplanacak çizelge yok."],
+            "schedule": [], "schedule_template": [],
         }
 
     base_content = dict(base_plan.content or {})
     dogum_haftasi = base_content.get("dogum_haftasi", 40)
-    _, params, yas_ay = bucket_params(baby, dogum_haftasi)
+    if baby.birth_date is None:
+        # Doğum tarihi yoksa yaş bandı ÇÖZÜLEMEZ. Eskiden bu yola hiç girilmiyordu
+        # (kayıt yoksa erken dönülüyordu); K8 ile hesap her çağrıda koştuğu için
+        # artık girilebiliyor. Çökmek yerine bantsız yola düşülür: gün, şablonun
+        # kendi penceresiyle hesaplanır, kestirme/toplam değerlendirmesi YAPILMAZ.
+        params, yas_ay = {}, None
+    else:
+        _, params, yas_ay = bucket_params(baby, dogum_haftasi)
     # 12-18 ay tek/çift uyku ayrımı planla birlikte saklanır; bant değişmedikçe korunur.
     tek_uyku = tek_uyku_bayragi(base_content)
 
     summary = plan_adapter.summarize_logs(logs, today=today)
     result = plan_adapter.adapt(
-        base_content, params, summary,
+        base_content, params, logs,
         training_completed_at=baby.training_completed_at, today=today,
-        yas_ay=yas_ay, tek_uyku=tek_uyku)
+        now_minute=now_minute, yas_ay=yas_ay, tek_uyku=tek_uyku,
+        log_summary=summary)
 
     if result["regenerate_required"]:
         content = generate_content(baby, None, dogum_haftasi,
@@ -485,22 +531,24 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
             "adapted": True,
             "regenerated": True,
             "base_plan_id": str(base_plan.id),
-            "adaptation": _adaptation_meta(result, summary, adjusted=False,
-                                           shift=0, required=True),
+            "adaptation": _adaptation_meta(result, summary, required=True),
         })
     else:
         content = base_content
         days_backfill(content)        # eski taban planda days yoksa şimdi türet
         content.update({
+            # K1 — şablon taşınır, ASLA günlük sonuçla üzerine yazılmaz.
+            "schedule_template": result["schedule_template"],
+            # K2/K3 — bugünün çizelgesi (yalnız bugünü bağlar).
             "schedule": result["schedule"],
-            # Kestirme kuralı her adaptasyonda yeniden değerlendirilir (gündüz
+            # Kestirme kuralı her hesaplamada yeniden değerlendirilir (gündüz
             # uyku minimumu tutmadıysa mobil kartı gösterir).
             "kestirme_protokolu": (base_content.get("kestirme_protokolu")
                                    or yas_bantlari.kestirme_protokolu()),
             "kestirme_degerlendirme": result["kestirme"],
             # "Bebeğim yeterince uyuyor mu?" — 24 saatlik toplam değerlendirmesi.
             "toplam_uyku_degerlendirme": result["toplam_uyku"],
-            # Çizelge kaydıysa başlıktaki yatış saati de güncellenmeli.
+            # Çizelge değiştiyse başlıktaki yatış saati de güncellenmeli.
             "headline": plan_adapter.headline(
                 baby.name, base_content.get("bucket"), result["schedule"]),
             "adapted": True,
@@ -508,10 +556,7 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
             "base_plan_id": str(base_plan.id),
             "night_wake_protocol": base_content.get("night_wake_protocol")
             or dict(plan_adapter.NIGHT_WAKE_PROTOCOL),
-            "adaptation": _adaptation_meta(result, summary,
-                                           adjusted=result["adjusted"],
-                                           shift=result["shift_minutes"],
-                                           required=False),
+            "adaptation": _adaptation_meta(result, summary, required=False),
         })
 
     plan = upsert_plan(db, user, baby, today, content)
@@ -521,9 +566,12 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
 # =============================================================================
 # ORTAK GİRİŞ NOKTASI — GET /plans/today ve bildirim zamanlayıcısı bunu kullanır
 # =============================================================================
-def already_adapted_today(plan: SleepPlan | None) -> bool:
-    """Bugünün planı zaten adapte edilmiş mi? (gereksiz DB yazımını önler)"""
-    return bool(plan is not None and (plan.content or {}).get("adapted"))
+# K8 — `already_adapted_today` KALDIRILDI.
+# v1'de bugünün planı bir kez hesaplandıktan sonra kilitleniyordu: anne sabah
+# sekmeyi açtıysa, gün içinde girdiği kayıtlar o gün plana HİÇ yansımıyordu
+# (ölçüldü). Artık hesap her GET /plans/today ve her POST /logs/batch sonrasında
+# çalışır. Gereksiz DB yazımı `upsert_plan` içindeki içerik karşılaştırmasıyla
+# önlenir — kilitle değil.
 
 
 def _yenidogan_bugune_tasi(db: Session, user: User, baby: Baby,
@@ -545,9 +593,10 @@ def _yenidogan_bugune_tasi(db: Session, user: User, baby: Baby,
     guncel_bant = yenidogan.alt_bant(yas["duzeltilmis_ay"])["id"]
 
     # GEREKSİZ YAZIM YOK: bugünün rehberi zaten güncelse dokunma.
-    # (already_adapted_today burada işe yaramıyor — rehberde `adapted` hep False
-    # kalıyor; bu kontrol olmadan HER GET /plans/today bir DB yazımı tetiklerdi,
-    # çünkü `egitim_baslangic.kalan_gun` her gün değişiyor.)
+    # (upsert_plan'ın içerik karşılaştırması burada yetmiyor — `egitim_baslangic
+    # .kalan_gun` her gün değiştiği için içerik DAİMA farklı çıkar ve her
+    # GET /plans/today bir DB yazımı tetiklerdi. Bu yüzden alt bant kimliği
+    # üzerinden ayrı bir tazelik kontrolü yapılır.)
     bugunku = plan_for_date(db, user, baby, today)
     if is_yenidogan(bugunku):
         b_icerik = bugunku.content or {}
@@ -575,54 +624,37 @@ def _yenidogan_bugune_tasi(db: Session, user: User, baby: Baby,
 
 
 def ensure_today_plan(db: Session, user: User, baby: Baby,
-                      today: date | None = None) -> SleepPlan | None:
-    """Bugünün planını döndür; gerekiyorsa lazy adaptasyonu ÇALIŞTIR.
+                      today: date | None = None,
+                      now_minute: int | None = None) -> SleepPlan | None:
+    """Bugünün planını döndür — hesap HER ÇAĞRIDA çalışır (K8, kilit yok).
 
     Akış:
-      1. Bugünün planı var ve ZATEN ADAPTE EDİLMİŞ → olduğu gibi dön (yazma YOK).
-      2. Bugünün planı var ama adapte değil → son 3 günün logları varsa adapte et.
-      3. Bugünün planı yok → en güncel planı bugüne taşı; log varsa adapte ederek.
-      4. Hiç plan yok → None (çağıran 404/atlama kararını verir).
+      1. Hiç plan yok → None (çağıran 404/atlama kararını verir).
+      2. Yenidoğan rehberi → adapte edilmez, bugüne taşınır.
+      3. Aksi hâlde: taban = bugünün planı (varsa) ya da en güncel plan; çizelge
+         ŞABLONDAN + BUGÜNÜN kayıtlarından yeniden hesaplanır. Kayıt yoksa bile
+         çalışır: sonuç şablonun aynısı olur (K6) ve içerik değişmediği için
+         DB'ye yazılmaz.
 
     Zamanlayıcı da bunu çağırır: kullanıcı uygulamayı hiç açmasa bile bildirim
-    güncel kaydırılmış saate göre gider."""
+    güncel hesaplanmış saate göre gider."""
     today = today or datetime.now(timezone.utc).date()
     bugunku = plan_for_date(db, user, baby, today)
-
-    # 1) Bugün zaten adapte edilmiş → ikinci kez adapt YOK.
-    if already_adapted_today(bugunku):
-        return ensure_current_schema(db, bugunku)
 
     base_plan = bugunku or latest_plan(db, user, baby)
     if base_plan is None:
         return None                                   # hiç plan üretilmemiş
 
-    # 2) Yenidoğan rehberi ADAPTE EDİLMEZ — kaydırılacak çizelge yoktur ve
-    #    üretilmesi bu yaşa program dayatmak olur (bkz. _yenidogan_content).
+    # Yenidoğan rehberi ADAPTE EDİLMEZ — hesaplanacak çizelge yoktur ve
+    # üretilmesi bu yaşa program dayatmak olur (bkz. _yenidogan_content).
     if is_yenidogan(base_plan):
         return _yenidogan_bugune_tasi(db, user, baby, base_plan, today)
 
+    # Şablon garantisi: v1 planlarında schedule_template yok; okuma yolunda bir
+    # kez yükselt ki taban dünün hesaplanmış çizelgesi olmasın (K1).
+    base_plan = ensure_current_schema(db, base_plan)
+
     logs = recent_logs(db, user, baby, today)
-    if logs:
-        plan, _ = run_adaptation(db, user, baby, base_plan, logs, today)
-        return plan
-
-    # 3b) Kayıt yok → adaptasyon yok. Bugünün planı varsa dokunma; yoksa taşı.
-    if bugunku is not None:
-        return ensure_current_schema(db, bugunku)
-
-    content = dict(base_plan.content or {})
-    sched = plan_adapter.normalize_schedule(content.get("schedule"))
-    days_backfill(content)            # taşınan planda da yapısal gün bölümleri dolsun
-    content.update({
-        "adapted": False,
-        "base_plan_id": str(base_plan.id),
-        "schedule": sched,
-        "headline": content.get("headline") or plan_adapter.headline(
-            baby.name, content.get("bucket"), sched),
-        "night_wake_protocol": content.get("night_wake_protocol")
-        or dict(plan_adapter.NIGHT_WAKE_PROTOCOL),
-        "kestirme_protokolu": (content.get("kestirme_protokolu")
-                               or yas_bantlari.kestirme_protokolu()),
-    })
-    return upsert_plan(db, user, baby, today, content)
+    plan, _ = run_adaptation(db, user, baby, base_plan, logs, today,
+                             now_minute=now_minute)
+    return plan

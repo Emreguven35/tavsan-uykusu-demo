@@ -399,23 +399,29 @@ check("14c) Mesaj biçimi: 🌙 {ad} için uyku vakti yaklaşıyor (saat)",
       f"body={_m14.get('body') if _m14 else None}")
 
 _plan14 = plan_service.plan_for_date(db, u14, b14, datetime(2026, 8, 14).date())
-check("14d) Plan bugüne adapte edilmiş olarak kaydedildi",
+_ad14 = (_plan14.content or {}).get("adaptation") or {}
+# v2: "shift_minutes" kavramı kaldırıldı (K1). Gün, gerçek uyanıştan zincirlenir;
+# izi `sabah_uyanis_gercek` + `yeniden_hesaplanan_bloklar` taşır.
+check("14d) Plan bugün için yeniden hesaplanmış olarak kaydedildi",
       (_plan14.content or {}).get("adapted") is True
-      and (_plan14.content or {}).get("adaptation", {}).get("shift_minutes") == 45,
-      str((_plan14.content or {}).get("adaptation", {}).get("shift_minutes")))
+      and _ad14.get("sabah_uyanis_gercek") == "07:45"
+      and "nap_1" in (_ad14.get("yeniden_hesaplanan_bloklar") or []),
+      f"gercek={_ad14.get('sabah_uyanis_gercek')} "
+      f"yeniden={_ad14.get('yeniden_hesaplanan_bloklar')}")
 
-# --- İKİNCİ TUR: aynı gün tekrar adapt YAPILMAMALI (gereksiz DB yazımı yok) ---
-_once = _plan14.content
-_updated_before = str(_plan14.content.get("adaptation", {}).get("log_summary"))
+# --- İKİNCİ TUR: K8 ile kilit yok ama SONUÇ AYNI → gereksiz DB yazımı yok ---
+_updated_before = str(_ad14.get("log_summary"))
+_sched_before = _plan14.content.get("schedule")
 stats14b = notifier.run_reminder_cycle(db, now=utc_at(9, 45, day=14))
-check("14e) Aynı gün İKİNCİ adapt YAPILMADI",
+check("14e) İkinci tur çizelgeyi DEĞİŞTİRMEDİ (idempotent, K8)",
       stats14b.get("adapted", 0) == 0, f"stats={stats14b}")
 
 db.expire_all()
 _plan14b = plan_service.plan_for_date(db, u14, b14, datetime(2026, 8, 14).date())
 check("14f) Plan içeriği değişmedi (yazma olmadı)",
-      _plan14b.content.get("adaptation", {}).get("shift_minutes") == 45
-      and str(_plan14b.content.get("adaptation", {}).get("log_summary")) == _updated_before,
+      _plan14b.content.get("schedule") == _sched_before
+      and str((_plan14b.content.get("adaptation") or {}).get("log_summary"))
+      == _updated_before,
       "içerik değişti")
 
 # 14g) plan_service tekilliği: aynı gün için tek satır

@@ -240,21 +240,25 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
         if user is None or not _prefs(user).get("plan_reminders", True):
             continue
 
-        # KRİTİK (Faz 6.6): bildirimden ÖNCE lazy adaptasyon — GET /plans/today ile
-        # AYNI kod yolu (plan_service). Kullanıcı uygulamayı hiç açmasa da bildirim
-        # güncel KAYDIRILMIŞ saate göre gider. Bugün zaten adapte edildiyse
-        # ensure_today_plan hiçbir şey yazmaz (gereksiz DB yazımı yok).
-        zaten = plan_service.already_adapted_today(
-            plan_service.plan_for_date(db, user, baby, today_local))
+        # KRİTİK (Faz 6.6): bildirimden ÖNCE gün içi hesaplama — GET /plans/today
+        # ile AYNI kod yolu (plan_service). Kullanıcı uygulamayı hiç açmasa da
+        # bildirim güncel hesaplanmış saate göre gider.
+        # v2/K8: "bugün zaten adapte edildi" kilidi kaldırıldı; hesap her turda
+        # koşar ama içerik değişmediyse upsert_plan DB'ye yazmaz. Zamanlayıcıya
+        # `now_minute` geçilir ki K6 ("zamanı geçen blok varsayılan sayılır")
+        # turun gerçek saatine göre değerlendirilsin.
+        onceki_cizelge = ((plan_service.plan_for_date(db, user, baby, today_local)
+                           or SleepPlan()).content or {}).get("schedule")
         try:
-            plan = plan_service.ensure_today_plan(db, user, baby, today=today_local)
+            plan = plan_service.ensure_today_plan(db, user, baby, today=today_local,
+                                                  now_minute=now_minute)
         except Exception:
             logger.exception("Bildirim öncesi plan hazırlanamadı (baby=%s)", baby.id)
             continue
         if plan is None:
             continue
         stats["checked_plans"] += 1
-        if not zaten and (plan.content or {}).get("adapted"):
+        if (plan.content or {}).get("schedule") != onceki_cizelge:
             stats["adapted"] += 1
 
         content = plan.content or {}

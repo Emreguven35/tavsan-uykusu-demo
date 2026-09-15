@@ -9,6 +9,7 @@ logs router — /api/v1/logs
 
 Hepsi user_id scoped; baby_id kullanıcıya ait değilse o kayıt atlanır (skipped).
 """
+import logging
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
@@ -72,7 +73,42 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
     db.commit()
     for r in out:
         db.refresh(r)
-    return BatchResult(created=created, updated=updated, skipped=skipped, logs=out)
+
+    # K8 — kayıt girildiği anda plan da yeniden hesaplanır. v1'de bu YOKTU:
+    # hesap yalnız Eğitim sekmesi açılınca koşuyordu, dolayısıyla "kaydı girdim
+    # ama plan değişmedi" davranışı ortaya çıkıyordu. Hesap ucuzdur (deterministik
+    # çizelge matematiği, LLM/ağ YOK) ve içerik değişmediyse DB'ye yazılmaz.
+    plan_updated = _plani_tazele(db, user, {r.baby_id for r in out})
+    return BatchResult(created=created, updated=updated, skipped=skipped,
+                       logs=out, plan_updated=plan_updated)
+
+
+def _plani_tazele(db: Session, user: User, baby_ids: set) -> bool:
+    """Etkilenen bebeklerin bugünkü planını yeniden hesapla. Dönen: değişti mi.
+
+    Hata YUTULUR ama loglanır: uyku kaydı senkronu, plan hesabı patladı diye
+    başarısız olmamalıdır (mobil offline kuyruğu tıkanır). Plan bir sonraki
+    GET /plans/today'de zaten yeniden hesaplanacaktır."""
+    from api.models import Baby
+    from api.services import plan_service
+
+    degisti = False
+    for bid in baby_ids:
+        baby = db.get(Baby, bid)
+        if baby is None or baby.birth_date is None:
+            continue
+        try:
+            onceki = plan_service.plan_for_date(
+                db, user, baby, datetime.now(timezone.utc).date())
+            onceki_sched = (onceki.content or {}).get("schedule") if onceki else None
+            plan = plan_service.ensure_today_plan(db, user, baby)
+        except Exception:                      # PlanError dahil → kayıt yine kabul
+            logging.getLogger("tavsan.logs").exception(
+                "Kayıt sonrası plan hesaplanamadı (baby=%s)", bid)
+            continue
+        if plan is not None and (plan.content or {}).get("schedule") != onceki_sched:
+            degisti = True
+    return degisti
 
 
 @router.get("", response_model=list[SleepLogResp])

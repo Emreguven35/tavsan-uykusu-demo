@@ -2,8 +2,9 @@
 plans router — /api/v1/plans
 
 POST /plans/generate: bebek profili → parameter_engine + plan_generator → JSONB.
-POST /plans/adapt:   son 3 günün uyku kayıtlarına göre çizelgeyi kaydırır (Faz 6.1).
-GET  /plans/today:   bugünün planı; yoksa en güncel planı bugüne adapte eder (lazy).
+POST /plans/adapt:   bugünün çizelgesini kayıtlardan yeniden hesaplar (elle tetik).
+GET  /plans/today:   bugünün planı; şablon + bugünün kayıtlarından HER çağrıda
+                     yeniden hesaplanır (v2/K8 — "günde bir kez" kilidi yok).
 GET  /plans, GET /plans/{plan_date}: kullanıcının planlarını döndürür.
 
 İŞ MANTIĞI BURADA DEĞİL: üretim/adaptasyon/lazy-adapt api/services/plan_service.py
@@ -130,18 +131,20 @@ def adapt_plan(baby_id: uuid.UUID = Query(...), db: Session = Depends(get_db),
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
                             detail=f"Plan yeniden üretilemedi: {e}")
 
-    logger.info("Plan adapte edildi: plan=%s baby=%s adjusted=%s shift=%s regen=%s "
-                "regression=%s", plan.id, baby.id, result["adjusted"],
-                result["shift_minutes"], result["regenerate_required"],
-                result["regression_detected"])
+    # v2: "kaydırma" yok; bugünün çizelgesi şablondan farklıysa yeniden hesaplandı.
+    adjusted = bool((result.get("adaptation") or {}).get("yeniden_hesaplanan_bloklar"))
+    logger.info("Plan yeniden hesaplandı: plan=%s baby=%s adjusted=%s regen=%s "
+                "regression=%s", plan.id, baby.id, adjusted,
+                result["regenerate_required"], result["regression_detected"])
     return PlanAdaptResp(
         plan=plan,
-        adjusted=result["adjusted"],
-        shift_minutes=result["shift_minutes"],
+        adjusted=adjusted,
+        shift_minutes=0,                      # kullanımdan kaldırıldı (K1)
         regenerate_required=result["regenerate_required"],
         regression_detected=result["regression_detected"],
         restart_program_suggested=result["restart_program_suggested"],
         reasons=result["reasons"],
+        adaptation=result.get("adaptation"),
     )
 
 
