@@ -31,6 +31,11 @@ from api.services import plan_service                       # noqa: E402
 from engine import plan_generator, yenidogan                # noqa: E402
 from engine.parameter_engine import parametre_uret          # noqa: E402
 
+# LLM MÜHRÜ (Faz 4) — import'lardan SONRA: load_dotenv anahtarı geri
+# yükleyebiliyor, dosya başındaki os.environ.pop tek başına yetmiyor.
+from tests.llm_muhuru import muhurle, muhur_saglam_mi   # noqa: E402
+muhurle()
+
 results: list[tuple[str, bool, str]] = []
 
 

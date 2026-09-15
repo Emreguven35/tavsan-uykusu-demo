@@ -2,7 +2,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import Date, ForeignKey, Integer, String
+from sqlalchemy import Date, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.db.base import GUID, Base
@@ -26,6 +26,17 @@ class Baby(Base, TimestampMixin):
     sleep_method: Mapped[str | None] = mapped_column(String(80), nullable=True)
     night_wakes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     night_feeds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # --- v2.1: KALICI PROFİL ------------------------------------------------
+    # Bu iki alan eskiden yalnız POST /plans/generate gövdesindeki
+    # `profile_overrides` içinde geliyordu ve HİÇBİR YERDE SAKLANMIYORDU.
+    # Sonuç: yaş bandı atlaması sonrası plan yeniden üretilince
+    # (run_adaptation → generate_content(baby, None, …)) sağlık uyarısı sessizce
+    # kayboluyordu. Artık bebekle birlikte kalıcı.
+    # Text (String(N) değil): serbest metin, uzunluk sınırı üretimde patlamasın.
+    saglik_problemi: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Prematüre düzeltmesi bu alandan yapılır; verilmezse 40 (miadında) sayılır.
+    dogum_haftasi: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # --- Eğitim takibi (Faz 6.1R, İlayda protokolü) --------------------------
     # Mobildeki 14 günlük eğitim modülü bu tarihleri set eder. Regresyon tespiti

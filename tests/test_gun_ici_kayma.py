@@ -1,5 +1,5 @@
 """
-GÜN İÇİ KAYMA MOTORU v2 — K1-K9 senaryo testleri.
+GÜN İÇİ KAYMA MOTORU v2.1 — K1-K10 senaryo testleri.
 
 LLM YOK, ağ YOK, prod DB YOK: geçici sqlite + FastAPI TestClient. Plan
 deterministik yedek motordan üretilir (ANTHROPIC_API_KEY silinir).
@@ -16,7 +16,13 @@ Senaryolar:
   D  Sabah 06:00 uyandı                  → gün 06:00'dan; yatış erkene
   E  Sabah uykusu atlandı                → nap_2 öne, kestirme + toplam uyarısı
   F  04:30 bölünme + 05:00-07:10 uyku    → sabah 07:10, bölünme kaydedildi
-  G  04:30'da uyandı, tekrar uyumadı     → hedef 07:00 korunur, zincir 04:30'dan
+  G1 04:30 uyandı, tekrar uyumadı      → gün 06:00'dan + 30 dk şekerleme (K10)
+  G2 04:30 + 05:00-06:40 uyudu         → sabah 06:40, şekerleme YOK
+  G3 05:50 uyandı                      → 06:00'dan, şekerleme var
+  G4 06:05 uyandı                      → normal K2, şekerleme yok
+  G5 09:00 uyandı                      → gün 09:00'dan, ÜST SINIR YOK
+  G6 G1 + şekerleme gerçek kayıt       → nap_1 gerçek bitiş + pencere
+  G7 G1'in ertesi günü                 → şablon 07:00, şekerleme yok
   H  Hiç kayıt yok, saat 15:00           → varsayilan_bloklar=[nap_1,nap_2]
   I  H + 13:40-14:10 gerçek nap_2 kaydı  → varsayım bozulur, sonrası yeniden
   J  Dünün kaydı bugün girildi           → bugün etkilenmez
@@ -50,8 +56,6 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_DB.as_posix()}"
 os.environ["JWT_SECRET"] = "test-secret-en-az-otuz-iki-karakter-uzunlugunda"
 os.environ["ENVIRONMENT"] = "development"        # zamanlayıcı başlamasın
 os.environ["MAIL_PROVIDER"] = "disabled"
-os.environ.pop("ANTHROPIC_API_KEY", None)        # → deterministik yedek motor
-
 from fastapi.testclient import TestClient              # noqa: E402
 from api.db import Base, SessionLocal, engine          # noqa: E402
 import api.models                                      # noqa: E402,F401
@@ -61,6 +65,13 @@ from api.services import plan_adapter as pa            # noqa: E402
 from api.services import plan_service                  # noqa: E402
 from engine import yas_bantlari                        # noqa: E402
 from engine.parameter_engine import hesapla_yas_ay     # noqa: E402
+
+# LLM MÜHRÜ — import'lardan SONRA. `api.main` içindeki load_dotenv() anahtarı
+# .env'den geri yüklediği için mührün burada olması ŞART; dosya başındaki
+# os.environ.pop() tek başına işe YARAMIYORDU (ölçüldü).
+from tests.llm_muhuru import (                         # noqa: E402
+    canli_cagri_sayisi, fallback_cagri_sayisi, muhur_saglam_mi, muhurle)
+muhurle()
 
 Base.metadata.create_all(bind=engine)
 client = TestClient(app)
@@ -105,6 +116,8 @@ _gen = client.post("/api/v1/plans/generate?sync=true", headers=H,
                    json={"baby_id": BID})
 assert _gen.status_code == 201, _gen.text
 BASE = _gen.json()["content"]
+assert BASE["generated_with"] == "fallback", (
+    f"Deterministik suite CANLI Claude çağırdı: {BASE['generated_with']}")
 
 # --- BEKLENEN DEĞERLER: tablodan hesaplanır, elle yazılmaz -------------------
 YAS_AY = hesapla_yas_ay(_dogum.isoformat(), 40)["duzeltilmis_ay"]
@@ -352,27 +365,132 @@ def test_f_gece_bolunmesi():
           s["nap_1"]["start_minute"] - TPL["nap_1"]["start_minute"] == 10,
           s["nap_1"]["start_minute"] - TPL["nap_1"]["start_minute"])
 
+# =============================================================================
+# G1-G7 — K10 ERKEN UYANMA KURALI
+# =============================================================================
+# Gün en erken 06:00'da başlar (K10.1). 06:00 öncesi uyanıp TEKRAR UYUMAYAN
+# bebekte gün 06:00'dan kurulur ve güne 30 dk ŞEKERLEME eklenir (K10.3).
+# Beklenen saatler yine tablodan: şekerleme = 06:00 + bandın MİNİMUM penceresi.
+WW_MIN = BANT["uyaniklik_penceresi_dk"][0]       # 8 ay → 120 dk
+GUN_BAS = pa.GUN_BASLANGICI_EN_ERKEN             # 06:00
+SEK_BAS = GUN_BAS + WW_MIN
+SEK_BIT = SEK_BAS + pa.SEKERLEME_DK
 
-# =============================================================================
-# G — 04:30'da uyandı, tekrar uyumadı, başka kayıt yok  [BELİRSİZ — bkz. rapor]
-# =============================================================================
-def test_g_cok_erken_uyanma():
+
+def test_g1_erken_uyanma_sekerleme():
+    """04:30 uyandı, tekrar uyumadı → gün 06:00'dan + şekerleme."""
     erken = 4 * 60 + 30
     kur(lambda row: [gece(row, TODAY, TPL["bedtime"]["start_minute"], erken)])
     c, s = bugun(now_minute=erken + 5)
-    bekle("G", s, "wake", W, "hedef KORUNUR")
-    check("G · kaynak='erken_uyanma'",
-          c["adaptation"]["sabah_uyanis_kaynak"] == "erken_uyanma",
-          c["adaptation"]["sabah_uyanis_kaynak"])
-    check("G · uyarı yazıldı",
-          any("erken uyanma" in u.lower() for u in c["adaptation"]["uyarilar"]),
-          c["adaptation"]["uyarilar"])
-    baslar = zincir(erken)                       # zincir 04:30'dan akar
-    for i, b in enumerate(baslar, start=1):
-        bekle("G", s, f"nap_{i}", b, "zincir 04:30'dan")
-    check("G · gece bölünmesi olarak da kaydedildi",
-          any(b["dakika"] == erken for b in c["adaptation"]["gece_bolunmeleri"]),
+    bekle("G1", s, "wake", GUN_BAS, "gün 06:00'dan")
+    check("G1 · wake bloğunda gerçek saat notu var (K10.5)",
+          "04:30" in (s["wake"].get("note") or ""), s["wake"].get("note"))
+    bekle("G1", s, "sekerleme", SEK_BAS, "06:00 + min pencere")
+    check("G1 · şekerleme 30 dk ve doğru başlık",
+          s["sekerleme"]["end_minute"] - s["sekerleme"]["start_minute"]
+          == pa.SEKERLEME_DK and s["sekerleme"]["title"] == pa.SEKERLEME_BASLIK,
+          f'{s["sekerleme"]["time"]}-{s["sekerleme"]["end"]} {s["sekerleme"]["title"]}')
+    # K10.4 — şekerlemeden sonra NORMAL pencere
+    bekle("G1", s, "nap_1", SEK_BIT + WW, "şekerleme bitişi + normal pencere")
+    bekle("G1", s, "nap_2", SEK_BIT + WW + NAP_SURE + WW)
+    bekle("G1", s, "bedtime", YATMA_HI, "tavanda")
+    ad = c["adaptation"]
+    check("G1 · adaptation.erken_uyanma dolu (K10.6)",
+          ad["erken_uyanma"] == {"gercek_saat": hhmm(erken),
+                                 "gun_baslangici": hhmm(GUN_BAS),
+                                 "sekerleme_eklendi": True},
+          ad["erken_uyanma"])
+    check("G1 · sabah_uyanis_gercek GERÇEK saat (06:00 değil)",
+          ad["sabah_uyanis_gercek"] == hhmm(erken), ad["sabah_uyanis_gercek"])
+    check("G1 · uyarı tek satır olarak yazıldı (K10.6)",
+          any("Erken uyanma: gün 06:00'dan başlatıldı" in u
+              for u in ad["uyarilar"]), ad["uyarilar"])
+    check("G1 · ŞABLON değişmedi (K1)",
+          c["schedule_template"] == BASE["schedule_template"], "")
+
+
+def test_g2_erken_sonra_tekrar_uyudu():
+    """04:30 uyandı, 05:00-06:40 uyudu → sabah uyanışı 06:40, şekerleme YOK."""
+    son = 6 * 60 + 40
+    def loglar(row):
+        return [gece(row, TODAY, TPL["bedtime"]["start_minute"], 4 * 60 + 30),
+                SleepLog(user_id=row.user_id, baby_id=row.id, type="sleep",
+                         started_at=utc(TODAY, 5 * 60), ended_at=utc(TODAY, son))]
+    kur(loglar)
+    c, s = bugun(now_minute=son + 5)
+    bekle("G2", s, "wake", son, "son uyanış")
+    check("G2 · şekerleme YOK", "sekerleme" not in s, list(s))
+    check("G2 · erken_uyanma None", c["adaptation"]["erken_uyanma"] is None, "")
+    check("G2 · 04:30 gece bölünmesi olarak kaydedildi",
+          any(b["dakika"] == 4 * 60 + 30
+              for b in c["adaptation"]["gece_bolunmeleri"]),
           c["adaptation"]["gece_bolunmeleri"])
+    bekle("G2", s, "nap_1", zincir(son)[0])
+
+
+def test_g3_bes_elli():
+    """05:50 uyandı, tekrar uyumadı → yine 06:00'dan, şekerleme var."""
+    erken = 5 * 60 + 50
+    kur(lambda row: [gece(row, TODAY, TPL["bedtime"]["start_minute"], erken)])
+    c, s = bugun(now_minute=erken + 5)
+    bekle("G3", s, "wake", GUN_BAS)
+    bekle("G3", s, "sekerleme", SEK_BAS)
+    check("G3 · erken_uyanma.gercek_saat 05:50",
+          c["adaptation"]["erken_uyanma"]["gercek_saat"] == hhmm(erken),
+          c["adaptation"]["erken_uyanma"])
+
+
+def test_g4_alti_bes():
+    """06:05 uyandı → normal K2 yolu, şekerleme YOK."""
+    gerc = 6 * 60 + 5
+    kur(lambda row: [gece(row, TODAY, TPL["bedtime"]["start_minute"], gerc)])
+    c, s = bugun(now_minute=gerc + 5)
+    bekle("G4", s, "wake", gerc, "gerçek uyanış")
+    check("G4 · şekerleme YOK", "sekerleme" not in s, list(s))
+    check("G4 · kaynak 'kayit'", c["adaptation"]["sabah_uyanis_kaynak"] == "kayit",
+          c["adaptation"]["sabah_uyanis_kaynak"])
+    bekle("G4", s, "nap_1", zincir(gerc)[0])
+
+
+def test_g5_gec_uyanis_ust_sinir_yok():
+    """09:00 wake kaydı → gün 09:00'dan. K10.2: üst sınır YOK."""
+    gerc = 9 * 60
+    kur(lambda row: [uyanik(row, TODAY, gerc)])
+    c, s = bugun(now_minute=gerc + 5)
+    bekle("G5", s, "wake", gerc, "üst sınır yok")
+    check("G5 · kaynak 'kayit' (varsayılana düşmedi)",
+          c["adaptation"]["sabah_uyanis_kaynak"] == "kayit",
+          c["adaptation"]["sabah_uyanis_kaynak"])
+    bekle("G5", s, "nap_1", zincir(gerc)[0])
+    check("G5 · şekerleme YOK", "sekerleme" not in s, list(s))
+
+
+def test_g6_sekerleme_gercek_kayit():
+    """G1 + şekerleme için gerçek kayıt 08:10-08:35 → K6/K7 şekerlemeye de işler."""
+    erken, s_bas, s_bit = 4 * 60 + 30, 8 * 60 + 10, 8 * 60 + 35
+    kur(lambda row: [gece(row, TODAY, TPL["bedtime"]["start_minute"], erken),
+                     nap(row, TODAY, s_bas, s_bit - s_bas)])
+    c, s = bugun(now_minute=s_bit + 5)
+    bekle("G6", s, "sekerleme", s_bas, "gerçek kayıt")
+    check("G6 · şekerleme kaynağı 'kayit' (K10.7)",
+          s["sekerleme"].get("kaynak") == "kayit", s["sekerleme"].get("kaynak"))
+    bekle("G6", s, "nap_1", s_bit + WW, "gerçek bitiş + pencere")
+    check("G6 · erken_uyanma hâlâ dolu",
+          c["adaptation"]["erken_uyanma"] is not None, "")
+
+
+def test_g7_ertesi_gun_sablona_doner():
+    """G1'in ertesi günü kayıt yok → şablon 07:00, şekerleme YOK (K1)."""
+    erken = 4 * 60 + 30
+    kur(lambda row: [gece(row, TODAY, TPL["bedtime"]["start_minute"], erken)])
+    bugun(now_minute=erken + 5)                      # bugünü hesapla (şekerlemeli)
+    yarin = TODAY + timedelta(days=1)
+    c2, s2 = bugun(now_minute=0, gun=yarin)
+    bekle("G7", s2, "wake", W, "şablon hedefi")
+    bekle("G7", s2, "nap_1", TPL["nap_1"]["start_minute"], "şablona döndü")
+    check("G7 · şekerleme YOK", "sekerleme" not in s2, list(s2))
+    check("G7 · erken_uyanma None", c2["adaptation"]["erken_uyanma"] is None, "")
+
 
 
 # =============================================================================
@@ -594,12 +712,27 @@ def test_p_mobil_sozlesmesi():
 # =============================================================================
 # Koşucu
 # =============================================================================
+def test_z_llm_muhru():
+    """Faz 4 — bu suite HİÇBİR canlı Sonnet çağrısı yapmamalı."""
+    ok, detay = muhur_saglam_mi()
+    check("Z · LLM mührü sağlam (canlı çağrı YOK)", ok, detay)
+    check("Z · plan gerçekten yedek motordan üretildi",
+          fallback_cagri_sayisi() > 0 and canli_cagri_sayisi() == 0,
+          f"fallback={fallback_cagri_sayisi()} canli={canli_cagri_sayisi()}")
+    check("Z · üretilen plan 'fallback' damgalı",
+          BASE["generated_with"] == "fallback", BASE["generated_with"])
+
+
 TESTLER = [test_a_plana_uyuldu, test_b_sabah_uykusu_gec, test_c_gec_uyanis,
            test_d_erken_uyanis, test_e_uyku_atlandi, test_f_gece_bolunmesi,
-           test_g_cok_erken_uyanma, test_h_kayit_yok, test_i_varsayim_bozulur,
+           test_g1_erken_uyanma_sekerleme, test_g2_erken_sonra_tekrar_uyudu,
+           test_g3_bes_elli, test_g4_alti_bes, test_g5_gec_uyanis_ust_sinir_yok,
+           test_g6_sekerleme_gercek_kayit, test_g7_ertesi_gun_sablona_doner,
+           test_h_kayit_yok, test_i_varsayim_bozulur,
            test_j_gecmise_donuk, test_k_sleep_tipi_karismasi, test_l_birikme_yok,
            test_m_yatis_tavani, test_n_idempotans, test_o_batch_tetikler,
-           test_p_mobil_sozlesmesi]
+           test_p_mobil_sozlesmesi, test_z_llm_muhru]
+
 
 
 def main() -> int:

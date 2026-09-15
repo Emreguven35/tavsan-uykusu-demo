@@ -518,17 +518,27 @@ check("7d) Bebek bant atladı (3 uyku şablonu, 2 uyku bandı) → regenerate_re
       _r_bant["regenerate_required"] is True and _r_bant["adaptation"] is None,
       f"required={_r_bant['regenerate_required']} reasons={_r_bant['reasons']}")
 
-# 7d2) K5 ÜST SINIRI: gün ortasında basılan bir `wake` kaydı SABAH UYANIŞI
-#      sayılmaz. (v1'de böyle bir sınır yoktu; ölçülen hata, 12:00'daki "hâlâ
-#      uyanık" kaydının bütün günü oraya itmesiydi.)
+# 7d2) K10.2 — "hedef+90 dk" ÜST SINIRI KALDIRILDI: geç uyanış artık kırpılmaz,
+#      gün gerçek uyanıştan kurulur. Ayakta kalan tek koruma şudur: gündüz
+#      uykusundan SONRA basılan bir `wake` kaydı ("hâlâ uyanık" işareti) sabah
+#      uyanışı sayılamaz — yoksa bütün gün oraya kayardı (ölçülen v1 hatası).
 _r_gec = pa.adapt({"schedule": pa.build_schedule({}, 7 * S, yas_ay=9)}, {},
-                  [FakeLog("wake", _utc(0, 12))],       # 12:00 → hedef+90'ın dışı
+                  [FakeLog("nap", _utc(0, 10), _utc(0, 11)),   # önce gündüz uykusu
+                   FakeLog("wake", _utc(0, 12))],              # sonra "uyanık" işareti
                   today=TODAY, now_minute=GUN_BITTI, yas_ay=9)
 _w_gec = next(b for b in _r_gec["schedule"] if b["key"] == "wake")
-check("7d2) Gün ortasındaki (12:00) uyanık kaydı sabah uyanışı SAYILMAZ",
+check("7d2) Gündüz uykusundan SONRAKİ 'uyanık' kaydı sabah uyanışı SAYILMAZ",
       _w_gec["time"] == "07:00"
       and _r_gec["adaptation"]["sabah_uyanis_kaynak"] == "varsayilan",
       f"wake={_w_gec['time']} kaynak={_r_gec['adaptation']['sabah_uyanis_kaynak']}")
+
+# 7d2b) Buna karşılık geç uyanışta ÜST SINIR YOK (K10.2).
+_r_gec2 = pa.adapt({"schedule": pa.build_schedule({}, 7 * S, yas_ay=9)}, {},
+                   [FakeLog("wake", _utc(0, 9))],              # 09:00 → hedef+120
+                   today=TODAY, now_minute=GUN_BITTI, yas_ay=9)
+check("7d2b) 09:00 uyanış kırpılmadan kabul edilir (üst sınır yok)",
+      next(b for b in _r_gec2["schedule"] if b["key"] == "wake")["time"] == "09:00",
+      next(b for b in _r_gec2["schedule"] if b["key"] == "wake")["time"])
 
 # Sabah toleransı içindeki uyanış normal işler (kural fazla hassas değil).
 _normal = {"schedule": pa.build_schedule({}, 7 * S, yas_ay=9)}

@@ -8,6 +8,7 @@ Sayısal değerler ASLA LLM'den gelmez (deterministik):
     → master_knowledge_base.json.
 """
 import json
+import re
 from datetime import datetime, date
 from pathlib import Path
 from typing import Any
@@ -110,31 +111,70 @@ def _lowstr(v: Any) -> str:
     return str(v or "").lower().strip()
 
 
-def egitim_uygunlugu_kontrol(profile: dict, yas: dict) -> tuple[bool, list[str]]:
-    """
-    Red flag tarama. Karar ağacındaki "yas_alt_siniri" ve "red_flags" kuralları.
+# --- v2.1 / K11 — gece uyanma kartının eşikleri -----------------------------
+# Kart ÇIKMA koşulu: yaş >= 6 ay VE gece uyanma sayısı >= 5.
+# v2.0'da karşılaştırma ALT DİZE aramasıyla yapılıyordu
+# (`any(n in metin for n in ["5","6",…,"10"])`) ve ölçülen sonuç şuydu:
+# 11/12/13/14/20 uyanma kartı ÜRETMİYOR ama 5 üretiyordu; "0.5 saatte bir"
+# içindeki '5' yüzünden yanlış tetikleniyordu. Artık SAYISAL karşılaştırma.
+GECE_UYANMA_ESIGI = 5
+GECE_UYANMA_YAS_ESIGI = 6.0
+_RE_TAM_SAYI = re.compile(r"\d+")
+
+
+def ilk_tam_sayi(deger: Any) -> int | None:
+    """Serbest metinden İLK tam sayıyı çıkar; çıkaramazsan None.
+
+    '6 kez' → 6 · '3-4 kez' → 3 · '0.5 saatte bir' → 0 · 'çok sık' → None
+    Sayı zaten int/float ise doğrudan çevrilir. None DÖNMEK bir cevaptır:
+    "bilinmiyor" ile "sıfır" karışmamalı (bilinmiyorken kart çıkmaz)."""
+    if deger is None or isinstance(deger, bool):
+        return None
+    if isinstance(deger, (int, float)):
+        return int(deger)
+    m = _RE_TAM_SAYI.search(str(deger))
+    return int(m.group(0)) if m else None
+
+
+def egitim_uygunlugu_kontrol(duzeltilmis_ay: float, dogum_haftasi: int,
+                             saglik_problemi: Any = None,
+                             gece_uyanma_sayisi: int | None = None,
+                             kaynak: str = "beyan") -> dict:
+    """Red flag tarama — SAF FONKSİYON (v2.1 / Faz 3).
+
+    Karar ağacındaki "yas_alt_siniri" ve "red_flags" kuralları. DB'ye, profile
+    sözlüğüne ya da plan içeriğine bakmaz; yalnız verilen dört değerden üretir.
+    Bu yüzden her GET'te bebeğin GÜNCEL verisiyle yeniden çalıştırılabilir —
+    v2.0'da liste üretim anında donup kalıyordu (ölçüldü: gece uyanma 6→1
+    düzeltilse bile kart ekranda kalıyordu).
+
+    gece_uyanma_sayisi None → gece uyanma kartı ÜRETİLMEZ (bilinmiyor ≠ sıfır).
+    kaynak: 'beyan' (onboarding) | 'olculen' (son 7 gecenin kayıt ortalaması) —
+    yalnız kartın METNİNİ değiştirir, eşiği değil (K11).
+
+    Dönen: {"uygun_mu": bool, "uyarilar": [str]}
     """
     uyarilar: list[str] = []
     uygun = True
 
     # 5. ay alt sınırı (kayıt37 — kademeli kavram bu yaşta gelişir)
-    if yas["duzeltilmis_ay"] < 5:
+    if duzeltilmis_ay < 5:
         uygun = False
         uyarilar.append(
-            f"⛔ Bebeğiniz düzeltilmiş yaşa göre {yas['duzeltilmis_ay']:.1f} aylık. "
+            f"⛔ Bebeğiniz düzeltilmiş yaşa göre {duzeltilmis_ay:.1f} aylık. "
             "Uyku eğitimi 5. ayını dolduran bebekler için uygundur. "
             "Şimdilik sadece saat planlaması yapabilirsiniz, eğitim ilerideki haftalarda."
         )
 
     # Prematüre düzeltme uyarısı
-    if yas["prematüre_mi"]:
+    if int(dogum_haftasi) < 37:
         uyarilar.append(
-            f"ℹ️ Bebeğiniz prematüre (doğum {yas['dogum_haftasi']} haftalık). "
-            f"Tüm hesaplar düzeltilmiş yaş üzerinden ({yas['duzeltilmis_ay']:.1f} ay) yapıldı."
+            f"ℹ️ Bebeğiniz prematüre (doğum {int(dogum_haftasi)} haftalık). "
+            f"Tüm hesaplar düzeltilmiş yaş üzerinden ({duzeltilmis_ay:.1f} ay) yapıldı."
         )
 
     # Sağlık problemleri
-    saglik = _lowstr(profile.get("saglik_problemi"))
+    saglik = _lowstr(saglik_problemi)
     if saglik and saglik not in ("yok", "hayır", "yoktur", "none", "-"):
         if any(k in saglik for k in KRITIK_HASTALIKLAR):
             uyarilar.append(
@@ -144,21 +184,23 @@ def egitim_uygunlugu_kontrol(profile: dict, yas: dict) -> tuple[bool, list[str]]
             uygun = False
         else:
             uyarilar.append(
-                f"ℹ️ Sağlık notu: «{profile.get('saglik_problemi')}». "
+                f"ℹ️ Sağlık notu: «{saglik_problemi}». "
                 "Şiddetli ise doktor onayı almanız önerilir."
             )
 
-    # Histerik ağlama profili — gece beslenme sayısı çok yüksekse
-    gece_uyanma = _lowstr(profile.get("gece_uyanma"))
-    if any(n in gece_uyanma for n in ["5", "6", "7", "8", "9", "10"]):
-        if yas["duzeltilmis_ay"] >= 6:
-            uyarilar.append(
-                "ℹ️ Bebeğiniz 6+ aylık ve gece çok uyanıyor. Önce emerek uyuma "
-                "alışkanlığını değiştirme ve 3 gündüz uykusu (toplam min 3 saat) "
-                "düzeni eğitim öncesi hazırlık olarak ele alınmalı."
-            )
+    # K11 — gece çok uyanma kartı. SAYISAL eşik; kaynak yalnız metni değiştirir.
+    if (gece_uyanma_sayisi is not None
+            and duzeltilmis_ay >= GECE_UYANMA_YAS_ESIGI
+            and gece_uyanma_sayisi >= GECE_UYANMA_ESIGI):
+        bas = ("ℹ️ Bebeğiniz 6+ aylık ve gece çok uyanıyor." if kaynak == "beyan"
+               else f"ℹ️ Son 7 gecede ortalama {gece_uyanma_sayisi} kez uyanıyor.")
+        uyarilar.append(
+            f"{bas} Önce emerek uyuma "
+            "alışkanlığını değiştirme ve 3 gündüz uykusu (toplam min 3 saat) "
+            "düzeni eğitim öncesi hazırlık olarak ele alınmalı."
+        )
 
-    return uygun, uyarilar
+    return {"uygun_mu": uygun, "uyarilar": uyarilar}
 
 
 # ---------------------------------------------------------------------------
@@ -589,7 +631,13 @@ def parametre_uret(profile: dict) -> dict:
                                         tek_uyku=_tek_uyku_mu(profile))
     bucket.update(_bant_parametreleri(bant))
 
-    uygun, uyarilar = egitim_uygunlugu_kontrol(profile, yas)
+    # v2.1: saf fonksiyon — profil sözlüğünden gerekli dört değer çıkarılır.
+    # Üretim anındaki bu liste YALNIZ LLM prompt bağlamı içindir; mobile giden
+    # content.uyarilar her GET'te plan_service tarafından YENİDEN türetilir.
+    _uygunluk = egitim_uygunlugu_kontrol(
+        yas["duzeltilmis_ay"], yas["dogum_haftasi"],
+        profile.get("saglik_problemi"), ilk_tam_sayi(profile.get("gece_uyanma")))
+    uygun, uyarilar = _uygunluk["uygun_mu"], _uygunluk["uyarilar"]
     on_hazirlik = on_hazirlik_belirle(profile, yas)
     # kb zaten yüklü — tekrar okumasın diye geçilir (plan kuralı buradan gelir).
     plan_secimi = egitim_plani_secimi(profile, yas, kb)

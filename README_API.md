@@ -582,7 +582,9 @@ olarak raporlanır (`durum`: `yeterli` | `az` | `fazla` | `veri_yok`); gündüz
 | K2 | **Gün, o günün verisinden** | `content.schedule` her hesaplamada şablon + **bugünün** kayıtlarından kurulur. Yalnız bugünü bağlar; yarın yine K1 hedefinden başlar. |
 | K3 | **Gündüz kayması** | Her uyku kaydında, o uykudan **sonraki** bloklar gerçek uyanma + uyanıklık penceresiyle yeniden hesaplanır. Geçmiş bloklara dokunulmaz. |
 | K4 | **Yatış tavanı** | Yatış = son uyku bitişi + pencere. Bandın minimum gece uykusu sabah hedefine kadar sığmalıdır; tavan aşılırsa önce son gündüz uykusu kısaltılır/kaldırılır, sonra yatış tavana çekilir. Her müdahale `adaptation.uyarilar`a yazılır. |
-| K5 | **Gece uyanması ≠ sabah** | Sabah uyanışı = hedeften en fazla **90 dk önce** biten son gece uykusu, ya da açık `wake` kaydı. Daha erkeni **gece bölünmesi**dir (`adaptation.gece_bolunmeleri`), gün planını etkilemez. Sabit `04:00` alt sınırı **kaldırıldı**. Bir `sleep` kaydı ancak sabah hedefinden **önce başlamışsa** gece uykusu sayılır — 70 dk'lık bir kayıt sabah uyanışı sanılmaz. |
+| K5 | **Gece uyanması ≠ sabah** | Sabah uyanışı = günün **son** uyanışı (ilk gündüz uykusundan önceki). Ondan öncekiler **gece bölünmesi**dir (`adaptation.gece_bolunmeleri`). Bir `sleep` kaydı ancak sabah hedefinden **önce başlamışsa** gece uykusu sayılır — 70 dk'lık bir kayıt sabah uyanışı sanılmaz. Sabit `04:00` alt sınırı ve hedefe göreli **±90 dk toleransı kaldırıldı** (v2.1/K10). |
+| **K10** | **Erken uyanma** | **Gün en erken 06:00'da başlar.** 06:00'dan önce uyanıp *tekrar uyumayan* bebekte gün 06:00'dan kurulur (`sabah_uyanis_gercek` gerçek saati tutar, `wake` bloğu 06:00 + açıklayıcı `note`) ve güne **30 dk şekerleme** eklenir: `key:"sekerleme"`, başlangıç = `06:00 + bandın MİNİMUM uyanıklık penceresi` (8 ay → 08:00). Sonrası normal zincir (`nap_1 = şekerleme bitişi + normal pencere`). Gün taşarsa **şekerleme asla kaldırılmaz**; önce son gündüz uykusu kısaltılır/kaldırılır. 06:00 öncesi uyanıp tekrar uyuduysa gece bölünmesi geçerli. **06:00 ve sonrası için ÜST SINIR YOK** — 09:00'da uyanan için gün 09:00'dan. Şablon hedefi değişmez; ertesi gün yine 07:00. |
+| **K11** | **Uyarılar canlı** | `content.uyarilar` / `content.uygun_mu` / `content.yas` / `content.yas_bandi` / `content.bucket` **her GET'te** bebeğin güncel verisinden **yeniden türetilir**, plandan kopyalanmaz. Gece uyanma kartının kaynağı: son 7 gecede `ended_at`'i dolu `night_wake` kaydı olan gece **< 3** ise `beyan` (`baby.night_wakes`), **≥ 3** ise `olculen` (o gecelerin ortalaması, yukarı yuvarlanmış). Eşik her iki kaynakta aynı: `yaş ≥ 6 ay` **ve** `sayı ≥ 5`, **sayısal** karşılaştırma (alt dize araması kaldırıldı). İz: `adaptation.gece_uyanma = {kaynak, deger, gece_sayisi}`. |
 | K6 | **Kayıt yoksa plana uydu** | Zamanı geçtiği hâlde kaydı olmayan blok "planlandığı gibi oldu" sayılır ve `adaptation.varsayilan_bloklar` içinde listelenir. Hiç kayıt yoksa çizelge şablonun **birebir aynısıdır**. |
 | K7 | **Varsayım bozulur** | Gerçek kayıt gelince (farklı saat, kısa uyku, `nap_skipped`, ya da uyanık geçen süre) blok gerçek veriye çevrilir ve K3 zinciri yeniden akar. Geçmişe dönük kayıtlar da aynı akışı tetikler. |
 | K8 | **Kilit yok** | Hesap her `GET /plans/today` **ve** her `POST /logs/batch` sonrasında koşar; idempotenttir (aynı kayıtlar → aynı çizelge) ve LLM çağırmaz. İçerik değişmediyse DB'ye **yazılmaz**. Yaş bandı ihlali (`regenerate_required`) korundu — ama kontrol artık **şablona** uygulanır, bugün bir uyku atlandı diye plan yeniden üretilmez. |
@@ -606,6 +608,11 @@ süren `night_wake` varsa → `regression_detected=true`, `restart_program_sugge
   "atlanan_bloklar": [],                // K7 — nap_skipped ile düşürülenler
   "yok_sayilan_kayitlar": [{"id": "…", "sebep": "tanınmayan kayıt tipi: 'xyz'"}],
   "gece_bolunmeleri": [{"saat": "04:30", "dakika": 270, "sebep": "…"}],
+  // v2.1/K10 — erken uyanma yoksa null
+  "erken_uyanma": {"gercek_saat": "04:30", "gun_baslangici": "06:00",
+                   "sekerleme_eklendi": true},
+  // v2.1/K11 — kartın beslendiği sayı ve kaynağı
+  "gece_uyanma": {"kaynak": "olculen", "deger": 6, "gece_sayisi": 7},
   "uyaniklik_penceresi_dk": 150,
   "uyarilar": ["Bugün yatış saati bandın sınırına dayandı"],
   "regenerate_required": false, "regression_detected": false,
@@ -633,6 +640,16 @@ yalnız `kaynak` (`kayit|plan|varsayilan`) ve gece bloğunda `gece_uykusu_dk` **
 - **YENİ (v2):** `adaptation.varsayilan_bloklar` içindeki bloklar "kaydı yok, plana
   uyduğu varsayıldı" demektir — mobil bunları soluk gösterip "böyle mi oldu?" diye
   sorabilir. `adaptation.uyarilar` kullanıcıya gösterilmelidir.
+- **YENİ (v2.1):** çizelgede **`key:"sekerleme"`** bloğu çıkabilir (erken uyanma
+  telafisi). Normal gündüz uykularından biri **değildir**; mobil "3 uyku" rozetini
+  sayarken bu bloğu saymamalıdır.
+- **YENİ (v2.1):** `PATCH /babies/{id}` artık **`saglik_problemi`** ve
+  **`dogum_haftasi`** kabul ediyor; onboarding bunları `profile_overrides` yerine
+  doğrudan bebeğe yazabilir (yazılmazsa `POST /plans/generate` gövdesindeki
+  `profile_overrides` yine bebeğe kalıcılaştırılır).
+- **YENİ (v2.1):** `content.uyarilar` artık **canlıdır** — kart koşul düşünce
+  kaybolur, koşul oluşunca gelir. Mobil listeyi önbelleğe almamalı, her
+  `plans/today` yanıtında gelen listeyi göstermelidir.
 
 ## 6.2 Bildirimler (Expo Push)
 

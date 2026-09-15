@@ -11,9 +11,11 @@ Zamanlayıcı ise yakalayıp loglar (tek bebek yüzünden tur düşmesin).
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 from datetime import date, datetime, timedelta, timezone
+from typing import Iterable
 
 from sqlalchemy.orm import Session
 
@@ -21,7 +23,10 @@ from api.models import Baby, SleepLog, SleepPlan, User
 from api.services import plan_adapter
 from api.services import usage
 from engine import plan_generator, plan_gunleri, yas_bantlari, yenidogan
-from engine.parameter_engine import hesapla_yas_ay, load_kb, parametre_uret, yas_bucket_sec
+from engine.parameter_engine import (
+    egitim_uygunlugu_kontrol, hesapla_yas_ay, ilk_tam_sayi, load_kb,
+    parametre_uret, yas_bucket_sec,
+)
 
 logger = logging.getLogger("tavsan.plan_service")
 
@@ -48,14 +53,55 @@ class PlanError(RuntimeError):
 # =============================================================================
 # Profil / parametre yardımcıları
 # =============================================================================
+def etkin_dogum_haftasi(baby: Baby, istekten: int | None = None) -> int:
+    """Prematüre düzeltmesinde kullanılacak doğum haftası (v2.1).
+
+    Öncelik: istek gövdesi > Baby satırı > 40 (miadında). İstekten gelen değer
+    Baby'ye YAZILIR (bkz. profili_kalicilastir) — böylece yeniden üretimlerde
+    kaybolmaz."""
+    # getattr: motor test fixture'ları (SahteBebek) ORM satırı değil, düz nesne.
+    # Yeni kolonu olmayan bir nesne buraya gelirse çökmek yerine varsayılana düşer.
+    return int(istekten or getattr(baby, "dogum_haftasi", None) or 40)
+
+
+def profili_kalicilastir(db: Session, baby: Baby, overrides: dict | None,
+                         dogum_haftasi: int | None) -> None:
+    """v2.1 — istekle gelen kalıcı profil alanlarını Baby'ye yaz.
+
+    Eskiden `profile_overrides` hiçbir yerde saklanmıyordu; bant atlaması sonrası
+    yeniden üretimde sağlık uyarısı sessizce kayboluyordu (ölçüldü). Artık bu iki
+    alan bebeğe ait. Diğer override anahtarları (onboarding'in serbest cevapları)
+    yine geçici — onların kalıcı karşılığı zaten Baby kolonlarıdır."""
+    degisti = False
+    if dogum_haftasi is not None and baby.dogum_haftasi != int(dogum_haftasi):
+        baby.dogum_haftasi = int(dogum_haftasi)
+        degisti = True
+    saglik = (overrides or {}).get("saglik_problemi")
+    if saglik is not None and baby.saglik_problemi != saglik:
+        baby.saglik_problemi = saglik or None
+        degisti = True
+    nw = (overrides or {}).get("gece_uyanma")
+    if nw is not None:
+        sayi = ilk_tam_sayi(nw)
+        if sayi is not None and baby.night_wakes != sayi:
+            baby.night_wakes = sayi
+            degisti = True
+    if degisti:
+        db.commit()
+        db.refresh(baby)
+
+
 def profile_from_baby(baby: Baby, overrides: dict | None,
                       dogum_haftasi: int | None) -> dict:
-    """Baby satırından motorun beklediği profil sözlüğünü kur. profile_overrides
-    (mobil onboarding'in 37 cevabı) üzerine yazılır."""
+    """Baby satırından motorun beklediği profil sözlüğünü kur.
+
+    v2.1: `saglik_problemi` ve `dogum_haftasi` artık BABY'DEN okunur (kalıcı).
+    profile_overrides (mobil onboarding'in 37 cevabı) hâlâ üzerine yazabilir ama
+    artık tek kaynak değildir — override verilmese de değerler korunur."""
     profile = {
         "bebek_ad": baby.name,
         "dogum_tarihi": baby.birth_date.isoformat(),   # çağıran öncesinde doğruladı
-        "dogum_haftasi": dogum_haftasi or 40,
+        "dogum_haftasi": etkin_dogum_haftasi(baby, dogum_haftasi),
         "beslenme": baby.feeding_type or "",
         "destek": baby.sleep_method or "",
         "oda": baby.sleep_environment or "",
@@ -63,10 +109,79 @@ def profile_from_baby(baby: Baby, overrides: dict | None,
         "dayanma_siniri": baby.crying_tolerance or "",
         "deneyim": baby.parent_experience or "",
         "gece_uyanma": str(baby.night_wakes) if baby.night_wakes is not None else "",
+        # v2.1 — KALICI: yeniden üretimde artık kaybolmuyor.
+        "saglik_problemi": getattr(baby, "saglik_problemi", None) or "",
     }
     if overrides:
         profile.update(overrides)
     return profile
+
+
+# =============================================================================
+# K11 — gece uyanma sayısının KAYNAĞI: beyan mı, ölçülen mi?
+# =============================================================================
+# Onboarding'de bir kez girilen sayı (beyan) ilk günlerin tek verisidir; ama
+# anne kayıt tutmaya başladıysa GERÇEK ölçüm beyanı gölgede bırakmalıdır.
+# v2.0'da yalnız beyan vardı ve hiç güncellenmiyordu: bebek düzelse bile
+# "gece çok uyanıyor" kartı ekranda kalıyordu (ölçüldü).
+GECE_UYANMA_PENCERE_GUN = 7        # son kaç gece taranır
+GECE_UYANMA_MIN_GECE = 3           # ölçülene geçmek için gereken en az gece sayısı
+
+
+def gece_uyanma_kaynagi(baby: Baby, logs: Iterable[SleepLog],
+                        today: date) -> dict:
+    """K11 — kartın besleneceği gece uyanma sayısı ve nereden geldiği.
+
+    Son `GECE_UYANMA_PENCERE_GUN` gecede `ended_at`'i DOLU `night_wake` kaydı
+    olan gece sayısı `GECE_UYANMA_MIN_GECE`'den azsa beyan (baby.night_wakes)
+    kullanılır; yeterliyse veri olan gecelerin ORTALAMASI (yukarı yuvarlanmış).
+
+    `ended_at` şartı bilinçli: süresi olmayan kayıt regresyon protokolünde de
+    sayılmıyor (bkz. plan_adapter.detect_regression) — iki yerde aynı ölçüt.
+
+    Dönen: {"kaynak": "beyan"|"olculen", "deger": int|None, "gece_sayisi": int}
+    """
+    basla = today - timedelta(days=GECE_UYANMA_PENCERE_GUN - 1)
+    gece_sayaci: dict[date, int] = {}
+    for lg in logs or []:
+        if getattr(lg, "type", None) != "night_wake":
+            continue
+        if getattr(lg, "ended_at", None) is None:
+            continue
+        gun, dakika = plan_adapter._local_minute(lg.started_at,
+                                                 plan_adapter.TZ_OFFSET_MIN)
+        # Gece anahtarı: öğleden önceki uyanmalar BİR ÖNCEKİ gecenin sayılır —
+        # detect_regression ile aynı kural, iki yerde ayrışmasın.
+        gece = gun - timedelta(days=1) if dakika < 12 * 60 else gun
+        if basla <= gece <= today:
+            gece_sayaci[gece] = gece_sayaci.get(gece, 0) + 1
+
+    if len(gece_sayaci) >= GECE_UYANMA_MIN_GECE:
+        ortalama = sum(gece_sayaci.values()) / len(gece_sayaci)
+        return {"kaynak": "olculen", "deger": math.ceil(ortalama),
+                "gece_sayisi": len(gece_sayaci)}
+    return {"kaynak": "beyan", "deger": baby.night_wakes,
+            "gece_sayisi": len(gece_sayaci)}
+
+
+def uyarilari_turet(baby: Baby, logs: Iterable[SleepLog], today: date,
+                    dogum_haftasi: int | None = None) -> dict:
+    """Faz 3 — `content.uyarilar` + `content.uygun_mu`'yu GÜNCEL veriden türet.
+
+    ASLA kopyalanmaz: üretim anındaki liste yalnız LLM prompt bağlamıdır.
+    Her GET'te bu fonksiyon koşar, dolayısıyla koşul düşünce kart kaybolur,
+    koşul oluşunca kart kendiliğinden gelir (v2.0'da ikisi de olmuyordu).
+
+    Dönen: {"uygun_mu", "uyarilar", "gece_uyanma", "yas"}
+    """
+    hafta = etkin_dogum_haftasi(baby, dogum_haftasi)
+    yas = hesapla_yas_ay(baby.birth_date.isoformat(), hafta)
+    gu = gece_uyanma_kaynagi(baby, logs, today)
+    sonuc = egitim_uygunlugu_kontrol(
+        yas["duzeltilmis_ay"], hafta, getattr(baby, "saglik_problemi", None),
+        ilk_tam_sayi(gu["deger"]), gu["kaynak"])
+    return {"uygun_mu": sonuc["uygun_mu"], "uyarilar": sonuc["uyarilar"],
+            "gece_uyanma": gu, "yas": yas}
 
 
 def bucket_params(baby: Baby, dogum_haftasi: int | None = None
@@ -93,8 +208,17 @@ def tek_uyku_bayragi(content: dict | None) -> bool | None:
 # =============================================================================
 # Sorgular
 # =============================================================================
+# Hesaplama yollarının İHTİYAÇ DUYDUĞU EN GENİŞ pencere. Tek bir sorguyla
+# çekilir, her tüketici kendi penceresine göre süzer:
+#   • recompute_day → yalnız BUGÜN,
+#   • summarize_logs / detect_regression → son 3 gün / 3 gece,
+#   • gece_uyanma_kaynagi (K11) → son 7 gece.
+# Dar çekilirse K11 sessizce eksik gece görür (ölçüldü: 7 gece yazıldı, 4 sayıldı).
+LOG_PENCERE_GUN = max(plan_adapter.LOOKBACK_DAYS, GECE_UYANMA_PENCERE_GUN)
+
+
 def recent_logs(db: Session, user: User, baby: Baby, today: date,
-                lookback_days: int = plan_adapter.LOOKBACK_DAYS) -> list[SleepLog]:
+                lookback_days: int = LOG_PENCERE_GUN) -> list[SleepLog]:
     """Son `lookback_days` günün kayıtları. Yerel gün sınırı kayması ve gece
     uykusunun bitişi için pencere bir gün geniş tutulur."""
     start = datetime.combine(today - timedelta(days=lookback_days),
@@ -505,7 +629,12 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         }
 
     base_content = dict(base_plan.content or {})
-    dogum_haftasi = base_content.get("dogum_haftasi", 40)
+    # v2.1: doğum haftası artık BEBEĞE ait; eski planlar için içerikteki değere
+    # düşülür (o da yoksa 40). Böylece yeniden üretimde prematüre düzeltmesi
+    # kaybolmaz.
+    dogum_haftasi = (baby.dogum_haftasi
+                     if baby.dogum_haftasi is not None
+                     else base_content.get("dogum_haftasi", 40))
     if baby.birth_date is None:
         # Doğum tarihi yoksa yaş bandı ÇÖZÜLEMEZ. Eskiden bu yola hiç girilmiyordu
         # (kayıt yoksa erken dönülüyordu); K8 ile hesap her çağrıda koştuğu için
@@ -558,6 +687,28 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
             or dict(plan_adapter.NIGHT_WAKE_PROTOCOL),
             "adaptation": _adaptation_meta(result, summary, required=False),
         })
+
+    # --- Faz 3: uyarılar + yaş HER hesaplamada güncel veriden türetilir -------
+    # Bunlar `content`'ten KOPYALANMAZ. v2.0'da liste üretim anında donuyordu:
+    # night_wakes 6→1 düzeltilse bile kart kalıyor, bebek 6 ayı geçse bile kart
+    # gelmiyordu (ikisi de ölçüldü). Artık kaynak her zaman BEBEĞİN ŞU ANKİ
+    # verisi + son 7 gecenin kayıtları.
+    if baby.birth_date is not None:
+        turetilmis = uyarilari_turet(baby, logs, today, dogum_haftasi)
+        content["uyarilar"] = turetilmis["uyarilar"]
+        content["uygun_mu"] = turetilmis["uygun_mu"]
+        content["yas"] = turetilmis["yas"]
+        # Yaş ilerledikçe bant/bucket de tazelenir (rozet ve tablo eskimesin).
+        # regenerate_required mantığı DEĞİŞMEZ: şablon ihlali yukarıda ayrıca
+        # kontrol edilir ve gerekirse plan zaten tam yeniden üretilmiştir.
+        content["yas_bandi"] = yas_bantlari.yas_bandi_getir(
+            turetilmis["yas"]["duzeltilmis_ay"], tek_uyku=tek_uyku)
+        content["bucket"] = yas_bucket_sec(turetilmis["yas"]["duzeltilmis_ay"])
+        content["dogum_haftasi"] = etkin_dogum_haftasi(baby, dogum_haftasi)
+        # K11 izi — mobil "beyan mı ölçüm mü" ayrımını gösterebilsin.
+        content.setdefault("adaptation", {})
+        if isinstance(content["adaptation"], dict):
+            content["adaptation"]["gece_uyanma"] = turetilmis["gece_uyanma"]
 
     plan = upsert_plan(db, user, baby, today, content)
     return plan, result

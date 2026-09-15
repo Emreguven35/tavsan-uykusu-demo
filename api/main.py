@@ -59,7 +59,7 @@ settings = get_settings()
 # sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
 #
 # Sentry'den ÖNCE tanımlı olmak zorunda: release etiketi olarak oraya geçiyor.
-APP_VERSION = os.getenv("APP_VERSION", "gun-ici-kayma-v2")
+APP_VERSION = os.getenv("APP_VERSION", "v2.1")
 
 # Hata izleme — YALNIZ production + SENTRY_DSN. Uygulama nesnesi kurulmadan ÖNCE
 # başlatılır ki Starlette/FastAPI entegrasyonları middleware zincirini sarabilsin.

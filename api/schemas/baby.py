@@ -16,6 +16,9 @@ class BabyCreate(BaseModel):
     sleep_method: str | None = None
     night_wakes: int | None = None
     night_feeds: int | None = None
+    # v2.1 — KALICI PROFİL (eskiden yalnız profile_overrides içinde geliyordu).
+    saglik_problemi: str | None = None
+    dogum_haftasi: int | None = Field(default=None, ge=24, le=42)
     # Eğitim takibi (Faz 6.1R) — mobilin 14 günlük modülü set eder.
     training_started_at: date | None = None
     training_completed_at: date | None = None
@@ -37,6 +40,9 @@ class BabyUpdate(BaseModel):
     sleep_method: str | None = None
     night_wakes: int | None = None
     night_feeds: int | None = None
+    # v2.1 — KALICI PROFİL (eskiden yalnız profile_overrides içinde geliyordu).
+    saglik_problemi: str | None = None
+    dogum_haftasi: int | None = Field(default=None, ge=24, le=42)
     training_started_at: date | None = None
     training_completed_at: date | None = None
 
@@ -54,6 +60,8 @@ class BabyResp(BaseModel):
     sleep_method: str | None
     night_wakes: int | None
     night_feeds: int | None
+    saglik_problemi: str | None
+    dogum_haftasi: int | None
     training_started_at: date | None
     training_completed_at: date | None
     created_at: datetime

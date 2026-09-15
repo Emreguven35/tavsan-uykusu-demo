@@ -53,6 +53,13 @@ def generate_plan(req: PlanGenerateReq,
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Plan için bebeğin doğum tarihi gereklidir")
 
+    # v2.1 — İstekle gelen kalıcı profil alanları (saglik_problemi, dogum_haftasi,
+    # gece uyanma sayısı) BEBEĞE yazılır. Eskiden yalnız bu isteğin gövdesinde
+    # yaşıyorlardı; bant atlaması sonrası yeniden üretimde sağlık uyarısı sessizce
+    # kayboluyordu (ölçüldü). Async yolda da geçerli olsun diye 202'den ÖNCE.
+    plan_service.profili_kalicilastir(db, baby, req.profile_overrides,
+                                      req.dogum_haftasi)
+
     if sync:
         try:
             content = plan_service.generate_content(
