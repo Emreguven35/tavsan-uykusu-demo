@@ -645,7 +645,8 @@
     ],
     "difficulty": "baslangic",
     "quality_notes": "Net ve sayısal. RAG için doğrudan kullanılabilir.",
-    "is_usable": true
+    "is_usable": true,
+    "guncel_kural_notu": "GÜNCEL KURAL (İlayda, Eyl 2026): beslenme ve ek gıda uykudan 1 saat önce biter. Bu kayıttaki 'ek gıda 2 saat' ifadesi güncel değildir."
   },
   {
     "source_file": "kayıt4.mp3",

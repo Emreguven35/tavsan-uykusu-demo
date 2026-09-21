@@ -741,12 +741,45 @@ check("Y2) sleep 20:30 AÇIK → gece uykusu",
       sinif(20 * 60 + 30) == pa.GECE_UYKUSU, sinif(20 * 60 + 30))
 check("Y3) `nap` tipiyle 21:00 → gece uykusu (type sınıfı belirlemez)",
       sinif(21 * 60, 22 * 60) == pa.GECE_UYKUSU, sinif(21 * 60, 22 * 60))
-check("Y4) sleep 18:00-19:00 (60 dk) → gündüz (akşam istisnası)",
+# v1.4 — GÜNDÜZ SINIRI 17:00 → 19:00 (İlayda: "17 çok erken gece uykusu
+# için; gece uykusu için 19:00 ve sonrasını baz almamız gerekiyor").
+# 18:00 artık İSTİSNA DEĞİL, düpedüz gündüz: süresine de açık/kapalı
+# olmasına da bakılmaz.
+check("Y4) sleep 18:00-19:00 (60 dk) → gündüz (19:00 öncesi)",
       sinif(18 * 60, 19 * 60) == pa.GUNDUZ_UYKUSU, sinif(18 * 60, 19 * 60))
-check("Y4b) 18:00 başlayıp 120 dk süren → gece (istisna 90 dk ile sınırlı)",
-      sinif(18 * 60, 20 * 60) == pa.GECE_UYKUSU, sinif(18 * 60, 20 * 60))
-check("Y4c) 18:00 AÇIK kayıt → gece (süre bilinmiyorsa istisna yok)",
-      sinif(18 * 60) == pa.GECE_UYKUSU, sinif(18 * 60))
+check("Y4b) 18:00 başlayıp 120 dk süren → gündüz (19:00 öncesi, süre önemsiz)",
+      sinif(18 * 60, 20 * 60) == pa.GUNDUZ_UYKUSU, sinif(18 * 60, 20 * 60))
+check("Y4c) 18:00 AÇIK kayıt → gündüz (19:00 öncesi)",
+      sinif(18 * 60) == pa.GUNDUZ_UYKUSU, sinif(18 * 60))
+
+# --- 19:00 SONRASI: kısa+kapalı istisnası, eşik BANDA bağlı ----------------
+check("Y4d) 19:30-20:00 (30 dk, kapalı) → gündüz kısa uykusu",
+      sinif(19 * 60 + 30, 20 * 60) == pa.GUNDUZ_UYKUSU,
+      sinif(19 * 60 + 30, 20 * 60))
+check("Y4e) 19:30 başlayıp 90 dk süren → gece (eşiği aştı)",
+      sinif(19 * 60 + 30, 21 * 60) == pa.GECE_UYKUSU,
+      sinif(19 * 60 + 30, 21 * 60))
+check("Y4f) 19:30 AÇIK kayıt → gece (süre bilinmiyorsa istisna yok)",
+      sinif(19 * 60 + 30) == pa.GECE_UYKUSU, sinif(19 * 60 + 30))
+check("Y4g) 19:00 tam sınırı → gece tarafında",
+      sinif(19 * 60, 21 * 60) == pa.GECE_UYKUSU, sinif(19 * 60, 21 * 60))
+
+# Eşik YAŞA bağlı: 50 dk'lık 20:00 kaydı 6 ay+ için gündüz (50<60),
+# 6 ay altı için gece (50>45).
+_b8ay = yas_bantlari.yas_bandi_getir(8)
+_b4ay = yas_bantlari.yas_bandi_getir(4)
+_k50 = {"bas_dk": 20 * 60, "bit_dk": 20 * 60 + 50, "sure_dk": 50,
+        "bas_gun": TODAY, "bit_gun": TODAY}
+check("Y4h) Kısa uyku eşiği bandan geliyor (6 ay+ = 60, 6 ay altı = 45)",
+      pa.kisa_uyku_esigi(_b8ay) == 60 and pa.kisa_uyku_esigi(_b4ay) == 45
+      and pa.kisa_uyku_esigi(None) == 60,
+      f"{pa.kisa_uyku_esigi(_b8ay)} / {pa.kisa_uyku_esigi(_b4ay)}")
+check("Y4i) 20:00'de 50 dk: 8 aylıkta gündüz, 4 aylıkta gece",
+      pa.uyku_tipi_belirle(_k50, _b8ay) == pa.GUNDUZ_UYKUSU
+      and pa.uyku_tipi_belirle(_k50, _b4ay) == pa.GECE_UYKUSU,
+      f"{pa.uyku_tipi_belirle(_k50, _b8ay)} / {pa.uyku_tipi_belirle(_k50, _b4ay)}")
+check("Y4j) Gece yarısından sonra istisna YOK (02:00'de 30 dk → gece)",
+      sinif(2 * 60, 2 * 60 + 30) == pa.GECE_UYKUSU, sinif(2 * 60, 2 * 60 + 30))
 check("Y5) `sekerleme` tipi 13:00-13:30 → gündüz uykusu",
       sinif(13 * 60, 13 * 60 + 30) == pa.GUNDUZ_UYKUSU,
       sinif(13 * 60, 13 * 60 + 30))

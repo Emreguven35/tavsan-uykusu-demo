@@ -209,6 +209,10 @@ def yas_bandi_getir(ay: float, tek_uyku: bool | None = None) -> dict:
         "toplam_gunluk_uyku_dk": list(al("toplam_gunluk_uyku_dk") or [0, None]),
         "notlar": list(b.get("notlar") or []),
         "kestirme_protokolu": kestirme_protokolu(),
+        # v1.4 — "kısa gündüz uykusu" eşiği (6 ay altı 45, 6 ay ve üstü 60).
+        # K19 sınıflandırması ve K20 parça birleştirmesi bunu okur; çözülmüş
+        # banda TAŞINMASI şart, yoksa iki katman varsayılana düşer.
+        "kisa_uyku_esigi_dk": int(b.get("kisa_uyku_esigi_dk") or 60),
     }
     # Alt bant çözüldüyse kimliği taşınır (mobil/chat "0-1 ay" diyebilsin).
     if alt is not None:

@@ -438,10 +438,37 @@ def list_logs(
             q = q.filter(SleepLog.started_at >= from_)
         if to is not None:
             q = q.filter(SleepLog.started_at <= to)
-    return [_kategorili(r) for r in q.order_by(SleepLog.started_at.desc()).all()]
+    satirlar = q.order_by(SleepLog.started_at.desc()).all()
+    bantlar = _bebek_bantlari(db, {r.baby_id for r in satirlar})
+    return [_kategorili(r, bantlar.get(r.baby_id)) for r in satirlar]
 
 
-def _kategorili(row: SleepLog) -> SleepLogResp:
+def _bebek_bantlari(db: Session, baby_ids: set) -> dict:
+    """baby_id → yaş bandı. Kısa uyku eşiği yaşa bağlı olduğu için gerekli.
+
+    Bebek başına BİR kez çözülür; bant çözülemeyen bebek için None döner ve
+    sınıflandırma varsayılan eşiğe düşer (uydurma yaş üretilmez)."""
+    from engine import yas_bantlari
+    from engine.parameter_engine import hesapla_yas_ay
+
+    out: dict = {}
+    for bid in baby_ids:
+        bant = None
+        try:
+            baby = db.get(Baby, bid)
+            if baby is not None and baby.birth_date is not None:
+                hafta = int(getattr(baby, "dogum_haftasi", None) or 40)
+                ay = hesapla_yas_ay(baby.birth_date.isoformat(),
+                                    hafta)["duzeltilmis_ay"]
+                bant = yas_bantlari.yas_bandi_getir(ay)
+        except Exception:
+            logging.getLogger("tavsan.logs").exception(
+                "Bant çözülemedi (baby=%s) — varsayılan eşik kullanılacak", bid)
+        out[bid] = bant
+    return out
+
+
+def _kategorili(row: SleepLog, bant: dict | None = None) -> SleepLogResp:
     """K19.2 — satırı yanıta çevirirken uyku SINIFINI ekle.
 
     Sınıf motorla AYNI fonksiyondan (plan_adapter.uyku_sinifi_ham) gelir; iki
@@ -450,7 +477,7 @@ def _kategorili(row: SleepLog) -> SleepLogResp:
     resp = SleepLogResp.model_validate(row)
     if row.type in UYKU_TIPLERI_TUM:
         resp.kategori = uyku_sinifi_ham(row.started_at, row.ended_at,
-                                        TZ_OFFSET_MIN)
+                                        TZ_OFFSET_MIN, bant)
         resp.kategori_etiket = UYKU_ETIKETLERI.get(resp.kategori)
     return resp
 

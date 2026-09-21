@@ -148,12 +148,24 @@ GECE_UYKUSU = "gece_uykusu"
 UYKU_ETIKETLERI = {GUNDUZ_UYKUSU: "Gündüz uykusu", GECE_UYKUSU: "Gece uykusu"}
 
 GUNDUZ_PENCERE_BAS = 6 * 60      # 06:00 — bundan önce başlayan uyku gecedir
-GUNDUZ_PENCERE_BIT = 17 * 60     # 17:00 — bundan sonra başlayan uyku gecedir
-# İSTİSNA: 17:00-19:00 arası başlayan KISA ve KAPALI kayıt geç bir şekerlemedir,
-# gece yatışı değil. Açık kayıtta istisna UYGULANMAZ: süresi bilinmeyen bir
-# 18:00 kaydını "kısa" varsaymak, akşam yatışını gündüz uykusuna çevirirdi.
-AKSAM_ISTISNA_BIT = 19 * 60      # 19:00
-AKSAM_ISTISNA_MAX_DK = 90
+# v1.4 (İlayda, 2026-09-21): "17 çok erken gece uykusu için. Gece uykusu için
+# 19:00 ve sonrasını baz almamız gerekiyor. 17:00 bizim için kısa gündüz
+# uykusu, şekerleme ya da ilave uyku saatleri olur."
+GUNDUZ_PENCERE_BIT = 19 * 60     # 19:00 — bundan sonra başlayan uyku gecedir
+
+# İSTİSNA: 19:00'dan sonra başlayan KISA ve KAPALI kayıt, gece yatışı değil
+# başarısız bir yatış denemesi / geç şekerlemedir. Açık kayıtta istisna
+# UYGULANMAZ: süresi bilinmeyen bir 20:00 kaydını "kısa" varsaymak gerçek gece
+# uykusunu gündüz uykusuna çevirirdi.
+#
+# ÜST SINIR 24:00 — spec "19:00'dan sonra" diyor ama sınırsız bırakılırsa
+# 02:00'de 30 dk uyuyup uyanan bebeğin o parçası "gündüz kısa uykusu" olurdu.
+# Gece yarısından sonrası her koşulda gecedir.
+AKSAM_ISTISNA_BIT = 24 * 60      # 00:00 (ertesi gün)
+# Eşik artık SABİT DEĞİL, banda bağlı (kisa_uyku_esigi_dk): 6 ay altı 45 dk,
+# 6 ay ve üstü 60 dk. Bant yoksa 6 ay+ değerine düşülür — uygulamanın kullanıcı
+# kitlesinin ezici çoğunluğu orada.
+VARSAYILAN_KISA_UYKU_ESIGI_DK = 60
 
 # --- K20 — parça kayıt birleştirme ------------------------------------------
 # Anne uzun bir uykuyu birden çok kayda bölüyor (14:00-14:36 + 14:36-15:46) ya
@@ -507,22 +519,35 @@ def _log_alanlari(lg: Any, tz_offset_min: int) -> dict | None:
 UYKU_TIPLERI = ("sleep", "nap", "sekerleme")
 
 
+def kisa_uyku_esigi(bant: dict | None) -> int:
+    """Bandın "kısa gündüz uykusu" eşiği (dk).
+
+    İlayda: "Bir saatin altında kalan uykulara kısa gündüz uykusu denir, altı ay
+    üzeri bebeklerde. Altı ayın altındaki bebeklerde ise 45 dakikanın
+    altındakiler." Değer tabloda (`kisa_uyku_esigi_dk`, v1.4)."""
+    if bant:
+        esik = bant.get("kisa_uyku_esigi_dk")
+        if esik:
+            return int(esik)
+    return VARSAYILAN_KISA_UYKU_ESIGI_DK
+
+
 def uyku_tipi_belirle(kayit: dict, bant: dict | None = None) -> str:
     """K19.1 — bir uyku kaydının SINIFI: gündüz mü gece mi.
 
     TEK KURAL, BAŞLANGIÇ SAATİ:
-      • 06:00–17:00 arası başlayan → gündüz uykusu,
-      • 17:00–06:00 arası başlayan → gece uykusu,
-      • İSTİSNA: 17:00–19:00 arası başlayan, KAPALI ve 90 dk'dan kısa kayıt
-        gündüz sayılır (geç şekerleme).
+      • 06:00–19:00 arası başlayan → gündüz uykusu,
+      • 19:00–06:00 arası başlayan → gece uykusu,
+      • İSTİSNA: 19:00–24:00 arası başlayan, KAPALI ve bandın kısa uyku
+        eşiğinden (6 ay altı 45 dk / 6 ay+ 60 dk) kısa kayıt gündüz sayılır —
+        bu gece yatışı değil, başarısız bir yatış denemesidir.
 
     DB'deki `type` sınıfı BELİRLEMEZ: `nap` tipiyle gelen 21:00 kaydı gece
     uykusudur, `sleep` tipiyle gelen 09:50 kaydı gündüz uykusudur. Eski
     istemcilerin `sekerleme` tipi de normal gündüz uykusu gibi işlenir.
 
-    `bant` şimdilik KULLANILMIYOR ama imzada duruyor: istisna penceresinin yaşa
-    göre daralması gündeme gelirse (metodoloji sahibine sorulacak) çağıranların
-    hepsini değiştirmek gerekmesin."""
+    `bant` artık KULLANILIYOR: kısa uyku eşiği yaşa bağlı (v1.4). Bant
+    verilmezse 6 ay+ eşiğine düşülür."""
     # Gece yarısını AŞAN kayıt her koşulda gece uykusudur: 16:00'da başlayıp
     # ertesi gün 02:00'de biten bir kayıt takvimsel olarak gündüz uykusu olamaz.
     # Bu, saat kuralının tek fiziksel istisnasıdır.
@@ -535,17 +560,19 @@ def uyku_tipi_belirle(kayit: dict, bant: dict | None = None) -> str:
     sure = kayit.get("sure_dk")
     if (GUNDUZ_PENCERE_BIT <= bas < AKSAM_ISTISNA_BIT
             and kayit.get("bit_dk") is not None
-            and sure is not None and sure < AKSAM_ISTISNA_MAX_DK):
+            and sure is not None and sure < kisa_uyku_esigi(bant)):
         return GUNDUZ_UYKUSU
     return GECE_UYKUSU
 
 
 def uyku_sinifi_ham(started_at: datetime, ended_at: datetime | None = None,
-                    tz_offset_min: int = TZ_OFFSET_MIN) -> str:
+                    tz_offset_min: int = TZ_OFFSET_MIN,
+                    bant: dict | None = None) -> str:
     """K19.2 — ORM satırı / ham datetime için sınıf (GET /logs yanıtı).
 
     `uyku_tipi_belirle` ile AYNI kuralı uygular; iki yerde ayrı yazılırsa
-    mobilin bastığı etiket ile motorun hesabı ayrışır."""
+    mobilin bastığı etiket ile motorun hesabı ayrışır. `bant` verilirse kısa
+    uyku eşiği yaşa göre çözülür."""
     bas_gun, bas_dk = _local_minute(started_at, tz_offset_min)
     sure = bit_dk = bit_gun = None
     if ended_at is not None:
@@ -553,7 +580,7 @@ def uyku_sinifi_ham(started_at: datetime, ended_at: datetime | None = None,
         sure = max(0, int((ended_at - started_at).total_seconds() // 60))
     return uyku_tipi_belirle({"bas_dk": bas_dk, "bit_dk": bit_dk,
                               "bas_gun": bas_gun, "bit_gun": bit_gun,
-                              "sure_dk": sure})
+                              "sure_dk": sure}, bant)
 
 
 def _atlandi_mi(k: dict) -> bool:
@@ -641,7 +668,8 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
                   tz_offset_min: int = TZ_OFFSET_MIN, *,
                   nap_sure_dk: int | None = None,
                   gece_sure_dk: int | None = None,
-                  now_minute: int | None = None) -> dict:
+                  now_minute: int | None = None,
+                  bant: dict | None = None) -> dict:
     """Ham kayıtları BUGÜNE ait rollere ayır (K2 — yalnız bugünün verisi).
 
     Dönen: {gece_uykulari, gunduz_uykulari, atlananlar, wake_kayitlari,
@@ -699,7 +727,7 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
             continue
 
         # --- K19.1 — SINIF SAATTEN gelir, type'tan DEĞİL --------------------
-        if uyku_tipi_belirle(k) == GECE_UYKUSU:
+        if uyku_tipi_belirle(k, bant) == GECE_UYKUSU:
             # Gece uykusu BUGÜNE, bittiği güne göre bağlanır (dün 20:30 → bugün 07:00).
             if k["bit_gun"] == gun:
                 out["gece_uykulari"].append(k)
@@ -1233,7 +1261,7 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
 
     kayitlar = gun_kayitlari(todays_logs, gun, sabit_wake, tz_offset_min,
                              nap_sure_dk=_nap_sure, gece_sure_dk=_gece_sure,
-                             now_minute=now_minute)
+                             now_minute=now_minute, bant=bant)
     sabah = sabah_uyanisi(kayitlar, sabit_wake)
 
     uyarilar: list[str] = list(sabah["uyarilar"])
