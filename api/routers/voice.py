@@ -158,11 +158,19 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
     # kendini besliyordu: yer yok → klon yok → temizlik yok → yer yok.
     # Kurtarma bilinçli olarak klondan SONRA: normal akışta kimsenin sesine
     # dokunulmasın, yalnız gerçekten tıkandığında dokunulsun.
+    kurtarma = {"serbest": 0, "asama": None}
     if not r.get("ok") and r.get("reason") == voice_svc.HATA_SLOT_DOLU:
-        if _slot_kurtar(db, user) > 0:
+        kurtarma = _slot_kurtar(db, user)
+        if kurtarma["serbest"] > 0:
             r = voice_svc.clone_voice(name, data, dosya_adi, icerik_turu)
 
     if not r.get("ok"):
+        # Kullanıcının KENDİ sesini yer açmak için sildik ve klonlama yine
+        # tutmadı: hem sesi gitti hem de 30 günlük bekleme yüzünden yenisini
+        # kaydedemez durumda kalırdı. Hakkı iade ediliyor — kaybın sebebi
+        # kendi davranışı değil, bizim kurtarma denememiz.
+        if kurtarma["asama"] == "kendi":
+            _klon_hakkini_iade_et(db, user)
         # user KİMLİĞİ loglanıyor: eskiden başarısızlıkta hiç kullanıcı bilgisi
         # yoktu, "kim etkilendi" sorusu loglardan CEVAPLANAMIYORDU.
         logger.warning("Voice clone başarısız: user=%s reason=%s upstream=%s",
@@ -308,10 +316,12 @@ def _klon_hata_mesaji(r: dict) -> str:
     }.get(r.get("reason"), SES_SERVIS_MESAJ)
 
 
-def _slot_kurtar(db: Session, user: User) -> int:
+def _slot_kurtar(db: Session, user: User) -> dict:
     """Hesap genelindeki klon slotlarından KULLANILMAYANLARI geri al.
 
-    Döner: serbest bırakılan slot sayısı.
+    Döner: {"serbest": <açılan slot>, "asama": "bayat"|"kendi"|None}.
+    Aşama çağırana lazım: "kendi" ise kullanıcının KENDİ sesi feda edilmiştir
+    ve klonlama yine tutmazsa aylık hakkının iadesi gerekir.
 
     İki aşama, bu sırayla — çalışan bir sese mümkün olduğunca dokunmadan yer
     açmak için:
@@ -334,7 +344,7 @@ def _slot_kurtar(db: Session, user: User) -> int:
     if not liste.get("ok"):
         logger.warning("Slot kurtarma: ElevenLabs ses listesi alınamadı (%s)",
                        liste.get("error"))
-        return 0
+        return {"serbest": 0, "asama": None}
     hesaptaki = {v["voice_id"] for v in liste["voices"]}
 
     def _idler(sorgu):
@@ -360,6 +370,7 @@ def _slot_kurtar(db: Session, user: User) -> int:
                        len(sahipsiz), ", ".join(sorted(sahipsiz)))
 
     serbest = 0
+    kullanilan_asama = None
     for asama, adaylar in (("bayat", (bayat & hesaptaki) - korunan),
                            ("kendi", (kendi & hesaptaki) - korunan)):
         if serbest:                      # bir slot yeter: fazlasını silme
@@ -371,6 +382,7 @@ def _slot_kurtar(db: Session, user: User) -> int:
                                asama, vid, sonuc.get("error"))
                 continue
             serbest += 1
+            kullanilan_asama = asama
             # Satır 'replaced' olmalı: ses artık ElevenLabs'te YOK. Aksi halde
             # /voice-status silinmiş bir voiceId dönüp /generate'i 410 yerine
             # anlamsız bir upstream hatasına sürüklerdi.
@@ -380,4 +392,22 @@ def _slot_kurtar(db: Session, user: User) -> int:
             logger.info("Slot kurtarma (%s): voice_id=%s silindi", asama, vid)
     if serbest:
         db.commit()
-    return serbest
+    return {"serbest": serbest, "asama": kullanilan_asama}
+
+
+def _klon_hakkini_iade_et(db: Session, user: User) -> None:
+    """Kullanıcının aylık klonlama hakkını ŞİMDİ kullanılabilir yap.
+
+    last_cloned_at'i tam 30 gün geriye çeker; _klon_durumu bunu "süre doldu"
+    olarak okur. NULL yapmak İŞE YARAMAZ: _son_klonlama NULL'da created_at'e
+    düşer ve bekleme aynen sürer."""
+    geri = datetime.now(timezone.utc) - timedelta(days=CLONE_COOLDOWN_DAYS)
+    n = 0
+    for p in (db.query(VoiceProfile)
+              .filter(VoiceProfile.user_id == user.id).all()):
+        p.last_cloned_at = geri
+        n += 1
+    if n:
+        db.commit()
+        logger.info("Klonlama hakkı iade edildi (kendi sesi feda edildi ama "
+                    "klonlama tutmadı): user=%s profil=%d", user.id, n)

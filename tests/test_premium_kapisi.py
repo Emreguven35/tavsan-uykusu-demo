@@ -287,6 +287,87 @@ check("9d) 422 + 503'ten sonra klonlama hâlâ mümkün (429 DEĞİL)",
 
 
 # =============================================================================
+# 10) KENDİ SESİ FEDA EDİLDİ AMA KLONLAMA YİNE TUTMADI → HAK İADE
+# =============================================================================
+# Tıkanıklıkta kurtarma kullanıcının KENDİ sesini silebiliyor. Klonlama yine
+# tutmazsa hem sesi gider hem de 30 günlük bekleme yüzünden yenisini
+# kaydedemez; kayıp kendi davranışından değil bizim denememizden kaynaklandığı
+# için hak İADE edilmeli.
+t_feda = reg("feda@test.com")
+KLON_SONUC.clear()
+r10 = klonla(t_feda)                       # başarılı ilk klon → kendi sesi oluşur
+_kendi_ses = r10.json()["voiceId"]
+check("10a) Hazırlık: ilk klon başarılı", r10.status_code == 200, r10.text[:120])
+
+# Bayat aday YOK; tek kurtarılabilir şey kullanıcının kendi sesi.
+KLON_SONUC.clear()
+KLON_SONUC.append({"ok": False, "error": HAM_UPSTREAM, "status": 503,
+                   "reason": voice_svc.HATA_SLOT_DOLU})
+KLON_SONUC.append({"ok": False, "error": HAM_UPSTREAM, "status": 503,
+                   "reason": voice_svc.HATA_SLOT_DOLU})     # retry de tutmuyor
+hak_ver(t_feda)
+r10b = klonla(t_feda)
+check("10b) Kurtarma sonrası da tutmazsa 503", r10b.status_code == 503,
+      f"{r10b.status_code} {r10b.text[:160]}")
+check("10c) Kullanıcının kendi sesi feda edildi", _kendi_ses in SILINEN,
+      f"kendi={_kendi_ses} silinen={SILINEN[-4:]}")
+
+_vs10 = client.get("/api/v1/voice/voice-status", headers=H(t_feda)).json()
+check("10d) Hak İADE edildi: can_clone yeniden true (30 gün kilit YOK)",
+      _vs10.get("can_clone") is True, str(_vs10))
+
+KLON_SONUC.clear()
+r10c = klonla(t_feda)
+check("10e) İade sonrası hemen yeniden klonlayabiliyor (429 değil)",
+      r10c.status_code == 200, f"{r10c.status_code} {r10c.text[:160]}")
+
+# Bayat aşamasıyla kurtarıldığında hak İADE EDİLMEZ (kendi sesi kaybolmadı)
+t_bayat = reg("bayat_iade@test.com")
+KLON_SONUC.clear()
+_bayat_kendi = klonla(t_bayat).json()["voiceId"]
+_db = SessionLocal()
+try:
+    _db.add(VoiceProfile(user_id=uid_of(t_bayat), elevenlabs_voice_id="BAYAT2",
+                         status="replaced"))
+    _db.commit()
+finally:
+    _db.close()
+HESAPTAKI.append("BAYAT2")
+hak_ver(t_bayat)                           # aylık kapı 429'a takılmasın
+_db = SessionLocal()
+try:
+    _once = {p.elevenlabs_voice_id: p.last_cloned_at
+             for p in _db.query(VoiceProfile)
+             .filter(VoiceProfile.user_id == uid_of(t_bayat)).all()}
+finally:
+    _db.close()
+
+KLON_SONUC.clear()
+KLON_SONUC.append({"ok": False, "error": HAM_UPSTREAM, "status": 503,
+                   "reason": voice_svc.HATA_SLOT_DOLU})
+KLON_SONUC.append({"ok": False, "error": HAM_UPSTREAM, "status": 503,
+                   "reason": voice_svc.HATA_SLOT_DOLU})
+r10d = klonla(t_bayat)
+check("10f) Bayat kurtarma başarısız olsa da 503",
+      r10d.status_code == 503, f"{r10d.status_code} {r10d.text[:160]}")
+check("10g) Bayat aşamasında BAYAT ses silindi, kullanıcının kendi sesi DURUYOR",
+      "BAYAT2" in SILINEN and _bayat_kendi not in SILINEN,
+      f"kendi={_bayat_kendi} silinen={SILINEN[-3:]}")
+
+_db = SessionLocal()
+try:
+    _sonra = {p.elevenlabs_voice_id: p.last_cloned_at
+              for p in _db.query(VoiceProfile)
+              .filter(VoiceProfile.user_id == uid_of(t_bayat)).all()}
+finally:
+    _db.close()
+# İade son_klon damgasını "şimdi - 30 gün"e taşır; bayat aşamasında hiç
+# dokunulmamalı (kullanıcı kendi sesini kaybetmedi, telafi edilecek bir şey yok).
+check("10h) Bayat aşamasında hak İADE EDİLMEZ (son_klon damgası değişmedi)",
+      _sonra == _once, f"once={_once} sonra={_sonra}")
+
+
+# =============================================================================
 # 2-3) BETA_MODE=false — AYRI SÜREÇ (config lru_cache'li, env sonradan değişmez)
 # =============================================================================
 _ALT_SUREC = r'''
