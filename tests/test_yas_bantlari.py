@@ -572,12 +572,19 @@ _naps_az = [FakeLog("nap", _utc(0, 10), _utc(0, 11)),        # 60 dk
 _loglar_az = wake_logs(7, days=1) + _naps_az
 _r_kest = pa.adapt(_plan8, {}, _loglar_az, today=TODAY, now_minute=GUN_BITTI,
                    yas_ay=7)
-check("7e) Gündüz toplam 120 dk (<180) → adapt kestirme gerekli der",
-      _r_kest["kestirme"]["gerceklesen_dk"] == 120
-      and _r_kest["kestirme"]["gerekli"] is True
-      and _r_kest["kestirme"]["eksik_dk"] == 60
-      and any("kestirme" in s for s in _r_kest["reasons"]),
-      f"kestirme={_r_kest['kestirme']}")
+# v1.4 — açık artık yalnız RAPORLANMIYOR, çizelgeye ŞEKERLEME olarak
+# ekleniyor. Bu yüzden adapt() sonrası gündüz toplamı minimuma ulaşıyor ve
+# `kestirme.gerekli` False oluyor. Ölçülen şey: açığın KAPANDIĞI.
+check("7e) Gündüz toplam 120 dk (<180) → şekerleme eklenip açık kapandı",
+      _r_kest["kestirme"]["gerceklesen_dk"] >= 180
+      and _r_kest["kestirme"]["gerekli"] is False
+      and (_r_kest["adaptation"]["sekerleme"] or {}).get("eksik_dk") == 60,
+      f"kestirme={_r_kest['kestirme']} sek={_r_kest['adaptation']['sekerleme']}")
+check("7e1) Şekerleme akşam penceresinde ve uyarısı yazıldı",
+      (_r_kest["adaptation"]["sekerleme"] or {}).get("start_minute", 0)
+      >= 17 * 60
+      and any("şekerleme eklendi" in s for s in _r_kest["adaptation"]["uyarilar"]),
+      str(_r_kest["adaptation"]["sekerleme"]))
 
 _naps_yeterli = [FakeLog("nap", _utc(0, 9), _utc(0, 10, 20)),    # 80
                  FakeLog("nap", _utc(0, 13), _utc(0, 14, 20)),   # 80
@@ -591,11 +598,12 @@ check("7f) Gündüz toplam 200 dk (>180) → kestirme gerekmez",
 
 # 7e2) 24 saatlik toplam uyku değerlendirmesi adapt() çıktısına yansır.
 #      Gündüz 120 dk + hesaplanan gece 660 dk = 780. 6-8 ay ihtiyacı 840 → 60 eksik.
-check("7e2) adapt: 24 saatlik toplam uyku eksikse raporlanır",
-      _r_kest["toplam_uyku"]["gerceklesen_dk"] == 780
-      and _r_kest["toplam_uyku"]["eksik_dk"] == 60
-      and _r_kest["toplam_uyku"]["durum"] == "az"
-      and any("24 saatlik toplam" in s for s in _r_kest["reasons"]),
+# v1.4 — şekerleme gündüz açığını kapattığı için 24 saatlik toplam da hedefe
+# ulaşıyor. "Eksik raporlanır" kuralı hâlâ geçerli ama artık AÇIK KALAN bir
+# durumda tetikleniyor; burada açık kapandığı için toplam yeterli.
+check("7e2) adapt: şekerleme sonrası 24 saatlik toplam yeterli",
+      _r_kest["toplam_uyku"]["durum"] != "az"
+      and _r_kest["toplam_uyku"]["eksik_dk"] == 0,
       f"toplam={_r_kest['toplam_uyku']}")
 
 # 7g) İSTATİSTİK katmanı: avg_day_sleep_minutes (gün başına toplam) ile
