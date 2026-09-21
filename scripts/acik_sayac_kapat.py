@@ -62,37 +62,26 @@ load_dotenv(ROOT / ".env")
 
 from api.db import SessionLocal                             # noqa: E402
 from api.models import Baby, SleepLog                       # noqa: E402
-from engine import yas_bantlari                             # noqa: E402
-from engine.parameter_engine import hesapla_yas_ay          # noqa: E402
+from api.services.plan_service import uyku_sureleri         # noqa: E402
 
 UYKU_TIPLERI = ("sleep", "nap")
 TERK_SAAT = 16                 # mutlak tavan: bundan uzun açık kayıt "terk edilmiş"
-VARSAYILAN_NAP_DK = 60         # bant çözülemezse (doğum tarihi yok) makul uzunluk
-VARSAYILAN_GECE_DK = 12 * 60   # bant çözülemezse gece uykusu üst sınırı
 ASGARI_DK = 60                 # kapanış başlangıcın gerisine düşerse
+TZ_OFFSET_MIN = 180            # UTC+3 — motorla aynı
+# Gece uykusu penceresi (yerel): bu saatten sonra ya da bu saatten önce başlayan
+# `sleep` kaydı gece uykusudur; arası gündüz uykusudur.
+GECE_BASLANGIC_DK = 18 * 60    # 18:00
+GUNDUZ_BASLANGIC_DK = 6 * 60   # 06:00
 
 
 def _bant_sureleri(db, baby_id, _onbellek: dict = {}) -> tuple[int, int]:
     """(planlanan gündüz uykusu dk, gece uykusu ÜST sınırı dk).
 
-    Bant çözülemezse makul varsayılanlara düşülür — uydurma bir 16 saat yerine.
-    Bebek başına bir kez hesaplanır."""
-    if baby_id in _onbellek:
-        return _onbellek[baby_id]
-    nap_dk, gece_dk = VARSAYILAN_NAP_DK, VARSAYILAN_GECE_DK
-    try:
-        baby = db.get(Baby, baby_id)
-        if baby is not None and baby.birth_date is not None:
-            hafta = int(getattr(baby, "dogum_haftasi", None) or 40)
-            ay = hesapla_yas_ay(baby.birth_date.isoformat(), hafta)["duzeltilmis_ay"]
-            bant = yas_bantlari.yas_bandi_getir(ay)
-            nap_dk = int(yas_bantlari.cizelge_parametreleri(bant)["uyku_suresi_dk"])
-            ust = (bant.get("gece_uykusu_dk") or [None, None])[1]
-            if ust:
-                gece_dk = int(ust)
-    except Exception:            # bant tablosu/doğum tarihi sorunlu → varsayılan
-        pass
-    _onbellek[baby_id] = (max(15, nap_dk), max(60, gece_dk))
+    Hesabın TEK kaynağı plan_service.uyku_sureleri — batch (K16.1) ve motor
+    (K17) da aynı fonksiyonu kullanıyor. Burada yalnız bebek başına önbellek
+    tutulur (betik yüzlerce satır tarıyor)."""
+    if baby_id not in _onbellek:
+        _onbellek[baby_id] = uyku_sureleri(db.get(Baby, baby_id))
     return _onbellek[baby_id]
 
 
@@ -151,9 +140,19 @@ def _adaylar(db, gun: int):
 
 
 def _tahmini_kapanis(db, kayit, bas: datetime, bebek_kayitlari: list):
-    """Kapsayan kayıt yokken kapanış anı ve gerekçesi."""
+    """Kapsayan kayıt yokken kapanış anı ve gerekçesi.
+
+    `sleep` tipi TEK BAŞINA "gece uykusu" demek DEĞİLDİR: mobil gündüz
+    uykularını da `sleep` olarak gönderebiliyor. Gece uykusu ölçütü motorunkiyle
+    (plan_adapter._gece_uykusu_mu) aynı olmalı — yerel saate bakılır. Aksi hâlde
+    sabah 09:50'de başlayan bir gündüz uykusuna 11 saatlik gece tavanı
+    uygulanıyor ve kayıt "sonraki kaydın başlangıcına" kadar uzuyordu."""
     nap_dk, gece_dk = _bant_sureleri(db, kayit.baby_id)
-    sure_dk = nap_dk if kayit.type == "nap" else gece_dk
+    yerel_dk = (bas + timedelta(minutes=TZ_OFFSET_MIN))
+    yerel_dk = yerel_dk.hour * 60 + yerel_dk.minute
+    gece_mi = (kayit.type == "sleep"
+               and (yerel_dk >= GECE_BASLANGIC_DK or yerel_dk < GUNDUZ_BASLANGIC_DK))
+    sure_dk = gece_dk if gece_mi else nap_dk
     adaylar = [(bas + timedelta(minutes=sure_dk),
                 f"bant süresi +{sure_dk} dk"),
                (bas + timedelta(hours=TERK_SAAT), f"tavan +{TERK_SAAT} saat")]

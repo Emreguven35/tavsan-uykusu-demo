@@ -2,8 +2,12 @@
 logs router — /api/v1/logs
 
 - POST /logs/batch: mobil SQLite sync-manager için toplu upsert. client_id ile
-  idempotent: aynı (user_id, client_id) ikinci kez gelirse GÜNCELLENİR. client_id
-  NULL ise idempotency'den MUAF — her zaman yeni kayıt olarak eklenir.
+  idempotent: aynı (user_id, client_id) ikinci kez gelirse GÜNCELLENİR.
+  client_id YOKSA (eski istemci) aynı bebek + aynı type + başlangıcı ±3 dk
+  içindeki kayıt KOPYA sayılır ve güncellenir (K18.2) — zayıf ağda yeniden
+  gönderim her seferinde yeni client_id ürettiği için tek başına client_id
+  yetmiyordu (prod'da 41 kopya çiftinin tamamında client_id'ler farklıydı).
+  Ayrıca bir bebekte aynı anda EN FAZLA BİR açık kayıt bırakılır (K16.1).
 - GET /logs?from=&to=&baby_id=: tarih aralığı sorgusu (started_at'e göre).
 - GET /logs?date=YYYY-MM-DD: K14.1 "o günün kayıtları" — gece yarısını aşan ve
   hâlâ açık olan kayıtlar da döner (bkz. _gun_filtresi).
@@ -48,12 +52,22 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
             continue
 
         row = None
-        # İdempotency yalnız client_id NULL DEĞİLKEN uygulanır (spec + kullanıcı notu).
         if item.client_id is not None:
+            # Birincil idempotency anahtarı. Bebek de süzülüyor: tekillik
+            # (baby_id, client_id) üzerinde de tanımlı (K18.1).
             row = (db.query(SleepLog)
                    .filter(SleepLog.user_id == user.id,
+                           SleepLog.baby_id == item.baby_id,
                            SleepLog.client_id == item.client_id)
                    .one_or_none())
+            if row is None:                       # eski satır başka bebeğe yazılmış olabilir
+                row = (db.query(SleepLog)
+                       .filter(SleepLog.user_id == user.id,
+                               SleepLog.client_id == item.client_id)
+                       .one_or_none())
+        else:
+            # K18.2 — client_id yok: zaman penceresiyle kopya ara.
+            row = _kopya_bul(db, user, item)
 
         if row is None:                          # yeni kayıt
             row = SleepLog(
@@ -79,6 +93,11 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
     # (K13.1/K13.2) bunu zaten tekilleştiriyor ama kayıt DB'de açık kaldığı
     # sürece mobilde sayaç dönmeye devam ediyor. Burada TEK yazımla kapatılır.
     timer_closed = _acik_sayaclari_kapat(db, user, out)
+    # K16.1 — yeni bir AÇIK kayıt geldiyse aynı bebekteki diğer açık kayıtlar
+    # kapatılır. Üç açık kaydın üçünün birden "sürüyor" sayılması gerçek vakada
+    # günü 5 gündüz uykusuna çıkarıyordu.
+    if _tek_acik_kayit_birak(db, user, out):
+        timer_closed = True
 
     db.commit()
     for r in out:
@@ -95,6 +114,92 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
 
 
 UYKU_TIPLERI = ("sleep", "nap")
+
+# K18.2 — client_id taşımayan kayıtlarda "aynı kayıt" penceresi.
+KOPYA_PENCERE = timedelta(minutes=3)
+
+
+def _kopya_bul(db: Session, user: User, item) -> SleepLog | None:
+    """K18.2 — client_id taşımayan kayıt için KOPYA satırı bul.
+
+    Ölçüt: aynı bebek + aynı type + başlangıcı ±3 dk içinde. Birden çok aday
+    varsa başlangıcı EN YAKIN olan.
+
+    Yalnız client_id YOKKEN çalışır: client_id gönderen istemcilerde birincil
+    anahtar zaten var, orada zaman penceresi uygulamak iki ayrı gerçek uykuyu
+    (ör. 10:00 ve 10:02'de başlayan iki beslenme) sessizce birleştirebilirdi."""
+    alt = item.started_at - KOPYA_PENCERE
+    ust = item.started_at + KOPYA_PENCERE
+    adaylar = (db.query(SleepLog)
+               .filter(SleepLog.user_id == user.id,
+                       SleepLog.baby_id == item.baby_id,
+                       SleepLog.type == item.type,
+                       SleepLog.started_at >= alt,
+                       SleepLog.started_at <= ust)
+               .all())
+    if not adaylar:
+        return None
+    return min(adaylar,
+               key=lambda r: abs((_as_utc(r.started_at)
+                                  - _as_utc(item.started_at)).total_seconds()))
+
+
+def _tek_acik_kayit_birak(db: Session, user: User,
+                          gelenler: list[SleepLog]) -> bool:
+    """K16.1 — bir bebekte aynı anda EN FAZLA BİR açık sleep/nap kaydı kalsın.
+
+    Bu batch'te AÇIK bir kayıt geldiyse, aynı bebeğin daha ESKİ açık kayıtları
+    kapatılır:
+        kapanış = min(yeni kaydın başlangıcı, eski başlangıç + bandın süresi)
+    "Yeni kayıt açıldı" bilgisi bebeğin o an uyanık olduğunun kanıtıdır; bandın
+    süresi ise üst sınır (bebek 6 saat aralıksız kestirmiyor).
+
+    Bu batch'te gelen kayıtlar BİRBİRİNİ de kapatır — zayıf ağda üç açık kayıt
+    tek istekte gelebiliyor.
+
+    Dönen: en az bir kayıt kapatıldı mı."""
+    from api.services.plan_service import uyku_sureleri     # döngüsel import önleme
+
+    yeni_acik = [r for r in gelenler
+                 if r.type in UYKU_TIPLERI and r.ended_at is None]
+    if not yeni_acik:
+        return False
+    kapatildi = False
+
+    for bebek_id in {r.baby_id for r in yeni_acik}:
+        baby = db.get(Baby, bebek_id)
+        nap_dk, _gece = uyku_sureleri(baby)
+        acik = (db.query(SleepLog)
+                .filter(SleepLog.user_id == user.id,
+                        SleepLog.baby_id == bebek_id,
+                        SleepLog.type.in_(UYKU_TIPLERI),
+                        SleepLog.ended_at.is_(None))
+                .all())
+        if len(acik) < 2:
+            continue
+        acik.sort(key=lambda r: _as_utc(r.started_at))
+        # En YENİ açık kayıt sürüyor sayılır; öncekiler kapatılır.
+        for i, eski in enumerate(acik[:-1]):
+            bas = _as_utc(eski.started_at)
+            kapanis = min(_as_utc(acik[i + 1].started_at),
+                          bas + timedelta(minutes=nap_dk))
+            if kapanis < bas:
+                kapanis = bas
+            eski.ended_at = kapanis
+            _not_ekle(eski, "otomatik kapatıldı: yeni kayıt açıldı")
+            kapatildi = True
+            logging.getLogger("tavsan.logs").info(
+                "K16.1 açık kayıt kapatıldı: log=%s baby=%s ended_at=%s",
+                eski.id, bebek_id, kapanis.isoformat())
+    return kapatildi
+
+
+def _not_ekle(row: SleepLog, metin: str) -> None:
+    """notes alanına not EKLE (mevcut notu ezme — anne yazmış olabilir)."""
+    mevcut = (row.notes or "").strip()
+    if metin in mevcut:
+        return
+    row.notes = f"{mevcut} | {metin}".strip(" |") if mevcut else metin
 
 
 def _acik_sayaclari_kapat(db: Session, user: User,

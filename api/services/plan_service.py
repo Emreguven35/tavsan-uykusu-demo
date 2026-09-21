@@ -202,6 +202,34 @@ def bucket_params(baby: Baby, dogum_haftasi: int | None = None
     return key, load_kb()["yas_buckets"].get(key, {}), yas["duzeltilmis_ay"]
 
 
+# --- Bant süreleri: TEK kaynak (K16.1, K17, bakım betikleri) ----------------
+# Aynı hesap üç yerde ayrı ayrı yazılmıştı; biri güncellenip diğeri unutulunca
+# "batch'te 60 dk, betikte 90 dk" gibi sessiz ayrışmalar oluyordu.
+VARSAYILAN_NAP_DK = 60
+VARSAYILAN_GECE_DK = 12 * 60
+
+
+def uyku_sureleri(baby: Baby | None) -> tuple[int, int]:
+    """(planlanan gündüz uykusu dk, gece uykusu ÜST sınırı dk).
+
+    Bant çözülemezse (doğum tarihi yok / tablo sorunlu) makul varsayılanlara
+    düşülür — uydurma bir 16 saat yerine. ASLA istisna fırlatmaz: bu değer
+    kayıt senkronunun ortasında kullanılıyor, senkronu düşüremez."""
+    nap_dk, gece_dk = VARSAYILAN_NAP_DK, VARSAYILAN_GECE_DK
+    try:
+        if baby is not None and baby.birth_date is not None:
+            hafta = int(getattr(baby, "dogum_haftasi", None) or 40)
+            ay = hesapla_yas_ay(baby.birth_date.isoformat(), hafta)["duzeltilmis_ay"]
+            bant = yas_bantlari.yas_bandi_getir(ay)
+            nap_dk = int(yas_bantlari.cizelge_parametreleri(bant)["uyku_suresi_dk"])
+            ust = (bant.get("gece_uykusu_dk") or [None, None])[1]
+            if ust:
+                gece_dk = int(ust)
+    except Exception:
+        pass
+    return max(15, nap_dk), max(60, gece_dk)
+
+
 def tek_uyku_bayragi(content: dict | None) -> bool | None:
     """Plan içeriğinden 12-18 ay tek/çift uyku bayrağını çöz.
 

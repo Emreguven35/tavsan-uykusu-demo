@@ -29,6 +29,16 @@ Senaryolar:
   W8  K15: 14,5 aylık, uyanış 08:00, manuel nap 09:00-09:40 → nap KABUL edilir
       ama uyarı üretilir, sonraki bloklar 09:40'tan
 
+v2.2.1 — K16/K17/K18 (gerçek vaka: aynı bebekte 06:30, 08:24, 08:26 başlangıçlı
+üç AÇIK kayıt + 09:50 ve 14:36; 08:24/08:26 zayıf ağda yeniden gönderimden
+kopya; sonuç 5 gündüz uykusu ve "şablonda olmayan ilave uyku"):
+  X1  üç açık nap → tek açık kalır, ikisi kapatılır, 3 uyku bloğu
+  X2  06:30 açık nap, saat 14:00 → kapanmış sayılır + "Sayaç kapatılmadı" uyarısı
+  X3  aynı client_id iki kez → TEK satır (id değişmez)
+  X4  client_id'siz ±2 dk kopya → TEK satır
+  X5  açık nap + wake 07:15 → nap 07:15'te kapanır
+  X6  toplam uyku açık kayıtta None/NaN üretmez; ŞİMDİYE kadarki süre sayılır
+
 Çalıştırma: python tests/test_kayit_semantigi.py
 """
 import os
@@ -470,6 +480,230 @@ w8b = S14.hesapla([L("sleep", DUN, 21 * 60 + 50, baby_id=BID14),
 check("W8e) Kayıt yokken 08:00 uyanışa 09:00 uyku ÜRETİLMİYOR",
       all(b["start_minute"] >= 8 * 60 + S14.ww_min for b in naplar(w8b)),
       str([(b["key"], hhmm(b["start_minute"])) for b in naplar(w8b)]))
+
+
+# =============================================================================
+# X1 — ÜÇ AÇIK NAP → tek açık, ikisi kapatılmış (K16.2)
+# =============================================================================
+# Açık kayıtlar bilerek GENİŞ aralıklı: gerçek vakadaki 08:24/08:26 gibi bitişik
+# olanlar kapatılınca 2 dakika kalır ve K12.1 onları zaten eler. Burada ölçülen
+# şey "üçü birden sürüyor sayılmıyor" kuralı.
+X_NAP = S8.cp["uyku_suresi_dk"]
+x1_loglar = [
+    L("sleep", DUN, 21 * 60 + 50, TODAY, S8.wake),
+    L("nap", TODAY, 8 * 60),                     # AÇIK
+    L("nap", TODAY, 11 * 60),                    # AÇIK
+    L("nap", TODAY, 14 * 60),                    # AÇIK (en yeni)
+]
+x1 = S8.hesapla(x1_loglar, now_minute=14 * 60 + 10)
+_x1_naplar = naplar(x1)
+_x1_kayit = [b for b in _x1_naplar if b.get("kaynak") == "kayit"]
+check("X1a) Üç açık kayıt → 3 uyku bloğu (fazlası/eksiği yok)",
+      len(_x1_kayit) == 3,
+      str([(b["key"], hhmm(b["start_minute"]), hhmm(b["end_minute"]),
+            b.get("otomatik_kapandi") or ("devam" if b.get("devam") else ""))
+           for b in _x1_naplar]))
+check("X1b) YALNIZ en yeni kayıt 'sürüyor'",
+      sum(1 for b in _x1_kayit if b.get("devam")) == 1
+      and _x1_kayit[-1].get("devam") is True,
+      str([(b["key"], b.get("devam")) for b in _x1_kayit]))
+check("X1c) Önceki ikisi bant süresiyle kapatıldı (08:00→09:10, 11:00→12:10)",
+      _x1_kayit[0]["end_minute"] == 8 * 60 + X_NAP
+      and _x1_kayit[1]["end_minute"] == 11 * 60 + X_NAP,
+      f"{hhmm(_x1_kayit[0]['end_minute'])} / {hhmm(_x1_kayit[1]['end_minute'])} "
+      f"(bant süresi {X_NAP} dk)")
+check("X1d) Kapatılanlar 'yeni_kayit' gerekçesiyle işaretli",
+      all(b.get("otomatik_kapandi") == "yeni_kayit" for b in _x1_kayit[:2]),
+      str([b.get("otomatik_kapandi") for b in _x1_kayit]))
+check("X1e) 'ilave uyku' notu YOK (yuvalar taşmadı)",
+      not any("ilave" in (b.get("note") or "") for b in _x1_naplar),
+      str([b.get("note") for b in _x1_naplar]))
+
+# Sonraki açık kayıt bant süresinden ÖNCE başlıyorsa kapanış oraya çekilir
+x1b = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, S8.wake),
+                  L("nap", TODAY, 8 * 60),
+                  L("nap", TODAY, 8 * 60 + 30)], now_minute=9 * 60)
+_x1b = [b for b in naplar(x1b) if b.get("kaynak") == "kayit"]
+check("X1f) Kapanış min(sonraki başlangıç, bant süresi) — 08:30'a çekildi",
+      bool(_x1b) and _x1b[0]["end_minute"] == 8 * 60 + 30,
+      str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _x1b]))
+
+
+# =============================================================================
+# X2 — BAYAT açık nap (K17.1)
+# =============================================================================
+x2 = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, 6 * 60),
+                 L("nap", TODAY, 6 * 60 + 30)], now_minute=14 * 60)
+_x2_kayit = [b for b in naplar(x2) if b.get("kaynak") == "kayit"]
+check("X2a) 7,5 saattir açık nap 'sürüyor' SAYILMIYOR",
+      bool(_x2_kayit) and not _x2_kayit[0].get("devam"),
+      str([(b["key"], b.get("devam"), b.get("otomatik_kapandi"))
+           for b in _x2_kayit]))
+check("X2b) Bitiş = başlangıç + planlanan süre",
+      bool(_x2_kayit) and _x2_kayit[0]["end_minute"] == 6 * 60 + 30 + X_NAP,
+      f"{hhmm(_x2_kayit[0]['end_minute']) if _x2_kayit else None} "
+      f"beklenen {hhmm(6*60+30+X_NAP)}")
+check("X2c) 'Sayaç kapatılmadı: 06:30 uykusunun bitişini gir' uyarısı var",
+      any("Sayaç kapatılmadı" in u and "06:30" in u
+          for u in x2["adaptation"]["uyarilar"]),
+      str(x2["adaptation"]["uyarilar"]))
+
+# Eşiğin ALTINDA olan açık nap hâlâ "sürüyor"
+x2b = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, 6 * 60),
+                  L("nap", TODAY, 13 * 60)], now_minute=13 * 60 + 40)
+_x2b = [b for b in naplar(x2b) if b.get("kaynak") == "kayit"]
+check("X2d) 40 dakikadır açık nap HÂLÂ sürüyor (eşik altı)",
+      bool(_x2b) and _x2b[0].get("devam") is True,
+      str([(b["key"], b.get("devam")) for b in _x2b]))
+check("X2e) Eşik altındayken 'Sayaç kapatılmadı' uyarısı YOK",
+      not any("Sayaç kapatılmadı" in u for u in x2b["adaptation"]["uyarilar"]),
+      str(x2b["adaptation"]["uyarilar"]))
+
+# Açık GECE uykusu için sınır 14 saat
+x2c = S8.hesapla([L("sleep", DUN, 21 * 60 + 50)], now_minute=13 * 60)
+check("X2f) 15 saattir açık gece uykusu → 'Sayaç kapatılmadı' uyarısı",
+      any("Sayaç kapatılmadı" in u and "gece" in u
+          for u in x2c["adaptation"]["uyarilar"]),
+      str(x2c["adaptation"]["uyarilar"]))
+
+
+# =============================================================================
+# X3 — aynı client_id iki kez → TEK satır
+# =============================================================================
+_db = SessionLocal()
+try:
+    _db.query(SleepLog).filter(SleepLog.baby_id == BID8).delete()
+    _db.commit()
+finally:
+    _db.close()
+
+_x3_govde = {"baby_id": str(BID8), "type": "nap",
+             "started_at": utc(TODAY, 9 * 60).isoformat(),
+             "ended_at": utc(TODAY, 10 * 60).isoformat(),
+             "client_id": "x3-ayni"}
+_r1 = client.post("/api/v1/logs/batch", headers=H, json={"logs": [_x3_govde]})
+_r2 = client.post("/api/v1/logs/batch", headers=H, json={"logs": [_x3_govde]})
+_x3_id1 = _r1.json()["logs"][0]["id"]
+_x3_id2 = _r2.json()["logs"][0]["id"]
+_db = SessionLocal()
+try:
+    _x3_n = (_db.query(SleepLog)
+             .filter(SleepLog.baby_id == BID8,
+                     SleepLog.client_id == "x3-ayni").count())
+finally:
+    _db.close()
+check("X3a) Aynı client_id iki kez → TEK satır", _x3_n == 1, f"satır={_x3_n}")
+check("X3b) İkinci yanıtta AYNI id döndü", _x3_id1 == _x3_id2,
+      f"{_x3_id1} vs {_x3_id2}")
+check("X3c) İkinci istek 'created' değil 'updated' saydı",
+      _r2.json()["created"] == 0 and _r2.json()["updated"] == 1,
+      str(_r2.json())[:160])
+
+
+# =============================================================================
+# X4 — client_id YOK, ±2 dk kopya → TEK satır (K18.2)
+# =============================================================================
+_db = SessionLocal()
+try:
+    _db.query(SleepLog).filter(SleepLog.baby_id == BID8).delete()
+    _db.commit()
+finally:
+    _db.close()
+
+client.post("/api/v1/logs/batch", headers=H, json={"logs": [{
+    "baby_id": str(BID8), "type": "nap",
+    "started_at": utc(TODAY, 8 * 60 + 24).isoformat(),
+    "ended_at": utc(TODAY, 9 * 60 + 34).isoformat()}]})
+_r4 = client.post("/api/v1/logs/batch", headers=H, json={"logs": [{
+    "baby_id": str(BID8), "type": "nap",
+    "started_at": utc(TODAY, 8 * 60 + 26).isoformat(),
+    "ended_at": utc(TODAY, 9 * 60 + 36).isoformat()}]})
+_db = SessionLocal()
+try:
+    _x4 = (_db.query(SleepLog).filter(SleepLog.baby_id == BID8,
+                                      SleepLog.type == "nap").all())
+    _x4_bilgi = [(pa._local_minute(r.started_at, TZ)[1],
+                  pa._local_minute(r.ended_at, TZ)[1]) for r in _x4]
+finally:
+    _db.close()
+check("X4a) ±2 dk kopya YENİ satır açmadı", len(_x4) == 1,
+      f"satır={len(_x4)} {_x4_bilgi}")
+check("X4b) Mevcut satır GÜNCELLENDİ (08:26-09:36)",
+      _x4_bilgi == [(8 * 60 + 26, 9 * 60 + 36)], str(_x4_bilgi))
+check("X4c) Yanıt 'updated' saydı", _r4.json()["updated"] == 1,
+      str(_r4.json())[:160])
+
+# ±3 dk penceresinin DIŞI ayrı kayıttır
+client.post("/api/v1/logs/batch", headers=H, json={"logs": [{
+    "baby_id": str(BID8), "type": "nap",
+    "started_at": utc(TODAY, 8 * 60 + 40).isoformat(),
+    "ended_at": utc(TODAY, 9 * 60 + 50).isoformat()}]})
+_db = SessionLocal()
+try:
+    _x4b = _db.query(SleepLog).filter(SleepLog.baby_id == BID8,
+                                      SleepLog.type == "nap").count()
+finally:
+    _db.close()
+check("X4d) 14 dk sonraki kayıt AYRI satır (pencere dışı)", _x4b == 2,
+      f"satır={_x4b}")
+
+
+# =============================================================================
+# X5 — açık nap + wake 07:15 → nap 07:15'te kapanır (K17.2)
+# =============================================================================
+x5 = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, 6 * 60),
+                 L("nap", TODAY, 6 * 60 + 30),           # AÇIK
+                 L("wake", TODAY, 7 * 60 + 15)],
+                now_minute=7 * 60 + 30)
+_x5 = [b for b in naplar(x5) if b.get("kaynak") == "kayit"]
+check("X5a) Açık nap uyanma kaydıyla kapandı",
+      bool(_x5) and not _x5[0].get("devam")
+      and _x5[0].get("otomatik_kapandi") == "wake",
+      str([(b["key"], hhmm(b["start_minute"]), hhmm(b["end_minute"]),
+            b.get("otomatik_kapandi"), b.get("devam")) for b in _x5]))
+check("X5b) Bitiş tam 07:15",
+      bool(_x5) and _x5[0]["end_minute"] == 7 * 60 + 15,
+      hhmm(_x5[0]["end_minute"]) if _x5 else None)
+check("X5c) Uyarı üretildi (anne bitişi girmemişti)",
+      any("uyanma kaydına göre" in u for u in x5["adaptation"]["uyarilar"]),
+      str(x5["adaptation"]["uyarilar"]))
+
+
+# =============================================================================
+# X6 — toplam uyku açık kayıtta None/NaN üretmez, ŞİMDİYE kadarki süre sayılır
+# =============================================================================
+_x6_simdi = 13 * 60 + 20                      # nap 13:00'te başladı, 20 dk oldu
+x6 = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, S8.wake),
+                 L("nap", TODAY, 13 * 60)], now_minute=_x6_simdi)
+_x6_gunduz, _x6_gece = pa.gun_uyku_toplamlari(x6["schedule"], _x6_simdi)
+_x6_gunduz_ham, _ = pa.gun_uyku_toplamlari(x6["schedule"])
+check("X6a) Toplam sayı döndü (None/NaN değil)",
+      isinstance(_x6_gunduz, int) and _x6_gunduz == _x6_gunduz,
+      f"gunduz={_x6_gunduz!r} gece={_x6_gece!r}")
+check("X6b) Süren uyku ŞİMDİYE kadarki süresiyle sayıldı (planlanan değil)",
+      _x6_gunduz < _x6_gunduz_ham,
+      f"now'lu={_x6_gunduz} now'suz={_x6_gunduz_ham} (fark {X_NAP - 20} dk olmalı)")
+_x6_devam = [b for b in naplar(x6) if b.get("devam")]
+check("X6c) Süren blok 'devam' bayrağı taşıyor",
+      len(_x6_devam) == 1, str([(b["key"], b.get("devam")) for b in naplar(x6)]))
+check("X6d) Süren bloğun katkısı tam 20 dk",
+      _x6_gunduz_ham - _x6_gunduz == X_NAP - 20,
+      f"fark={_x6_gunduz_ham - _x6_gunduz} beklenen={X_NAP - 20}")
+check("X6e) Bozuk blok toplamı çökertmiyor",
+      pa.gun_uyku_toplamlari(
+          [{"type": "nap", "start_minute": None, "end_minute": 10},
+           {"type": "nap", "start_minute": 0, "end_minute": 30}], 100) == (30, 0),
+      str(pa.gun_uyku_toplamlari(
+          [{"type": "nap", "start_minute": None, "end_minute": 10},
+           {"type": "nap", "start_minute": 0, "end_minute": 30}], 100)))
+
+# Temizlik
+_db = SessionLocal()
+try:
+    _db.query(SleepLog).filter(SleepLog.baby_id == BID8).delete()
+    _db.commit()
+finally:
+    _db.close()
 
 
 # =============================================================================

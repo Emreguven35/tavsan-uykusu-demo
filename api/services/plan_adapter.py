@@ -132,6 +132,19 @@ GECE_UYANMA_VARSAYILAN_DK = 10
 # "0 uyanma" olarak raporlanıyordu (beta verisinde ölçüldü).
 UZUN_UYANMA_MIN_DK = SELF_SOOTHE_FAIL_MIN
 
+# --- K16/K17 — açık (ended_at null) kayıt kuralları (v2.2.1) ----------------
+# Gerçek vaka: aynı bebekte 06:30, 08:24 ve 08:26 başlangıçlı ÜÇ açık uyku
+# kaydı vardı. Üçü birden "sürüyor" sayılıyor, üçü de ayrı yuva tüketiyor ve
+# gün 5 gündüz uykusuyla + "şablonda olmayan ilave uyku" notlarıyla çıkıyordu.
+
+# K17.1 — Açık bir `nap` kaydının "artık sürmüyor" sayılma eşiği:
+# bandın uyku süresinin 2 katı, ama en az bu kadar. Bebek 3 saattir aralıksız
+# kestirmiyor; kaydı kapatmak unutulmuştur.
+K17_NAP_ESIK_MIN_DK = 3 * 60
+# Açık GECE uykusu için aynı eşik. Gece uykusu saatler sürer, bu yüzden çok
+# daha geniş: 14 saati aşmışsa artık uyku değil, unutulmuş sayaçtır.
+K17_GECE_ESIK_DK = 14 * 60
+
 # K13.1 — İki uyku kaydının "aynı uyku" sayılması için gereken örtüşme oranı.
 # Payda KISA olan kaydın süresidir: 10 dakikalık bir kayıt 2 saatlik bir kaydın
 # içine düşüyorsa örtüşme %100'dür, %8 değil.
@@ -566,7 +579,9 @@ def _cakismalari_coz(kayitlar: list[dict], out: dict) -> list[dict]:
 
 
 def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
-                  tz_offset_min: int = TZ_OFFSET_MIN) -> dict:
+                  tz_offset_min: int = TZ_OFFSET_MIN, *,
+                  nap_sure_dk: int | None = None,
+                  now_minute: int | None = None) -> dict:
     """Ham kayıtları BUGÜNE ait rollere ayır (K2 — yalnız bugünün verisi).
 
     Dönen: {gece_uykulari, gunduz_uykulari, atlananlar, wake_kayitlari,
@@ -584,6 +599,10 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
         (K12.2) — ama `wake` kaydı sabah uyanışı adaylığını KAYBETMEZ, çünkü
         K10.1 "06:00 öncesi uyanıp tekrar uyumadı" durumunu yönetiyor.
       • Çakışan uyku kayıtları tekilleştirilir (K13).
+      • Aynı anda EN FAZLA BİR açık uyku kaydı sürüyor sayılır; bayat açık
+        kayıtlar hesapta kapatılır (K16.2/K17). Bunun için `nap_sure_dk` ve
+        `now_minute` gerekir; verilmezse bu adım ATLANIR (eski çağrılar aynen
+        çalışır, uydurma bir süre varsayılmaz).
     """
     out = {"gece_uykulari": [], "gunduz_uykulari": [], "atlananlar": [],
            "wake_kayitlari": [], "gece_uyanmalari": [], "yok_sayilan": []}
@@ -654,10 +673,92 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
     out["gunduz_uykulari"] = _cakismalari_coz(out["gunduz_uykulari"], out)
     out["gece_uykulari"] = _cakismalari_coz(out["gece_uykulari"], out)
 
+    # --- K16.2/K17 — açık kayıtları çöz -------------------------------------
+    _acik_kayitlari_coz(out, nap_sure_dk, now_minute)
+
     for anahtar in ("gece_uykulari", "gunduz_uykulari", "atlananlar",
                     "wake_kayitlari", "gece_uyanmalari"):
         out[anahtar].sort(key=lambda x: x["bas_dk"])
     return out
+
+
+def _kaydi_kapat(k: dict, bit_dk_lin: int, sebep: str) -> None:
+    """Açık bir kaydı HESAPTA kapat (DB'ye dokunmaz).
+
+    `bit_dk_lin` gün başlangıcına göre doğrusal dakikadır (24 saati aşabilir);
+    `bit_dk` duvar saatine indirgenir."""
+    bit_dk_lin = max(k["bas_dk"], int(bit_dk_lin))
+    k["bit_dk_lin"] = bit_dk_lin
+    k["bit_dk"] = bit_dk_lin % 1440
+    k["sure_dk"] = bit_dk_lin - k["bas_dk"]
+    k["_devam"] = False
+    k["_otomatik_kapandi"] = sebep
+
+
+def _acik_kayitlari_coz(out: dict, nap_sure_dk: int | None,
+                        now_minute: int | None) -> None:
+    """K16.2 + K17 — açık uyku kayıtlarını hesapta kapat.
+
+    DB'DEKİ KAYIT DEĞİŞMEZ. Burası "düzeltilmemiş eski veriyi doğru oku"
+    katmanıdır; kaydı gerçekten kapatan yol POST /logs/batch (K16.1) ve
+    scripts/acik_sayac_kapat.py'dir.
+
+    Sıra önemli:
+      1. K16.2 — birden fazla açık kayıt varsa YALNIZ EN YENİSİ sürüyor sayılır.
+         Öncekiler min(sonraki açık kaydın başlangıcı, kendi başlangıcı + bandın
+         planlanan süresi) ile kapanır. "Yeni kayıt açıldı" bilgisi, bebeğin o
+         an uyanık olduğunun kanıtıdır.
+      2. K17.2 — açık bir nap'ten SONRA gelen `wake` kaydı onu o saatte kapatır
+         (K12.4'ün gece uykusundan nap'e genellenmesi).
+      3. K17.1 — hâlâ açık olan kayıt bandın süresinin 2 katını (en az 3 saat)
+         aşmışsa "sürüyor" sayılmaz: bitiş = başlangıç + planlanan süre.
+
+    Kapanış sonucu UYKU_MIN_SURE_DK altına düşerse kayıt tümüyle yok sayılır —
+    2 dakikalık bir "uyku" yuva tüketmemeli (K12.1 ile aynı eşik)."""
+    if nap_sure_dk is None:
+        return
+    nap_sure_dk = max(1, int(nap_sure_dk))
+    bayat_esik = max(2 * nap_sure_dk, K17_NAP_ESIK_MIN_DK)
+
+    # 1) K16.2 — tek açık kayıt
+    acik = sorted([k for k in out["gunduz_uykulari"] if k.get("_devam")],
+                  key=lambda x: x["bas_dk"])
+    for i in range(len(acik) - 1):                 # sonuncusu hariç hepsi
+        _kaydi_kapat(acik[i],
+                     min(acik[i + 1]["bas_dk"], acik[i]["bas_dk"] + nap_sure_dk),
+                     "yeni_kayit")
+
+    # 2) K17.2 — sonraki `wake` kaydı açık nap'i kapatır
+    wakeler = sorted(w["bas_dk"] for w in out["wake_kayitlari"])
+    for k in out["gunduz_uykulari"]:
+        if not k.get("_devam"):
+            continue
+        sonraki = next((w for w in wakeler if w > k["bas_dk"]), None)
+        if sonraki is not None:
+            _kaydi_kapat(k, sonraki, "wake")
+
+    # 3) K17.1 — bayat açık kayıt
+    if now_minute is not None:
+        for k in out["gunduz_uykulari"]:
+            if k.get("_devam") and (now_minute - k["bas_dk"]) >= bayat_esik:
+                _kaydi_kapat(k, k["bas_dk"] + nap_sure_dk, "bayat")
+        for g in out["gece_uykulari"]:
+            # Açık gece uykusu bir ÖNCEKİ günde başlar; bugünün dakikasına
+            # göre geçen süre +24 saattir.
+            if g.get("_devam") and (now_minute + 1440 - g["bas_dk"]) >= K17_GECE_ESIK_DK:
+                g["_bayat"] = True
+
+    # Kapanış çok kısa kaldıysa kayıt yuvaya giremez.
+    kalan = []
+    for k in out["gunduz_uykulari"]:
+        if (k.get("_otomatik_kapandi") and not k.get("_devam")
+                and (k.get("sure_dk") or 0) < UYKU_MIN_SURE_DK):
+            _yok_say(out, k, "otomatik_kapanis_kisa",
+                     f"{_fmt(k['bas_dk'])} açık kaydı otomatik kapatılınca "
+                     f"{k.get('sure_dk')} dk kaldı — yuvaya eşlenmedi")
+            continue
+        kalan.append(k)
+    out["gunduz_uykulari"] = kalan
 
 
 def gece_uyanma_suresi(k: dict) -> int:
@@ -900,10 +1001,42 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
     if _tpl_bed is not None:
         yatma_lo, yatma_hi = min(yatma_lo, _tpl_bed), max(yatma_hi, _tpl_bed)
 
-    kayitlar = gun_kayitlari(todays_logs, gun, sabit_wake, tz_offset_min)
+    # K16.2/K17 — açık kayıtları çözebilmek için bandın planlanan uyku süresi.
+    # Bant yoksa ŞABLONUN kendi uyku uzunluğu kullanılır; ikisi de yoksa açık
+    # kayıt çözümü atlanır (uydurma süre üretmeyiz).
+    _tpl_naplar = _sablon_naplari(sablon)
+    if bant is not None:
+        _nap_sure = int(yas_bantlari.cizelge_parametreleri(bant)["uyku_suresi_dk"])
+    else:
+        _nap_sure = _tpl_naplar[0]["sure_dk"] if _tpl_naplar else None
+
+    kayitlar = gun_kayitlari(todays_logs, gun, sabit_wake, tz_offset_min,
+                             nap_sure_dk=_nap_sure, now_minute=now_minute)
     sabah = sabah_uyanisi(kayitlar, sabit_wake)
 
     uyarilar: list[str] = list(sabah["uyarilar"])
+
+    # --- K16.2/K17 — otomatik kapatılan açık kayıtların uyarıları ------------
+    # Anne "sayacı kapatmayı unuttum" bilgisini EKRANDA görmeli; aksi hâlde
+    # çizelgede nereden çıktığı belirsiz bir uyku bloğu duruyor.
+    for _k in kayitlar["gunduz_uykulari"]:
+        _sebep = _k.get("_otomatik_kapandi")
+        if _sebep == "bayat":
+            uyarilar.append(
+                f"Sayaç kapatılmadı: {_fmt(_k['bas_dk'])} uykusunun bitişini gir")
+        elif _sebep == "yeni_kayit":
+            uyarilar.append(
+                f"{_fmt(_k['bas_dk'])} uykusu kapatılmamıştı; yeni kayıt "
+                f"açıldığı için {_fmt(_k['bit_dk_lin'])}'da kapatılmış sayıldı")
+        elif _sebep == "wake":
+            uyarilar.append(
+                f"{_fmt(_k['bas_dk'])} uykusu kapatılmamıştı; uyanma kaydına "
+                f"göre {_fmt(_k['bit_dk_lin'])}'da kapatıldı")
+    for _g in kayitlar["gece_uykulari"]:
+        if _g.get("_bayat"):
+            uyarilar.append(
+                f"Sayaç kapatılmadı: {_fmt(_g['bas_dk'])} gece uykusunun "
+                f"bitişini gir")
 
     # --- K15 — SAĞLAMLIK KURALI ---------------------------------------------
     # Hiçbir gündüz uykusu, sabah uyanışı + bandın MİNİMUM uyanıklık
@@ -1006,6 +1139,17 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
                     "title": yuva["title"], "kaynak": "kayit"}
             if olay.get("_devam"):
                 blok["note"] = "Uyku sürüyor — bitiş planlanan süreyle tahmin edildi"
+                # X6 — toplam uyku hesabı bu bloğu ŞU ANA kadar sürmüş kabul
+                # etmeli; planlanan bitiş yalnız GÖSTERİM içindir. İşaret
+                # olmadan 10 dakikadır uyuyan bebek 70 dk uyumuş sayılıyordu.
+                blok["devam"] = True
+            elif olay.get("_otomatik_kapandi"):
+                blok["note"] = {
+                    "bayat": "Sayaç kapatılmamış — bitiş planlanan süreyle kabul edildi",
+                    "yeni_kayit": "Sayaç kapatılmamış — yeni kayıt açılınca kapatıldı",
+                    "wake": "Sayaç kapatılmamış — uyanma kaydıyla kapatıldı",
+                }.get(olay["_otomatik_kapandi"], "Sayaç otomatik kapatıldı")
+                blok["otomatik_kapandi"] = olay["_otomatik_kapandi"]
             bloklar.append(blok)
             cursor = max(cursor, bit)
             kanit = max(kanit, bit)
@@ -1031,10 +1175,13 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
             continue
         bit = (fazla["bit_dk_lin"] if fazla.get("bit_dk_lin") is not None
                else fazla["bas_dk"] + 30)
-        bloklar.append({"key": f"nap_{j}", "type": "nap",
-                        "start_minute": fazla["bas_dk"], "end_minute": bit,
-                        "title": f"{j}. gündüz uykusu", "kaynak": "kayit",
-                        "note": "Şablonda olmayan ilave uyku kaydı"})
+        _fazla_blok = {"key": f"nap_{j}", "type": "nap",
+                       "start_minute": fazla["bas_dk"], "end_minute": bit,
+                       "title": f"{j}. gündüz uykusu", "kaynak": "kayit",
+                       "note": "Şablonda olmayan ilave uyku kaydı"}
+        if fazla.get("_devam"):
+            _fazla_blok["devam"] = True
+        bloklar.append(_fazla_blok)
         cursor = max(cursor, bit)
 
     # --- K4: yatış zinciri + gece uykusu tavanı ------------------------------
@@ -1477,7 +1624,7 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
     # --- K9: bugünün TOPLAM uykusu bandın ihtiyacını karşılıyor mu? ----------
     # Ölçüt artık 3 günlük ortalama değil, YENİDEN HESAPLANAN GÜNÜN kendisidir.
     if bant is not None:
-        gunduz_dk, gece_dk = gun_uyku_toplamlari(gun["schedule"])
+        gunduz_dk, gece_dk = gun_uyku_toplamlari(gun["schedule"], now_minute)
         kestirme = yas_bantlari.kestirme_degerlendir(bant, gunduz_dk)
         result["kestirme"] = kestirme
         if kestirme["gerekli"]:
@@ -1499,10 +1646,27 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
     return result
 
 
-def gun_uyku_toplamlari(schedule: list[dict]) -> tuple[int, int]:
-    """K9 — hesaplanmış günün (gündüz toplam, gece uykusu) dakikaları."""
-    gunduz = sum(max(0, int(b["end_minute"]) - int(b["start_minute"]))
-                 for b in schedule if b.get("type") == "nap")
+def gun_uyku_toplamlari(schedule: list[dict],
+                        now_minute: int | None = None) -> tuple[int, int]:
+    """K9 — hesaplanmış günün (gündüz toplam, gece uykusu) dakikaları.
+
+    X6 — HÂLÂ SÜREN bir uyku (`devam=True`) toplamda ŞU ANA kadarki süresiyle
+    sayılır, planlanan bitişiyle değil: 10 dakikadır uyuyan bebek "70 dk uyudu"
+    sayılıp "yeterince uyudu" denemez. `now_minute` verilmezse planlanan bitiş
+    kullanılır (geriye dönük davranış).
+
+    Hiçbir yolda None/NaN dönmez — açık kayıt en kötü ihtimalle 0 dk katkı verir."""
+    gunduz = 0
+    for b in schedule:
+        if b.get("type") != "nap":
+            continue
+        try:
+            bas, bit = int(b["start_minute"]), int(b["end_minute"])
+        except (TypeError, ValueError, KeyError):
+            continue                       # bozuk blok toplamı çökertmemeli
+        if b.get("devam") and now_minute is not None:
+            bit = min(bit, max(bas, int(now_minute)))
+        gunduz += max(0, bit - bas)
     bed = next((b for b in schedule if b.get("key") == "bedtime"), None)
     gece = int(bed.get("gece_uykusu_dk") or
                (int(bed["end_minute"]) - int(bed["start_minute"]))) if bed else 0

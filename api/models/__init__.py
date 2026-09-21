@@ -5,6 +5,7 @@ autogenerate ve create_all için gerekli).
 from api.models.user import User
 from api.models.baby import Baby
 from api.models.sleep_log import SleepLog
+from api.models.silinen_sleep_log import SilinenSleepLog
 from api.models.sleep_plan import SleepPlan
 from api.models.subscription import Subscription
 from api.models.chat_message import ChatMessage
@@ -23,7 +24,7 @@ from api.models.community_moderation import ModerationLog
 from api.models.api_usage import ApiUsage
 
 __all__ = [
-    "User", "Baby", "SleepLog", "SleepPlan",
+    "User", "Baby", "SleepLog", "SilinenSleepLog", "SleepPlan",
     "Subscription", "ChatMessage", "VoiceProfile",
     "RefreshToken", "PasswordResetToken",
     "PushToken", "SentNotification",

@@ -8,7 +8,7 @@ mobilde bir client_id taşır; aynı (user_id, client_id) ikinci kez gelirse UPD
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.db.base import GUID, Base
@@ -20,6 +20,11 @@ class SleepLog(Base, TimestampMixin):
     __table_args__ = (
         # Mobil senkron idempotency: aynı kullanıcının aynı client_id'si tekildir.
         UniqueConstraint("user_id", "client_id", name="uq_sleep_logs_user_client"),
+        # K18.1 — bebek bazlı tekillik. (user_id, client_id) tekilse bu da zorunlu
+        # olarak tekildir (bebek tek kullanıcıya ait); fazladan SATIR engellemez.
+        # Varlık sebebi sözleşmeyi açık kılmak ve K18.2'nin her batch'te koştuğu
+        # bebek bazlı upsert sorgusunu indeksli tutmak.
+        Index("uq_sleep_logs_baby_client", "baby_id", "client_id", unique=True),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
