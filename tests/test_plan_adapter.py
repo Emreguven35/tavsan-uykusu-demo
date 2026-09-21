@@ -210,20 +210,35 @@ det_none, _ = pa.detect_regression(None, s_2fail, today=TODAY)
 check("6d) training_completed_at boş → regresyon YOK",
       det_none is False, f"detected={det_none}")
 
-# 6e) Kısa gece uyanmaları (20dk altı) sinyal SAYILMAZ
+# 6e) K12.2 — KISA gece uyanmaları da SAYILIR; 20 dk yalnız ALT METRİK
+# v2.1'e kadar 20 dk altı uyanma hiç sayılmıyordu. Beta annelerinin verisinde
+# gece uyanmaları bu yüzden görünmez oldu: 3 kez uyanan bebek "0 uyanma"
+# raporlanıyordu. Ana sayım artık süreye bakmıyor (K12.2).
 s_short = pa.summarize_logs(wake_logs(7, 10) + fail_night_logs(3, dur_min=15),
                             today=TODAY)
 det_short, _ = pa.detect_regression(DONE_13, s_short, today=TODAY)
-check("6e) 15dk'lık uyanmalar (eşik altı) → sinyal sayılmaz",
-      det_short is False and s_short["self_soothe_fail_nights"] == 0,
+check("6e) 15dk'lık uyanmalar SAYILIR (K12.2: ana sayım süreye bakmaz)",
+      det_short is True and s_short["self_soothe_fail_nights"] == 3,
       f"detected={det_short} fail_nights={s_short['self_soothe_fail_nights']}")
+check("6e2) 15dk'lık uyanma 'uzun uyanma' alt metriğine GİRMEZ",
+      s_short["uzun_uyanma_geceleri"] == 0,
+      f"uzun={s_short['uzun_uyanma_geceleri']}")
+check("6e3) 25dk'lık uyanma alt metriğe girer",
+      pa.summarize_logs(wake_logs(7, 10) + fail_night_logs(2, dur_min=25),
+                        today=TODAY)["uzun_uyanma_geceleri"] == 2, "")
 
-# 6f) Süresi olmayan (ended_at=None) gece uyanması sinyal sayılmaz
+# 6f) K12.2 — ended_at OLMAYAN gece uyanması da sayılır (süre 10 dk varsayılır)
+# Anneler gece 03:00'te kaydı açıp bitişini girmiyor; eski kural bu kayıtları
+# tümüyle atıyordu ve "bütün gece uyandı" diyen anne sistemde sessiz kalıyordu.
 s_noend = pa.summarize_logs(wake_logs(7, 10) + [FakeLog("night_wake", _utc(d, 2))
                                                 for d in range(3)], today=TODAY)
 det_noend, _ = pa.detect_regression(DONE_13, s_noend, today=TODAY)
-check("6f) ended_at olmayan gece uyanması → sinyal sayılmaz",
-      det_noend is False, f"fail_nights={s_noend['self_soothe_fail_nights']}")
+check("6f) ended_at olmayan gece uyanması SAYILIR (K12.2)",
+      det_noend is True and s_noend["self_soothe_fail_nights"] == 3,
+      f"fail_nights={s_noend['self_soothe_fail_nights']}")
+check("6f2) Süresiz uyanma 'uzun uyanma' sayılmaz (varsayılan 10 dk < 20)",
+      s_noend["uzun_uyanma_geceleri"] == 0,
+      f"uzun={s_noend['uzun_uyanma_geceleri']}")
 
 # =============================================================================
 # 7) adapt() regresyonu bayrak olarak döner; OTOMATİK ÜRETİM YOK

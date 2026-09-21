@@ -132,24 +132,30 @@ def gece_uyanma_kaynagi(baby: Baby, logs: Iterable[SleepLog],
                         today: date) -> dict:
     """K11 — kartın besleneceği gece uyanma sayısı ve nereden geldiği.
 
-    Son `GECE_UYANMA_PENCERE_GUN` gecede `ended_at`'i DOLU `night_wake` kaydı
-    olan gece sayısı `GECE_UYANMA_MIN_GECE`'den azsa beyan (baby.night_wakes)
-    kullanılır; yeterliyse veri olan gecelerin ORTALAMASI (yukarı yuvarlanmış).
+    Son `GECE_UYANMA_PENCERE_GUN` gecede uyanma kaydı olan gece sayısı
+    `GECE_UYANMA_MIN_GECE`'den azsa beyan (baby.night_wakes) kullanılır;
+    yeterliyse veri olan gecelerin ORTALAMASI (yukarı yuvarlanmış).
 
-    `ended_at` şartı bilinçli: süresi olmayan kayıt regresyon protokolünde de
-    sayılmıyor (bkz. plan_adapter.detect_regression) — iki yerde aynı ölçüt.
+    K12.2 — `ended_at` ŞARTI KALDIRILDI. Eskiden süresi girilmemiş kayıt
+    sayılmıyordu; anneler gece 03:00'te uyanma kaydını açıp bitişini
+    girmediği için bu kart beta boyunca hiç ölçülene geçmedi ve onboarding'de
+    bir kez beyan edilen sayı ekranda donup kaldı (beta verisinde ölçüldü).
+    Ölçüt plan_adapter.summarize_logs ile aynı — iki yerde ayrışmasın.
+
+    06:00 öncesi `wake` kayıtları da gece uyanması sayılır (K12.2).
 
     Dönen: {"kaynak": "beyan"|"olculen", "deger": int|None, "gece_sayisi": int}
     """
     basla = today - timedelta(days=GECE_UYANMA_PENCERE_GUN - 1)
     gece_sayaci: dict[date, int] = {}
     for lg in logs or []:
-        if getattr(lg, "type", None) != "night_wake":
-            continue
-        if getattr(lg, "ended_at", None) is None:
+        tip = getattr(lg, "type", None)
+        if tip not in ("night_wake", "wake"):
             continue
         gun, dakika = plan_adapter._local_minute(lg.started_at,
                                                  plan_adapter.TZ_OFFSET_MIN)
+        if tip == "wake" and dakika >= plan_adapter.GUN_BASLANGICI_EN_ERKEN:
+            continue                      # sabah uyanışı — gece uyanması değil
         # Gece anahtarı: öğleden önceki uyanmalar BİR ÖNCEKİ gecenin sayılır —
         # detect_regression ile aynı kural, iki yerde ayrışmasın.
         gece = gun - timedelta(days=1) if dakika < 12 * 60 else gun

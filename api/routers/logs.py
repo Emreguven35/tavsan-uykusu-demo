@@ -5,6 +5,8 @@ logs router — /api/v1/logs
   idempotent: aynı (user_id, client_id) ikinci kez gelirse GÜNCELLENİR. client_id
   NULL ise idempotency'den MUAF — her zaman yeni kayıt olarak eklenir.
 - GET /logs?from=&to=&baby_id=: tarih aralığı sorgusu (started_at'e göre).
+- GET /logs?date=YYYY-MM-DD: K14.1 "o günün kayıtları" — gece yarısını aşan ve
+  hâlâ açık olan kayıtlar da döner (bkz. _gun_filtresi).
 - GET /logs/weekly-summary: haftalık agregasyon (mobil grafikleri tüketir).
 
 Hepsi user_id scoped; baby_id kullanıcıya ait değilse o kayıt atlanır (skipped).
@@ -15,6 +17,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from api.db import get_db
@@ -23,6 +26,7 @@ from api.models import Baby, SleepLog, User
 from api.schemas.log import (
     BatchReq, BatchResult, DaySummary, SleepLogResp, WeeklySummaryResp,
 )
+from api.services.plan_adapter import TZ_OFFSET_MIN
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -70,6 +74,12 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
         db.flush()                               # aynı batch'te sonraki aramalar görsün
         out.append(row)
 
+    # K13.3 — AÇIK SAYACI KAPAT. Anne sayacı başlatıp durdurmuyor, sonra aynı
+    # uykuyu elle giriyor; iki kayıt iki ayrı uyku sanılıyordu. Hesap tarafı
+    # (K13.1/K13.2) bunu zaten tekilleştiriyor ama kayıt DB'de açık kaldığı
+    # sürece mobilde sayaç dönmeye devam ediyor. Burada TEK yazımla kapatılır.
+    timer_closed = _acik_sayaclari_kapat(db, user, out)
+
     db.commit()
     for r in out:
         db.refresh(r)
@@ -80,7 +90,63 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
     # çizelge matematiği, LLM/ağ YOK) ve içerik değişmediyse DB'ye yazılmaz.
     plan_updated = _plani_tazele(db, user, {r.baby_id for r in out})
     return BatchResult(created=created, updated=updated, skipped=skipped,
-                       logs=out, plan_updated=plan_updated)
+                       logs=out, plan_updated=plan_updated,
+                       timer_closed=timer_closed)
+
+
+UYKU_TIPLERI = ("sleep", "nap")
+
+
+def _acik_sayaclari_kapat(db: Session, user: User,
+                          gelenler: list[SleepLog]) -> bool:
+    """K13.3 — bu batch'teki manuel kayıtla ÖRTÜŞEN açık sayacı kapat.
+
+    Ölçüt: manuel kayıt (kapalı, sleep/nap) açık sayacın BAŞLANGICINI kapsıyor
+    (started_at <= sayac.started_at <= ended_at). Kapanış saati manuel kaydın
+    `ended_at`'idir.
+
+    NEDEN KAPSAMA ŞARTI VAR: spec "başlangıcından sonra biten manuel kayıt"
+    diyor, ama bu tek başına alınırsa sabah 10:01'de unutulan sayaç, öğleden
+    sonraki 15:00'te biten BAŞKA bir uykuyla kapatılıp 5 saatlik hayalet bir
+    uyku üretirdi. Örtüşme şartı, düzeltilmek istenen durumu (aynı uykunun iki
+    kaydı) tam olarak yakalar. Terk edilmiş sayaçlar ayrı bir iştir ve
+    scripts/acik_sayac_kapat.py ile 16 saatte kapatılır.
+
+    Sayacın KENDİSİ bu batch'te geldiyse dokunulmaz — anne şu an uyku
+    başlatıyordur.
+
+    Dönen: en az bir sayaç kapatıldı mı."""
+    manuel = [r for r in gelenler
+              if r.type in UYKU_TIPLERI and r.ended_at is not None]
+    if not manuel:
+        return False
+    gelen_idler = {r.id for r in gelenler}
+    kapatildi = False
+
+    for bebek_id in {r.baby_id for r in manuel}:
+        acik = (db.query(SleepLog)
+                .filter(SleepLog.user_id == user.id,
+                        SleepLog.baby_id == bebek_id,
+                        SleepLog.type.in_(UYKU_TIPLERI),
+                        SleepLog.ended_at.is_(None))
+                .all())
+        for sayac in acik:
+            if sayac.id in gelen_idler:
+                continue                       # az önce başlatılan sayaç
+            bas = _as_utc(sayac.started_at)
+            ortusen = [m for m in manuel
+                       if m.baby_id == bebek_id
+                       and _as_utc(m.started_at) <= bas <= _as_utc(m.ended_at)]
+            if not ortusen:
+                continue
+            # Birden çok aday varsa EN ERKEN biten: sayaç en geç o an bitmiştir.
+            kapanis = min(_as_utc(m.ended_at) for m in ortusen)
+            sayac.ended_at = kapanis
+            kapatildi = True
+            logging.getLogger("tavsan.logs").info(
+                "K13.3 açık sayaç kapatıldı: log=%s baby=%s ended_at=%s",
+                sayac.id, bebek_id, kapanis.isoformat())
+    return kapatildi
 
 
 def _plani_tazele(db: Session, user: User, baby_ids: set) -> bool:
@@ -114,21 +180,57 @@ def _plani_tazele(db: Session, user: User, baby_ids: set) -> bool:
     return degisti
 
 
+def gun_araligi(gun: date, tz_offset_min: int = TZ_OFFSET_MIN
+                ) -> tuple[datetime, datetime]:
+    """Yerel bir günün UTC sınırları: [00:00, 24:00). Motor UTC+3 ile çalışır."""
+    bas = (datetime.combine(gun, time.min, tzinfo=timezone.utc)
+           - timedelta(minutes=tz_offset_min))
+    return bas, bas + timedelta(days=1)
+
+
+def gun_filtresi(gun: date, tz_offset_min: int = TZ_OFFSET_MIN):
+    """K14.1 — "o günün kayıtları" SQL koşulu.
+
+    Üç durumu birden kapsar; v2.1'e kadar yalnız birincisi vardı ve gece
+    yarısını aşan kayıtlar günün listesinden düşüyordu:
+      1. started_at o gün, VEYA
+      2. ended_at o gün (dün 21:50 başlayıp bugün 07:05 biten gece uykusu), VEYA
+      3. HÂLÂ AÇIK ve o günden önce başlamış (dün akşam başlatılıp
+         durdurulmamış sayaç — "sürüyor" olarak görünmeli).
+    """
+    bas, bit = gun_araligi(gun, tz_offset_min)
+    return or_(
+        and_(SleepLog.started_at >= bas, SleepLog.started_at < bit),
+        and_(SleepLog.ended_at.isnot(None),
+             SleepLog.ended_at >= bas, SleepLog.ended_at < bit),
+        and_(SleepLog.ended_at.is_(None), SleepLog.started_at < bas),
+    )
+
+
 @router.get("", response_model=list[SleepLogResp])
 def list_logs(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     from_: datetime | None = Query(default=None, alias="from"),
     to: datetime | None = Query(default=None),
+    date_: date | None = Query(
+        default=None, alias="date",
+        description="Yerel gün (YYYY-MM-DD). Verilirse from/to yok sayılır; "
+                    "gece yarısını aşan ve hâlâ açık kayıtlar da döner (K14.1)."),
     baby_id: uuid.UUID | None = Query(default=None),
 ):
     q = db.query(SleepLog).filter(SleepLog.user_id == user.id)
     if baby_id is not None:
         q = q.filter(SleepLog.baby_id == baby_id)
-    if from_ is not None:
-        q = q.filter(SleepLog.started_at >= from_)
-    if to is not None:
-        q = q.filter(SleepLog.started_at <= to)
+    if date_ is not None:
+        # K14.1 — gün sorgusu from/to ile BİRLEŞTİRİLMEZ: ikisi farklı soruların
+        # cevabı ve kesişimleri sessizce boş liste üretirdi.
+        q = q.filter(gun_filtresi(date_))
+    else:
+        if from_ is not None:
+            q = q.filter(SleepLog.started_at >= from_)
+        if to is not None:
+            q = q.filter(SleepLog.started_at <= to)
     return q.order_by(SleepLog.started_at.desc()).all()
 
 

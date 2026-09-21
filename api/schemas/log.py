@@ -44,6 +44,10 @@ class BatchResult(BaseModel):
     # v2/K8: bu senkron sonucunda BUGÜNÜN çizelgesi değişti mi. true ise mobil
     # plans/today sorgusunu invalidate etmelidir.
     plan_updated: bool = False
+    # v2.2/K13.3: açık kalmış bir sayaç kaydı, bu batch'teki manuel kayıtla
+    # otomatik kapatıldı mı. true ise mobil elindeki "sürüyor" durumunu
+    # tazelemelidir — aksi hâlde ekranda hâlâ dönen bir sayaç görünür.
+    timer_closed: bool = False
 
 
 class DaySummary(BaseModel):
