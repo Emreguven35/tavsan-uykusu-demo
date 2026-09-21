@@ -42,6 +42,10 @@ os.environ["ENVIRONMENT"] = "development"
 os.environ["MAIL_PROVIDER"] = "disabled"
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy")
 os.environ["ELEVENLABS_API_KEY"] = "test-key"
+# /voice/clone artik premium kapisi arkasinda (deps.require_premium). Beta
+# suresince kapiyi acan sey BETA_MODE; bu dosya aylik LIMITI test ediyor,
+# kapiyi degil (kapi: tests/test_premium_kapisi.py).
+os.environ["BETA_MODE"] = "true"
 
 from api import tts                                    # noqa: E402
 from api.db import Base, engine                        # noqa: E402

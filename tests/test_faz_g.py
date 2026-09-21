@@ -41,6 +41,7 @@ os.environ["MAIL_PROVIDER"] = "disabled"
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy")
 os.environ.pop("ELEVENLABS_API_KEY", None)          # G3'te mock'la yöneteceğiz
 os.environ.pop("BETA_PREMIUM_ALL", None)
+os.environ.pop("BETA_MODE", None)          # G5 'source=none' bekliyor
 
 from fastapi.testclient import TestClient            # noqa: E402
 from sqlalchemy import text                          # noqa: E402
@@ -204,7 +205,7 @@ def test_g3():
 
     tok = _register("g3_user@example.com")
     from api.db import SessionLocal
-    from api.models import VoiceProfile
+    from api.models import Subscription, VoiceProfile
     import uuid as _uuid
     # Kullanıcının kendi voice profilini DB'ye ekle (klon akışını mock'lamadan)
     uid = None
@@ -214,6 +215,13 @@ def test_g3():
         uid = _uuid.UUID(decode_access_token(tok)["sub"])
         dbs.add(VoiceProfile(user_id=uid, elevenlabs_voice_id="MY_OWN_VOICE",
                              status="ready"))
+        # /voice/generate artik premium kapisi arkasinda (deps.require_premium)
+        # ve bu dosya BETA_MODE'u bilerek KAPALI tutuyor (G5 "source=none"
+        # bekliyor). Burada olcmek istedigimiz sey SAHIPLIK kontrolu, o yuzden
+        # kullaniciya gercek bir abonelik veriliyor.
+        dbs.add(Subscription(user_id=uid, platform="ios",
+                             product_id="premium_monthly", status="active",
+                             receipt_data="A1b2C3realbase64receiptdata=="))
         dbs.commit()
     finally:
         dbs.close()

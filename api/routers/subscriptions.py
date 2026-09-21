@@ -11,9 +11,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from api.config import get_settings
 from api.db import get_db
-from api.deps import get_current_user
+from api.deps import get_current_user, premium_karari
 from api.models import Subscription, User
 from api.schemas.subscription import (
     SubscriptionResp, SubscriptionStatusResp, SubscriptionVerifyReq,
@@ -65,18 +64,15 @@ def premium_status(db: Session = Depends(get_db),
     """SUNUCU-TARAFI premium kararı (Faz G5). Mobil paywall bunu tek doğruluk
     kaynağı olarak kullanmalı — istemcinin kendi 'premium' bayrağına güvenilmez.
 
-    premium = aktif abonelik VAR **veya** BETA_PREMIUM_ALL açık. Beta bittiğinde
-    flag kapatılır ve karar tümüyle gerçek aboneliğe döner (kod değişmeden)."""
-    settings = get_settings()
-    if settings.beta_premium_all:
-        return SubscriptionStatusResp(premium=True, source="beta")
-    aktif = (db.query(Subscription)
-             .filter(Subscription.user_id == user.id,
-                     Subscription.status == "active")
-             .first())
-    if aktif is not None:
-        return SubscriptionStatusResp(premium=True, source="subscription")
-    return SubscriptionStatusResp(premium=False, source="none")
+    premium = aktif abonelik VAR **veya** BETA_MODE açık. Beta bittiğinde bayrak
+    kapatılır ve karar tümüyle gerçek aboneliğe döner (kod değişmeden).
+
+    Karar deps.premium_karari'den geliyor — premium uçları koruyan
+    require_premium ile AYNI fonksiyon. Eskiden mantık yalnız buradaydı ve
+    hiçbir uç onu zorlamıyordu; bu uç "premium" derken /voice/* başka türlü
+    davranamaz."""
+    premium, kaynak = premium_karari(db, user)
+    return SubscriptionStatusResp(premium=premium, source=kaynak)
 
 
 @router.get("", response_model=list[SubscriptionResp])

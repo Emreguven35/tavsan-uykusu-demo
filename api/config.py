@@ -13,6 +13,14 @@ import os
 from functools import lru_cache
 
 
+def _bayrak(ad: str) -> bool:
+    """Env bayrağı: "1/true/yes/on" (harf büyüklüğü farketmez) → True.
+
+    Tek yerde tanımlı olması bilinçli: bayrağı her modülün kendince okuması,
+    kapının bir uçta açık bir uçta kapalı kalmasına yol açıyordu."""
+    return (os.getenv(ad) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _normalize_db_url(url: str) -> str:
     """Railway/Heroku bazen 'postgres://' verir; SQLAlchemy 'postgresql://' bekler.
     Ayrıca sürücüyü psycopg2'ye sabitleriz (requirements: psycopg2-binary)."""
@@ -141,12 +149,21 @@ class Settings:
         # göreli path'e düşülür (lokal geliştirme + mevcut testler bozulmaz).
         self.public_base_url = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
 
-        # --- Abonelik / beta (Faz G5) ---------------------------------------
+        # --- Abonelik / beta (Faz G5 → Faz V) --------------------------------
         # Gerçek Apple/Google IAP doğrulaması ayrı sprint. Beta süresince premium'u
-        # SUNUCU TARAFI bu flag ile aç — istemcinin gönderdiği bir "premium" alanına
-        # ASLA güvenme. true → GET /subscriptions/status herkese premium döner.
-        self.beta_premium_all = (os.getenv("BETA_PREMIUM_ALL") or "").strip().lower() \
-            in ("1", "true", "yes", "on")
+        # SUNUCU TARAFI bu bayrakla aç — istemcinin gönderdiği bir "premium"
+        # alanına ASLA güvenme.
+        #
+        # BETA_MODE KANONİK bayraktır: açıkken premium kapısı HER YERDE geçer —
+        # deps.require_premium ve GET /subscriptions/status aynı kararı verir.
+        # Mobil BETA_MODE'da herkesi premium sayıyordu ama sunucuda karşılığı
+        # YOKTU; iki taraf artık tek bayrağa bakıyor.
+        #
+        # BETA_PREMIUM_ALL eski addır, hâlâ OKUNUR (ortamlarda kalmış olabilir).
+        # Biri bile açıksa beta modu açıktır. Beta bitince İKİSİ de kapatılır.
+        self.beta_mode = _bayrak("BETA_MODE") or _bayrak("BETA_PREMIUM_ALL")
+        # Geriye dönük ad — mevcut çağrı yerleri kırılmasın.
+        self.beta_premium_all = self.beta_mode
 
         # CORS — virgülle ayrılmış origin listesi. "*" YALNIZ development'ta geçerli;
         # production'da yok sayılır (aşağıda).

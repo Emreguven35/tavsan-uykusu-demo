@@ -20,8 +20,10 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 load_dotenv()
@@ -59,7 +61,7 @@ settings = get_settings()
 # sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
 #
 # Sentry'den ÖNCE tanımlı olmak zorunda: release etiketi olarak oraya geçiyor.
-APP_VERSION = os.getenv("APP_VERSION", "v2.1")
+APP_VERSION = os.getenv("APP_VERSION", "v2.2-ses-premium")
 
 # Hata izleme — YALNIZ production + SENTRY_DSN. Uygulama nesnesi kurulmadan ÖNCE
 # başlatılır ki Starlette/FastAPI entegrasyonları middleware zincirini sarabilsin.
@@ -166,6 +168,29 @@ async def log_requests(request: Request, call_next):
     logger.info("%s %s → %d (%d ms)",
                 request.method, request.url.path, response.status_code, dt)
     return response
+
+
+# --- 422 gövdesi: Türkçe, TEK cümle ------------------------------------------
+# FastAPI'nin varsayılan 422'si detail alanına İngilizce bir HATA LİSTESİ
+# koyuyor ([{"loc": [...], "msg": "field required", ...}]). Mobil detail'i
+# olduğu gibi ekrana bastığı için anne bu listeyi görüyordu. Artık detail tek
+# bir Türkçe cümle; ayrıntı ayrı bir "errors" alanında kalıyor (geliştirici
+# için kaybolmasın).
+GENEL_422_MESAJ = "Gönderilen bilgiler geçersiz, lütfen kontrol edip tekrar deneyin."
+
+
+@app.exception_handler(RequestValidationError)
+async def dogrulama_hatasi(request: Request, exc: RequestValidationError):
+    """Ses uçlarında mesaj ANNEYE göre: kaydın kendisi işlenememiş olabilir.
+
+    Genel bir "geçersiz istek" metni /voice/clone'da işe yaramıyor — kadın 30
+    saniye konuştu, ona ne yapacağını söylemek gerekiyor."""
+    ses_ucu = "/voice/" in request.url.path
+    return JSONResponse(
+        status_code=422,
+        content={"detail": voice.SES_422_MESAJ if ses_ucu else GENEL_422_MESAJ,
+                 "errors": jsonable_encoder(exc.errors())},
+    )
 
 
 # --- Mobil sözleşmesi: tüm yeni endpoint'ler /api/v1 altında ------------------
