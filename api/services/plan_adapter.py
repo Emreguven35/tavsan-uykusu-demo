@@ -70,9 +70,20 @@ GUN_BASLANGICI_EN_ERKEN = 6 * 60             # 06:00
 # Gündüz uyku SAYISINDAN biri değildir (bant n=3 derken bu sayılmaz); şablona da
 # girmez, yalnız o günün çizelgesinde görünür. K4 gün taşırsa bu blok ASLA
 # kaldırılmaz — önce normal gündüz uykuları kısaltılır (K10.4).
-SEKERLEME_DK = 30
 SEKERLEME_KEY = "sekerleme"
-SEKERLEME_BASLIK = "Şekerleme (30 dk)"
+# Süre ve pencere artık TABLODAN gelir (yas_bantlari v1.4
+# evrensel_kurallar.kestirme_protokolu). Buradaki değerler yalnız tablo
+# okunamazsa kullanılan emniyet payıdır.
+SEKERLEME_DK = 30                       # geriye uyum: taban süre
+SEKERLEME_VARSAYILAN_PENCERE = (17 * 60, 19 * 60)
+# 12-18 ay TEK UYKU varyantında pencere daralır: İlayda "ortalama 18:00 gibi
+# sabit bir saatte yaptırıyoruz şekerlemeyi, ya da 19:00 gibi" dedi.
+SEKERLEME_TEK_UYKU_PENCERE = (18 * 60, 19 * 60)
+
+
+def sekerleme_basligi(sure_dk: int) -> str:
+    """Başlık süreye göre — sabit "Şekerleme (30 dk)" artık yanlış olabilir."""
+    return f"Şekerleme ({int(sure_dk)} dk)"
 
 # Bir `sleep` kaydının "gece uykusu" sayılması için ölçüt (K5/K-senaryosu):
 # ya bandın gece uykusu ALT SINIRININ bu oranı kadar sürmüş olmalı, ya da
@@ -1103,8 +1114,10 @@ def sabah_uyanisi(kayitlar: dict, hedef_minute: int) -> dict:
                     gece_uykusu=_gece_uykusu_ozeti(kayitlar, kapanis))
 
     # K10.1 — 06:00 öncesi uyandı ve tekrar uyumadı: gün 06:00'dan başlar.
-    uyarilar.append("Erken uyanma: gün 06:00'dan başlatıldı, "
-                    "30 dk şekerleme eklendi.")
+    # v1.4 — erken uyanma ARTIK TEK BAŞINA şekerleme eklemiyor. Gün 06:00'dan
+    # kurulur; şekerleme yalnız gündüz uyku açığı kalırsa günün sonunda eklenir
+    # (bkz. _sekerleme_yerlestir). Bu uyarı o yüzden şekerlemeden söz etmiyor.
+    uyarilar.append("Erken uyanma: gün 06:00'dan başlatıldı.")
     return dict(
         bos,
         minute=GUN_BASLANGICI_EN_ERKEN,
@@ -1117,9 +1130,13 @@ def sabah_uyanisi(kayitlar: dict, hedef_minute: int) -> dict:
         wake_note=(f"Bebeğiniz {_fmt(gercek)}'da uyandı, "
                    f"gün {_fmt(GUN_BASLANGICI_EN_ERKEN)} kabul edildi"),
         # K10.6 — mobilin okuduğu yapılandırılmış iz.
+        # `sekerleme_eklendi` artık BURADA karara bağlanmıyor: şekerleme günün
+        # sonunda, gündüz açığına göre eklenir. recompute_day gerçek sonucu
+        # `adaptation.sekerleme` alanına yazar; bu bayrak geriye uyum için
+        # duruyor ve DAİMA False'tur.
         erken_uyanma={"gercek_saat": _fmt(gercek),
                       "gun_baslangici": _fmt(GUN_BASLANGICI_EN_ERKEN),
-                      "sekerleme_eklendi": True},
+                      "sekerleme_eklendi": False},
     )
 
 
@@ -1313,17 +1330,13 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
     bloklar: list[dict] = [wake_blok]
 
     yuvalar = _sablon_naplari(sablon)
-    # K10.3 — Erken uyanmada güne EK 30 dk şekerleme yuvası eklenir. Başlangıcı
-    # zincire değil, bandın MİNİMUM uyanıklık penceresine bağlıdır:
-    # 06:00 + pencere_alt_sinir (8 ay: 120 dk → 08:00). Bant çözülemiyorsa
-    # şablonun penceresinin altına inilmez (uydurma sayı yok).
-    if sabah["kaynak"] == "erken_uyanma":
-        ww_min = (int(bant["uyaniklik_penceresi_dk"][0]) if bant is not None
-                  else min(ww, _mid(DEFAULT_WAKE_WINDOW)))
-        yuvalar = [{"key": SEKERLEME_KEY, "title": SEKERLEME_BASLIK,
-                    "sure_dk": SEKERLEME_DK,
-                    "sabit_bas": sabah["zincir_baslangici"] + ww_min,
-                    "ek_blok": True}] + yuvalar
+    # v1.4 — ŞEKERLEME ARTIK BURADA EKLENMİYOR.
+    # Eskiden (K10.3) erken uyanma TEK BAŞINA 30 dk'lık bir blok ekliyordu ve
+    # blok GÜNÜN BAŞINA konuyordu. İlayda: "İlla her zaman bir şekerlemeye
+    # gerek yok. Gün içerisinde uyku yetersiz kalırsa bir şekerleme yapıyoruz"
+    # ve "günün sonunda onu ekleyebiliyoruz". Yani tetikleyici erken uyanma
+    # değil GÜNDÜZ UYKU AÇIĞI, yeri de günün sonu. Zincir kurulduktan SONRA
+    # `_sekerleme_yerlestir` karar veriyor.
     # Gerçek uykular ve "atlandı" kayıtları TEK bir zaman sıralı olay dizisidir;
     # yuvalara sırayla oturur. Böylece "1. uykuyu atladı, 2.'yi 13:40'ta yaptı"
     # gibi karışık günler de tek kuralla işlenir.
@@ -1436,9 +1449,27 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
         bloklar.append(_fazla_blok)
         cursor = max(cursor, bit)
 
+    # --- v1.4: ŞEKERLEME (K9 + K10.3 tek mekanizma) --------------------------
+    # Gündüz toplamı bandın minimumunu tutmuyorsa günün SONUNA ilave uyku.
+    bloklar, sekerleme_bilgi, sek_uyari = _sekerleme_yerlestir(
+        bloklar, bant, cursor, ww, yatma_lo, yatma_hi, now_minute)
+    uyarilar.extend(sek_uyari)
+    # ŞEKERLEME ZİNCİR HALKASI DEĞİLDİR: `cursor` ilerletilmez. İlayda:
+    # "30 dakika uyutup kalktıktan sonra ÜÇ SAAT SONRA BİLE gece uykusuna
+    # geçirebiliyoruz." Şekerlemeden sonra tam uyanıklık penceresi dayatmak
+    # yatışı bandın tavanının çok ötesine atıp şekerlemeyi iptal ettiriyordu.
+    # Tek kısıt: yatış, şekerleme bitişinden en az `gece_uykusuna_gecis_dk`
+    # sonra olmalı.
+    en_erken_yatis = None
+    if sekerleme_bilgi:
+        _gecis = int((bant or {}).get("kestirme_protokolu", {})
+                     .get("gece_uykusuna_gecis_dk") or 60)
+        en_erken_yatis = sekerleme_bilgi["end_minute"] + _gecis
+
     # --- K4: yatış zinciri + gece uykusu tavanı ------------------------------
     bloklar, yatis, k4_uyari = _yatisi_yerlestir(
-        bloklar, cursor, ww, yatma_lo, yatma_hi, sabit_wake, now_minute)
+        bloklar, cursor, ww, yatma_lo, yatma_hi, sabit_wake, now_minute,
+        en_erken_yatis=en_erken_yatis)
     uyarilar.extend(k4_uyari)
     if yatis.get("kaynak") == "varsayilan":
         varsayilan.append("bedtime")
@@ -1461,6 +1492,9 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
         "sabah_uyanis_kaynak": sabah["kaynak"],
         # K10.6 — erken uyanma izi; erken uyanma yoksa None.
         "erken_uyanma": sabah.get("erken_uyanma"),
+        # v1.4 — şekerleme eklendiyse gerekçesi ve süresi (mobil kartı bunu
+        # gösteriyor). Eklenmediyse None — erken uyanma TEK BAŞINA eklemez.
+        "sekerleme": sekerleme_bilgi,
         "varsayilan_bloklar": varsayilan,
         "yeniden_hesaplanan_bloklar": yeniden,
         "atlanan_bloklar": atlanan,
@@ -1483,26 +1517,171 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
     return {"schedule": schedule, "adaptation": adaptation}
 
 
+def _sekerleme_yerlestir(bloklar: list[dict], bant: dict | None, cursor: int,
+                         ww: int, yatma_lo: int, yatma_hi: int,
+                         now_minute: int) -> tuple[list[dict], dict | None,
+                                                   list[str]]:
+    """v1.4 — gündüz uyku açığı varsa GÜNÜN SONUNA şekerleme ekle (K9+K10.3).
+
+    TETİKLEYİCİ: günün hesaplanan gündüz toplamı (gerçek kayıtlar + varsayılan
+    bloklar) bandın gündüz MİNİMUMUNUN altında. Erken uyanma TEK BAŞINA
+    tetiklemez — erken uyanan ama uykusunu dolduran bebeğe blok eklenmez.
+    12-18 ay tek uyku varyantında aynı ölçüt "öğle uykusu < 120 dk" demektir
+    (bandın gündüz minimumu zaten 120), yalnız pencere 18:00-19:00'a daralır.
+
+    KONUM: son gündüz uykusundan sonra, tablodaki saat penceresinde
+    (17:00-19:00), gece yatışından en az `gece_uykusuna_gecis_dk` (60 dk) önce
+    bitecek şekilde.
+
+    SÜRE: taban 30 dk; şekerleme başlangıcı ile gece yatışı arasında
+    `gece_yatisina_kalan_min_dk` (150 dk) ya da fazlası varsa 60 dk
+    ("30 dakika minimum süredir; gece uykusunu geciktirmiyorsak bir saat de
+    yapabilir").
+
+    Sığmıyorsa blok EKLENMEZ ve sebep uyarıya yazılır — sessizce atlanmaz."""
+    uyarilar: list[str] = []
+    if bant is None:
+        return bloklar, None, uyarilar
+
+    kestirme = yas_bantlari.kestirme_degerlendir(bant, _gunduz_toplam(bloklar))
+    if not kestirme.get("gerekli"):
+        return bloklar, None, uyarilar
+
+    tek_uyku = (bant.get("varyant") == "tek_uyku")
+    pencere = kestirme.get("saat_penceresi") or ["17:00", "19:00"]
+    pen_bas, pen_bit = _saat_dk(pencere[0]), _saat_dk(pencere[1])
+    if tek_uyku:
+        pen_bas = max(pen_bas, SEKERLEME_TEK_UYKU_PENCERE[0])
+
+    naplar = [b for b in bloklar if b["type"] == "nap"]
+    son_bitis = max((b["end_minute"] for b in naplar), default=cursor)
+    bas = max(son_bitis, pen_bas)
+
+    # Yatış, şekerleme eklenmemiş hâliyle nereye düşüyordu?
+    yatis_tahmini = max(yatma_lo, min(yatma_hi, cursor + ww))
+    gecis = int(kestirme.get("gece_uykusuna_gecis_dk") or 60)
+    lo = int(kestirme.get("sure_dk_min") or SEKERLEME_DK)
+    hi = int(kestirme.get("sure_dk_max") or lo)
+    kalan_esik = int(kestirme.get("gece_yatisina_kalan_min_dk") or 150)
+
+    sure = hi if (yatis_tahmini - bas) >= kalan_esik else lo
+    if bas >= pen_bit:
+        uyarilar.append(
+            f"Gündüz uykusu {kestirme['eksik_dk']} dk eksik kaldı ama şekerleme "
+            f"eklenemedi — son uyku {_fmt(son_bitis)}'da bitti, şekerleme "
+            f"penceresi ({pencere[0]}-{pencere[1]}) kapanmıştı")
+        return bloklar, None, uyarilar
+
+    # Gece yatışından en az `gecis` dk önce bitmeli. ÖLÇÜT BANDIN TAVANI,
+    # şekerlemesiz hesaplanan yatış DEĞİL: şekerleme eklenince yatış zaten
+    # ileri kayıyor (İlayda: "30 dakika uyutup kalktıktan sonra üç saat sonra
+    # bile gece uykusuna geçirebiliyoruz"). Öngörülen yatışa göre ölçmek, tek
+    # uyku varyantında şekerlemeyi imkânsız kılıyordu (18:00 pencere + 19:00
+    # öngörü → hiçbir süre sığmıyor).
+    en_gec_bitis = min(pen_bit, yatma_hi - gecis)
+    if bas + lo > en_gec_bitis:
+        uyarilar.append(
+            f"Gündüz uykusu {kestirme['eksik_dk']} dk eksik kaldı ama şekerleme "
+            f"eklenemedi — gece yatışına ({_fmt(yatis_tahmini)}) en az "
+            f"{gecis} dk kalması gerekiyor")
+        return bloklar, None, uyarilar
+    sure = max(lo, min(sure, en_gec_bitis - bas))
+
+    blok = {"key": SEKERLEME_KEY, "type": "nap",
+            "start_minute": bas, "end_minute": bas + sure,
+            "title": sekerleme_basligi(sure),
+            "kaynak": "varsayilan" if bas + sure <= now_minute else "plan",
+            "note": (f"Gündüz toplam uyku {kestirme['eksik_dk']} dk eksik "
+                     "kaldığı için eklendi")}
+    bloklar.append(blok)
+    uyarilar.append(
+        f"Gündüz toplam uyku {kestirme['gerceklesen_dk']} dk; bandın minimumu "
+        f"{kestirme['min_gunduz_dk']} dk ({kestirme['eksik_dk']} dk eksik) — "
+        f"{_fmt(bas)}'da {sure} dk şekerleme eklendi")
+    return bloklar, {"start_minute": bas, "end_minute": bas + sure,
+                     "sure_dk": sure, "eksik_dk": kestirme["eksik_dk"],
+                     "tetik": "tek_uyku_kisa" if tek_uyku else "gunduz_acigi"}, uyarilar
+
+
+def _gunduz_toplam(bloklar: list[dict]) -> int:
+    """Çizelgedeki gündüz uykusu toplamı (şekerleme HARİÇ — henüz yok)."""
+    return sum(max(0, int(b["end_minute"]) - int(b["start_minute"]))
+               for b in bloklar
+               if b.get("type") == "nap" and b.get("key") != SEKERLEME_KEY)
+
+
+def _saat_dk(hhmm: str) -> int:
+    """"17:00" → 1020. Bozuk değer gelirse 17:00'a düşer (sessiz 0 olmaz)."""
+    try:
+        s, d = str(hhmm).split(":")
+        return int(s) * 60 + int(d)
+    except Exception:
+        return 17 * 60
+
+
 def _yatisi_yerlestir(bloklar: list[dict], cursor: int, ww: int,
                       yatma_lo: int, yatma_hi: int, sabit_wake: int,
-                      now_minute: int) -> tuple[list[dict], dict, list[str]]:
+                      now_minute: int,
+                      en_erken_yatis: int | None = None
+                      ) -> tuple[list[dict], dict, list[str]]:
     """K4 — yatış = son uyku bitişi + pencere; bandın tavanını aşamaz.
 
-    Tavan aşılıyorsa sıra (K10.4): ① son gündüz uykusu bandın izin verdiği
-    MİNİMUMA kadar kısaltılır, ② tavanın tamamen ötesine düşen uyku kaldırılır,
-    ③ artan taşma için yatış tavana kırpılır. Gerçek KAYIT olan uykuya
-    dokunulmaz (geçmiş değiştirilemez) ve ŞEKERLEME ASLA kaldırılmaz/kısaltılmaz
-    — o, erken uyanmanın telafisidir (K10.3/K10.4).
+    TAŞMA SIRASI v1.4'te TERSİNE DÖNDÜ (eski K10.4):
+      ① ŞEKERLEME kısaltılır, yetmezse İPTAL edilir,
+      ② planlanan son gündüz uykusu bandın MİNİMUMUNA kadar kısaltılır,
+      ③ tavanın tamamen ötesine düşen planlı uyku kaldırılır,
+      ④ artan taşma için yatış tavana kırpılır.
+    Eskiden şekerleme dokunulmazdı ve gerçek uyku kısaltılırdı. Yanlıştı:
+    şekerleme zaten AÇIĞI KAPATMAK için eklenen ilave bir bloktur, günü taşıran
+    ilk vazgeçilecek şey odur. Gerçek KAYIT olan uykuya hiç dokunulmaz (geçmiş
+    değiştirilemez) — kısaltma gerekiyorsa uyarı üretilir, blok korunur.
     Her müdahale `uyarilar`a yazılır; sessiz kırpma YOKTUR."""
     uyarilar: list[str] = []
-    # Şekerleme (K10.3) ve gerçek kayıtlar müdahale dışıdır.
+
     def _oynanabilir(b):
         return (b["type"] == "nap" and b["key"] != SEKERLEME_KEY
                 and b.get("kaynak") != "kayit")
 
+    # Doğal yatış = son gündüz uykusu + pencere. Şekerleme varsa yatış onun
+    # bitişinden en az `gecis` dk sonra olmalı (zincire EKLENMEZ, alt sınır
+    # koyar).
     ham = cursor + ww
+    if en_erken_yatis is not None:
+        ham = max(ham, en_erken_yatis)
+
+    # ① ŞEKERLEME önce gider — ilave bloktur, günü o taşırdıysa vazgeçilir.
+    if ham > yatma_hi:
+        sek = next((b for b in bloklar if b["key"] == SEKERLEME_KEY), None)
+        if sek is not None:
+            sure = sek["end_minute"] - sek["start_minute"]
+            fazla = ham - yatma_hi
+            if fazla >= sure:
+                bloklar.remove(sek)
+                uyarilar.append(
+                    f"Şekerleme iptal edildi — {_fmt(yatma_hi)} yatış tavanını "
+                    "aşıyordu")
+                kalan = [b for b in bloklar if b["type"] == "nap"]
+                ham = (kalan[-1]["end_minute"] if kalan else cursor) + ww
+            else:
+                sek["end_minute"] -= fazla
+                yeni = sek["end_minute"] - sek["start_minute"]
+                sek["title"] = sekerleme_basligi(yeni)
+                sek["note"] = "Yatış tavanına sığsın diye kısaltıldı"
+                uyarilar.append(
+                    f"Şekerleme {sure} dk yerine {yeni} dk yapıldı — yatış "
+                    f"bandın tavanını ({_fmt(yatma_hi)}) aşmasın diye")
+                ham = sek["end_minute"] + ww
+
     if ham > yatma_hi:
         oynanabilir = [b for b in bloklar if _oynanabilir(b)]
+        # Kısaltılamayan GERÇEK kayıt varsa sessiz kalma: anne neden yatışın
+        # tavana dayandığını görmeli.
+        if not oynanabilir and any(b["type"] == "nap"
+                                   and b.get("kaynak") == "kayit"
+                                   for b in bloklar):
+            uyarilar.append(
+                "Gündüz uykusu kayıttan geldiği için kısaltılmadı; yatış "
+                f"bandın tavanına ({_fmt(yatma_hi)}) kırpıldı")
         son = oynanabilir[-1] if oynanabilir else None
         if son is not None:
             if son["start_minute"] >= yatma_hi:

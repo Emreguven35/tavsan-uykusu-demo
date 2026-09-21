@@ -330,14 +330,24 @@ def test_e_uyku_atlandi():
     b2 = max(W + WW, kanit)
     bekle("E", s, "nap_2", b2, "öne çekildi")
     bekle("E", s, "nap_3", max(b2 + NAP_SURE + WW, kanit))
-    kes = c["kestirme_degerlendirme"]
-    check("E · kestirme önerisi ÇIKTI (K9)", kes["gerekli"] is True,
-          f'gündüz {kes["gerceklesen_dk"]} dk < min {GUNDUZ_MIN} dk')
-    check("E · gündüz toplamı bandın minimumunun ALTINDA",
-          kes["gerceklesen_dk"] < GUNDUZ_MIN, kes["gerceklesen_dk"])
+    # v1.4 — gündüz açığı artık YALNIZ uyarı değil, ÇİZELGEYE BLOK olarak
+    # kapatılıyor: akşam şekerlemesi eklendiği için K9 değerlendirmesi
+    # "gerekli değil" diyebilir. Ölçülen şey artık açığın KAPANMIŞ olması.
+    _sek = sekerleme_blogu(s)
+    check("E · gündüz açığı akşam şekerlemesiyle kapatıldı",
+          _sek is not None
+          and SEK_PENCERE[0] <= _sek["start_minute"] < SEK_PENCERE[1],
+          f'{_sek["time"]}-{_sek["end"]}' if _sek else "şekerleme YOK")
+    check("E · şekerleme sonrası gündüz toplamı minimuma ulaştı",
+          gunduz_toplam(s) >= GUNDUZ_MIN,
+          f"{gunduz_toplam(s)} / {GUNDUZ_MIN}")
     tpl_deg = c["toplam_uyku_degerlendirme"]
-    check("E · 24 saatlik toplam 'az' (K9)", tpl_deg["durum"] == "az",
-          f'{tpl_deg["gerceklesen_dk"]} dk / hedef {TOPLAM_LO} dk')
+    # v1.4 — akşam şekerlemesi açığı kapattığı için 24 saatlik toplam artık
+    # "az" DEĞİL. Ölçülen şey: uyku atlansa bile gün hedefe ulaşıyor.
+    check("E · 24 saatlik toplam artık yeterli (şekerleme açığı kapattı)",
+          tpl_deg["durum"] != "az",
+          f'{tpl_deg["gerceklesen_dk"]} dk / hedef {TOPLAM_LO} dk '
+          f'durum={tpl_deg["durum"]}')
 
 
 # =============================================================================
@@ -373,38 +383,58 @@ def test_f_gece_bolunmesi():
 # Beklenen saatler yine tablodan: şekerleme = 06:00 + bandın MİNİMUM penceresi.
 WW_MIN = BANT["uyaniklik_penceresi_dk"][0]       # 8 ay → 120 dk
 GUN_BAS = pa.GUN_BASLANGICI_EN_ERKEN             # 06:00
-SEK_BAS = GUN_BAS + WW_MIN
-SEK_BIT = SEK_BAS + pa.SEKERLEME_DK
+# v1.4 — şekerleme artık GÜNÜN SONUNDA ve YALNIZ gündüz uyku açığı varsa.
+# Eski SEK_BAS (06:00 + min pencere) kavramı KALKTI.
+SEK_PENCERE = pa.SEKERLEME_VARSAYILAN_PENCERE       # (17:00, 19:00)
+_KES = yas_bantlari.kestirme_protokolu()
+SEK_MIN, SEK_MAX = _KES["sure_dk_min"], _KES["sure_dk_max"]
+
+
+def sekerleme_blogu(s):
+    return s.get(pa.SEKERLEME_KEY)
+
+
+def gunduz_toplam(s):
+    return sum(b["end_minute"] - b["start_minute"]
+               for b in s.values() if b.get("type") == "nap")
 
 
 def test_g1_erken_uyanma_sekerleme():
-    """04:30 uyandı, tekrar uyumadı → gün 06:00'dan + şekerleme."""
+    """04:30 uyandı, tekrar uyumadı → gün 06:00'dan.
+
+    v1.4: ERKEN UYANMA TEK BAŞINA ŞEKERLEME EKLEMEZ (İlayda: "illa her zaman
+    bir şekerlemeye gerek yok"). Gün 06:00'dan normal zincirle kurulur;
+    şekerleme yalnız gündüz açığı kalırsa ve AKŞAM eklenir."""
     erken = 4 * 60 + 30
     kur(lambda row: [gece(row, TODAY, TPL["bedtime"]["start_minute"], erken)])
     c, s = bugun(now_minute=erken + 5)
     bekle("G1", s, "wake", GUN_BAS, "gün 06:00'dan")
     check("G1 · wake bloğunda gerçek saat notu var (K10.5)",
           "04:30" in (s["wake"].get("note") or ""), s["wake"].get("note"))
-    bekle("G1", s, "sekerleme", SEK_BAS, "06:00 + min pencere")
-    check("G1 · şekerleme 30 dk ve doğru başlık",
-          s["sekerleme"]["end_minute"] - s["sekerleme"]["start_minute"]
-          == pa.SEKERLEME_DK and s["sekerleme"]["title"] == pa.SEKERLEME_BASLIK,
-          f'{s["sekerleme"]["time"]}-{s["sekerleme"]["end"]} {s["sekerleme"]["title"]}')
-    # K10.4 — şekerlemeden sonra NORMAL pencere
-    bekle("G1", s, "nap_1", SEK_BIT + WW, "şekerleme bitişi + normal pencere")
-    bekle("G1", s, "nap_2", SEK_BIT + WW + NAP_SURE + WW)
-    bekle("G1", s, "bedtime", YATMA_HI, "tavanda")
+    # Gün 06:00 + pencere ile normal kurulur — şekerleme başa GİRMEZ.
+    bekle("G1", s, "nap_1", GUN_BAS + WW, "06:00 + pencere (şekerleme yok)")
+    bekle("G1", s, "nap_2", GUN_BAS + WW + NAP_SURE + WW)
+    _sek = sekerleme_blogu(s)
+    check("G1 · şekerleme varsa YALNIZ akşam penceresinde",
+          _sek is None or SEK_PENCERE[0] <= _sek["start_minute"] < SEK_PENCERE[1],
+          f'{_sek["time"]}-{_sek["end"]}' if _sek else "şekerleme yok")
+    check("G1 · şekerleme günün BAŞINA eklenmedi (eski K10.3 kalktı)",
+          _sek is None or _sek["start_minute"] > GUN_BAS + WW,
+          f'{_sek["time"]}' if _sek else "yok")
     ad = c["adaptation"]
     check("G1 · adaptation.erken_uyanma dolu (K10.6)",
           ad["erken_uyanma"] == {"gercek_saat": hhmm(erken),
                                  "gun_baslangici": hhmm(GUN_BAS),
-                                 "sekerleme_eklendi": True},
+                                 "sekerleme_eklendi": False},
           ad["erken_uyanma"])
     check("G1 · sabah_uyanis_gercek GERÇEK saat (06:00 değil)",
           ad["sabah_uyanis_gercek"] == hhmm(erken), ad["sabah_uyanis_gercek"])
     check("G1 · uyarı tek satır olarak yazıldı (K10.6)",
           any("Erken uyanma: gün 06:00'dan başlatıldı" in u
               for u in ad["uyarilar"]), ad["uyarilar"])
+    check("G1 · uyarı artık şekerlemeden söz ETMİYOR",
+          not any("Erken uyanma" in u and "şekerleme" in u
+                  for u in ad["uyarilar"]), ad["uyarilar"])
     check("G1 · ŞABLON değişmedi (K1)",
           c["schedule_template"] == BASE["schedule_template"], "")
 
@@ -434,7 +464,7 @@ def test_g3_bes_elli():
     kur(lambda row: [gece(row, TODAY, TPL["bedtime"]["start_minute"], erken)])
     c, s = bugun(now_minute=erken + 5)
     bekle("G3", s, "wake", GUN_BAS)
-    bekle("G3", s, "sekerleme", SEK_BAS)
+    bekle("G3", s, "nap_1", GUN_BAS + WW, "06:00 + pencere (şekerleme başa yok)")
     check("G3 · erken_uyanma.gercek_saat 05:50",
           c["adaptation"]["erken_uyanma"]["gercek_saat"] == hhmm(erken),
           c["adaptation"]["erken_uyanma"])
@@ -465,16 +495,20 @@ def test_g5_gec_uyanis_ust_sinir_yok():
     check("G5 · şekerleme YOK", "sekerleme" not in s, list(s))
 
 
-def test_g6_sekerleme_gercek_kayit():
-    """G1 + şekerleme için gerçek kayıt 08:10-08:35 → K6/K7 şekerlemeye de işler."""
+def test_g6_erken_uyanma_gercek_kayit():
+    """G1 + 08:10-08:35 gerçek kayıt.
+
+    v1.4: bu kayıt artık "şekerleme yuvası" DEĞİL, günün BİRİNCİ gündüz
+    uykusudur — şekerleme kavramı akşama taşındı. Kayıt olduğu gibi durur,
+    zincir onun bitişinden akar."""
     erken, s_bas, s_bit = 4 * 60 + 30, 8 * 60 + 10, 8 * 60 + 35
     kur(lambda row: [gece(row, TODAY, TPL["bedtime"]["start_minute"], erken),
                      nap(row, TODAY, s_bas, s_bit - s_bas)])
     c, s = bugun(now_minute=s_bit + 5)
-    bekle("G6", s, "sekerleme", s_bas, "gerçek kayıt")
-    check("G6 · şekerleme kaynağı 'kayit' (K10.7)",
-          s["sekerleme"].get("kaynak") == "kayit", s["sekerleme"].get("kaynak"))
-    bekle("G6", s, "nap_1", s_bit + WW, "gerçek bitiş + pencere")
+    bekle("G6", s, "nap_1", s_bas, "gerçek kayıt birinci uyku oldu")
+    check("G6 · kaynağı 'kayit'",
+          s["nap_1"].get("kaynak") == "kayit", s["nap_1"].get("kaynak"))
+    bekle("G6", s, "nap_2", s_bit + WW, "gerçek bitiş + pencere")
     check("G6 · erken_uyanma hâlâ dolu",
           c["adaptation"]["erken_uyanma"] is not None, "")
 
@@ -532,11 +566,155 @@ def test_i_varsayim_bozulur():
     check("I · nap_2 kaynağı 'kayit'", s["nap_2"].get("kaynak") == "kayit",
           s["nap_2"].get("kaynak"))
     bekle("I", s, "nap_3", gercek_bas + gercek_sure + WW, "yeniden hesaplandı")
+    # v1.4 — nap_2 yalnız 30 dk sürdüğü için gün bandın gündüz minimumunun
+    # altında kalıyor; akşam şekerlemesi ekleniyor ve yatış tavana dayanıyor.
+    # İlayda: "gece uykusu gecikse dahi minimum gündüz uykusu önceliklidir."
+    _sek_i = sekerleme_blogu(s)
+    check("I · gündüz açığı akşam şekerlemesiyle kapatıldı",
+          _sek_i is not None
+          and SEK_PENCERE[0] <= _sek_i["start_minute"] < SEK_PENCERE[1],
+          f'{_sek_i["time"]}-{_sek_i["end"]}' if _sek_i else "şekerleme YOK")
+    # Şekerleme zincir halkası DEĞİL (yalnız alt sınır koyar), bu yüzden yatış
+    # doğal zincirden gelmeye devam ediyor.
     bekle("I", s, "bedtime",
-          beklenen_yatis(gercek_bas + gercek_sure + WW + NAP_SURE))
+          beklenen_yatis(gercek_bas + gercek_sure + WW + NAP_SURE),
+          "doğal zincir — şekerleme yatışı ötelemedi")
+    check("I · yatış şekerleme bitişinden en az 60 dk sonra",
+          _sek_i is None
+          or s["bedtime"]["start_minute"] - _sek_i["end_minute"] >= 60,
+          f'sek={_sek_i["end"]} yatis={s["bedtime"]["time"]}' if _sek_i else "")
     check("I · nap_3 ve bedtime yeniden hesaplananlar listesinde",
           {"nap_3", "bedtime"} <= set(c["adaptation"]["yeniden_hesaplanan_bloklar"]),
           c["adaptation"]["yeniden_hesaplanan_bloklar"])
+
+
+# =============================================================================
+# S1-S4 — ŞEKERLEME (v1.4: K9 + K10.3 tek mekanizma)
+# =============================================================================
+# İlayda: "İlla her zaman bir şekerlemeye gerek yok. Gün içerisinde uyku
+# yetersiz kalırsa bir şekerleme yapıyoruz" + "günün sonunda ekliyoruz".
+def _gunduz_dk(s):
+    return sum(b["end_minute"] - b["start_minute"]
+               for b in s.values() if b.get("type") == "nap")
+
+
+def test_s1_acik_yok_sekerleme_yok():
+    """Gündüz uykusu bandın minimumunu DOLDURUYORSA şekerleme EKLENMEZ."""
+    # Bandın minimumunu aşan uzun kayıtlar: açık kalmasın.
+    uzun = max(NAP_SURE, (GUNDUZ_MIN // N_NAP) + 20)
+    def loglar(row):
+        out = [gece(row, TODAY, TPL["bedtime"]["start_minute"], W)]
+        bas = W + WW
+        for _ in range(N_NAP):
+            out.append(nap(row, TODAY, bas, uzun))
+            bas = bas + uzun + WW
+        return out
+    kur(loglar)
+    c, s = bugun(now_minute=20 * 60)
+    check("S1 · gündüz toplamı bandın minimumunu karşılıyor",
+          _gunduz_dk(s) >= GUNDUZ_MIN, f"{_gunduz_dk(s)} / {GUNDUZ_MIN}")
+    check("S1 · ŞEKERLEME EKLENMEDİ (açık yok)",
+          sekerleme_blogu(s) is None,
+          str(sekerleme_blogu(s) or "yok"))
+    check("S1 · adaptation.sekerleme None",
+          c["adaptation"]["sekerleme"] is None, c["adaptation"]["sekerleme"])
+
+
+def test_s2_acik_var_aksam_sekerlemesi():
+    """Gündüz açığı varsa şekerleme AKŞAM penceresinde eklenir."""
+    # Kısa uykular: toplam bandın minimumunun altında kalsın.
+    kisa = 30
+    def loglar(row):
+        out = [gece(row, TODAY, TPL["bedtime"]["start_minute"], W)]
+        bas = W + WW
+        for _ in range(N_NAP):
+            out.append(nap(row, TODAY, bas, kisa))
+            bas = bas + kisa + WW
+        return out
+    kur(loglar)
+    c, s = bugun(now_minute=20 * 60)
+    sek = sekerleme_blogu(s)
+    check("S2 · şekerleme EKLENDİ", sek is not None,
+          f"gündüz={_gunduz_dk(s)} min={GUNDUZ_MIN}")
+    check("S2 · akşam penceresinde (17:00-19:00)",
+          sek is not None
+          and SEK_PENCERE[0] <= sek["start_minute"] < SEK_PENCERE[1],
+          f'{sek["time"]}-{sek["end"]}' if sek else "yok")
+    check("S2 · başlık süreye göre dinamik",
+          sek is not None
+          and sek["title"] == pa.sekerleme_basligi(
+              sek["end_minute"] - sek["start_minute"]),
+          sek["title"] if sek else "")
+    check("S2 · gece yatışından en az 60 dk önce bitiyor",
+          sek is not None and s["bedtime"]["start_minute"] - sek["end_minute"] >= 60,
+          f'sek_bit={sek["end"]} yatis={s["bedtime"]["time"]}' if sek else "")
+    ad = c["adaptation"]["sekerleme"]
+    check("S2 · adaptation.sekerleme gerekçeyi taşıyor",
+          ad is not None and ad["tetik"] == "gunduz_acigi" and ad["eksik_dk"] > 0,
+          str(ad))
+
+
+def test_s3_yatisa_uc_saat_varsa_altmis_dk():
+    """Gece yatışına ≥150 dk kalıyorsa şekerleme 60 dk olur."""
+    # Tek kısa uyku → hem açık büyük hem son uyku erken biter.
+    kur(lambda row: [gece(row, TODAY, TPL["bedtime"]["start_minute"], W),
+                     nap(row, TODAY, W + WW, 30)])
+    c, s = bugun(now_minute=20 * 60)
+    sek = sekerleme_blogu(s)
+    sure = (sek["end_minute"] - sek["start_minute"]) if sek else 0
+    kalan = (s["bedtime"]["start_minute"] - sek["start_minute"]) if sek else 0
+    check("S3 · şekerleme eklendi", sek is not None, "")
+    check("S3 · yatışa ≥150 dk varsa süre 60 dk, değilse 30 dk",
+          (sure == SEK_MAX) if kalan >= 150 else (sure == SEK_MIN),
+          f"süre={sure} yatışa kalan={kalan} dk")
+    check("S3 · süre tablodaki aralıkta", SEK_MIN <= sure <= SEK_MAX,
+          f"{sure} ∉ [{SEK_MIN},{SEK_MAX}]")
+
+
+def test_s4_tek_uyku_kisa_aksam_sekerlemesi():
+    """12-18 ay TEK UYKU: öğle uykusu 90 dk (<120) → akşam şekerlemesi."""
+    tok2 = client.post("/api/v1/auth/register",
+                       json={"email": "sekerleme_tek@example.com",
+                             "password": "TestPass123!"}).json()["access_token"]
+    h2 = {"Authorization": f"Bearer {tok2}"}
+    dogum15 = TODAY - timedelta(days=456)          # ≈ 15 ay
+    bid2 = client.post("/api/v1/babies", headers=h2,
+                       json={"name": "Tek", "birth_date": dogum15.isoformat(),
+                             "night_wakes": 1}).json()["id"]
+    gen = client.post("/api/v1/plans/generate?sync=true", headers=h2,
+                      json={"baby_id": bid2})
+    assert gen.status_code == 201, gen.text
+    bant15 = yas_bantlari.yas_bandi_getir(
+        hesapla_yas_ay(dogum15.isoformat(), 40)["duzeltilmis_ay"],
+        tek_uyku=True)
+    tpl15 = pa.build_schedule({}, 7 * 60, yas_ay=15, tek_uyku=True)
+    w15 = pa.sabit_wake_minute(tpl15)
+
+    class L:
+        def __init__(s_, tip, bas, bit=None, gun=TODAY):
+            import uuid as _u
+            s_.id = _u.uuid4(); s_.type = tip
+            s_.started_at = utc(gun, bas)
+            s_.ended_at = None if bit is None else utc(gun, bit)
+
+    # Gece uykusu + 12:00-13:30 öğle uykusu (90 dk < 120 dk minimum)
+    loglar = [L("sleep", 21 * 60 + 30, w15, TODAY - timedelta(days=1)),
+              L("nap", 12 * 60, 13 * 60 + 30)]
+    loglar[0].ended_at = utc(TODAY, w15)
+    r = pa.recompute_day(tpl15, bant15, w15, loglar, now_minute=20 * 60,
+                         gun=TODAY, tz_offset_min=TZ)
+    blok = {b["key"]: b for b in r["schedule"]}
+    sek = blok.get(pa.SEKERLEME_KEY)
+    check("S4 · tek uykuda 90 dk → şekerleme eklendi", sek is not None,
+          str([(b["key"], b["time"], b.get("end")) for b in r["schedule"]]))
+    check("S4 · şekerleme 18:00-19:00 penceresinde (tek uyku varyantı)",
+          sek is not None
+          and pa.SEKERLEME_TEK_UYKU_PENCERE[0] <= sek["start_minute"]
+          < pa.SEKERLEME_TEK_UYKU_PENCERE[1],
+          f'{sek["time"]}-{sek["end"]}' if sek else "yok")
+    check("S4 · tetik tek_uyku_kisa",
+          (r["adaptation"]["sekerleme"] or {}).get("tetik") == "tek_uyku_kisa",
+          str(r["adaptation"]["sekerleme"]))
 
 
 # =============================================================================
@@ -727,7 +905,10 @@ TESTLER = [test_a_plana_uyuldu, test_b_sabah_uykusu_gec, test_c_gec_uyanis,
            test_d_erken_uyanis, test_e_uyku_atlandi, test_f_gece_bolunmesi,
            test_g1_erken_uyanma_sekerleme, test_g2_erken_sonra_tekrar_uyudu,
            test_g3_bes_elli, test_g4_alti_bes, test_g5_gec_uyanis_ust_sinir_yok,
-           test_g6_sekerleme_gercek_kayit, test_g7_ertesi_gun_sablona_doner,
+           test_g6_erken_uyanma_gercek_kayit, test_g7_ertesi_gun_sablona_doner,
+    test_s1_acik_yok_sekerleme_yok, test_s2_acik_var_aksam_sekerlemesi,
+    test_s3_yatisa_uc_saat_varsa_altmis_dk,
+    test_s4_tek_uyku_kisa_aksam_sekerlemesi,
            test_h_kayit_yok, test_i_varsayim_bozulur,
            test_j_gecmise_donuk, test_k_sleep_tipi_karismasi, test_l_birikme_yok,
            test_m_yatis_tavani, test_n_idempotans, test_o_batch_tetikler,
