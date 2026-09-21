@@ -1926,6 +1926,11 @@ def egitim_gunu(training_started_at: date | None,
     return (today - training_started_at).days + 1
 
 
+# adaptation.regresyon.asama — kart tipinin KISA adı (mobil switch'i için).
+REGRESYON_ASAMA = {"kendi_donuyor_mu": "soru", "devam_45": "devam",
+                   "tibbi_yonlendirme": "tibbi"}
+
+
 def regresyon_karti(training_started_at: date | None,
                     kendi_donuyor: bool | None,
                     today: date | None = None) -> dict:
@@ -2130,13 +2135,15 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
     }
 
     # --- Regresyon katmanı: gün planından BAĞIMSIZ, yalnız BAYRAK -----------
-    # Otomatik hiçbir şey üretilmez; mobil kullanıcıya "Programı baştan başlatmak
-    # ister misiniz?" kartını gösterir, onay gelirse /plans/generate çağırır.
+    # Otomatik hiçbir şey üretilmez. v1.4: mobil `regresyon_karti`'nı gösterir,
+    # annenin cevabı POST /plans/regresyon-cevap ile geri döner.
     regression, reg_reasons = detect_regression(training_completed_at, ozet, today)
+    _kart = None
     if regression:
         result["regression_detected"] = True
         kart = regresyon_karti(training_started_at, regresyon_kendi_donuyor, today)
-        result["regresyon_karti"] = kart if kart["tip"] else None
+        _kart = kart if kart["tip"] else None
+        result["regresyon_karti"] = _kart
         reasons.extend(reg_reasons)
 
     # --- Yaş bandı ihlali → TAM YENİDEN ÜRETİM (K8: mevcut haliyle korundu) --
@@ -2154,6 +2161,13 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
                         now_minute, gun=today, bucket_params=bucket_params)
     result["schedule"] = gun["schedule"]
     result["adaptation"] = gun["adaptation"]
+    # Aşama gün hesabının izine de düşer: recompute_day regresyonu bilmez, bu
+    # yüzden alanı None kurar ve burada doldurulur.
+    if _kart:
+        result["adaptation"]["regresyon"] = {
+            "asama": REGRESYON_ASAMA[_kart["tip"]], "tip": _kart["tip"],
+            "egitim_gunu": _kart["egitim_gunu"],
+            "kirkbes_gun_doldu": _kart["kirkbes_gun_doldu"]}
     reasons.extend(gun["adaptation"]["uyarilar"])
 
     # --- K9: bugünün TOPLAM uykusu bandın ihtiyacını karşılıyor mu? ----------

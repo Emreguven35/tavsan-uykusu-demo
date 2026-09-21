@@ -270,17 +270,21 @@ def _fail_loglar(gece: int) -> list:
     return out
 
 
-_PLAN = {"schedule": [
-    {"key": "wake", "title": "Uyanma", "time": "07:00", "type": "wake"},
-    {"key": "bedtime", "title": "Gece uykusu", "time": "20:00", "type": "sleep"},
-]}
-_BUCKET = {"yas_ay": 9.0}
+# 8 aylık bant (test_plan_adapter ile aynı gerçek KB değerleri) — çizelgeyi
+# motorun kendisi kursun, yoksa bant ihlali sanılıp erken dönülür.
+_BUCKET = {
+    "uyaniklik_penceresi": {"RESMI_DEGER_genel_kullanim": "2.5 - 3.5 Saat"},
+    "uyku_sayisi": {"RESMI_DEGER": "2-3"},
+    "gunduz_uyku_total": "2.5-3.5 Saat",
+    "yatma_vakti": "18:00 - 20:00",
+}
+_PLAN = {"schedule": pa.build_schedule(_BUCKET, 7 * 60),
+         "baseline_night_wakes": 2}
 _DONE = TODAY - timedelta(days=13)          # eğitim 13 gün önce bitti
 _BASLADI = TODAY - timedelta(days=27)       # 28. gün → 45 dolmadı
 
 _a1 = pa.adapt(_PLAN, _BUCKET, _fail_loglar(3), training_completed_at=_DONE,
-               training_started_at=_BASLADI, today=TODAY, now_minute=22 * 60,
-               yas_ay=9.0)
+               training_started_at=_BASLADI, today=TODAY, now_minute=22 * 60)
 check("5) Regresyon + cevap yok → 1. kademe kartı",
       _a1["regression_detected"] is True
       and (_a1["regresyon_karti"] or {}).get("tip") == "kendi_donuyor_mu",
@@ -291,34 +295,44 @@ check("5a) Eğitim günü ve 45 gün bayrağı sonuçta VAR",
 
 _a2 = pa.adapt(_PLAN, _BUCKET, _fail_loglar(3), training_completed_at=_DONE,
                training_started_at=_BASLADI, regresyon_kendi_donuyor=True,
-               today=TODAY, now_minute=22 * 60, yas_ay=9.0)
+               today=TODAY, now_minute=22 * 60)
 check("5b) Anne 'evet' dediyse regresyon görülse bile kart YOK",
       _a2["regression_detected"] is True and _a2["regresyon_karti"] is None,
       str(_a2["regresyon_karti"]))
 
 _a3 = pa.adapt(_PLAN, _BUCKET, _fail_loglar(3), training_completed_at=_DONE,
                training_started_at=_BASLADI, regresyon_kendi_donuyor=False,
-               today=TODAY, now_minute=22 * 60, yas_ay=9.0)
+               today=TODAY, now_minute=22 * 60)
 check("5c) 'hayır' → devam_45 kartı",
       (_a3["regresyon_karti"] or {}).get("tip") == "devam_45",
       str(_a3["regresyon_karti"]))
 
 _a4 = pa.adapt(_PLAN, _BUCKET, _fail_loglar(3), training_completed_at=_DONE,
                training_started_at=TODAY - timedelta(days=60),
-               regresyon_kendi_donuyor=False, today=TODAY, now_minute=22 * 60,
-               yas_ay=9.0)
+               regresyon_kendi_donuyor=False, today=TODAY, now_minute=22 * 60)
 check("5d) 45 gün dolmuşsa 'hayır' → tıbbi yönlendirme",
       (_a4["regresyon_karti"] or {}).get("tip") == "tibbi_yonlendirme"
       and _a4["kirkbes_gun_doldu"] is True, str(_a4["regresyon_karti"]))
 
 _a5 = pa.adapt(_PLAN, _BUCKET, [], training_completed_at=_DONE,
-               training_started_at=_BASLADI, today=TODAY, now_minute=22 * 60,
-               yas_ay=9.0)
+               training_started_at=_BASLADI, today=TODAY, now_minute=22 * 60)
 check("5e) Regresyon YOKSA kart da YOK",
       _a5["regression_detected"] is False and _a5["regresyon_karti"] is None,
       str(_a5["regresyon_karti"]))
 check("5f) adapt() sonucunda eski bayrak YOK",
       "restart_program_suggested" not in _a1, str(sorted(_a1.keys())))
+
+# Aşama gün hesabının izine de düşer (mobil tek yerden okuyabilsin).
+check("5g) adaptation.regresyon aşamayı taşıyor",
+      (_a1["adaptation"]["regresyon"] or {}).get("asama") == "soru"
+      and (_a3["adaptation"]["regresyon"] or {}).get("asama") == "devam"
+      and (_a4["adaptation"]["regresyon"] or {}).get("asama") == "tibbi",
+      f'{_a1["adaptation"]["regresyon"]} | {_a3["adaptation"]["regresyon"]} '
+      f'| {_a4["adaptation"]["regresyon"]}')
+check("5h) Regresyon yoksa adaptation.regresyon None",
+      _a5["adaptation"]["regresyon"] is None
+      and _a2["adaptation"]["regresyon"] is None,
+      f'{_a5["adaptation"]["regresyon"]} | {_a2["adaptation"]["regresyon"]}')
 
 
 # =============================================================================
