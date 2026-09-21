@@ -42,6 +42,8 @@ os.environ["ENVIRONMENT"] = "development"
 os.environ["MAIL_PROVIDER"] = "disabled"
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy")
 os.environ["ELEVENLABS_API_KEY"] = "test-key"
+# v2.3 — ses paketi depoya yazılıyor; testler proje klasörünü kirletmesin.
+os.environ["MEDIA_ROOT"] = str(Path(tempfile.gettempdir()) / "voice_limit_medya")
 # /voice/clone artik premium kapisi arkasinda (deps.require_premium). Beta
 # suresince kapiyi acan sey BETA_MODE; bu dosya aylik LIMITI test ediyor,
 # kapiyi degil (kapi: tests/test_premium_kapisi.py).
@@ -52,6 +54,7 @@ from api.db import Base, engine                        # noqa: E402
 from api.models import VoiceProfile                    # noqa: E402
 from api.routers import voice as voice_router          # noqa: E402
 from api.services import voice as voice_svc            # noqa: E402
+from api.services import voice_uretim                  # noqa: E402
 
 results: list[tuple[str, bool, str]] = []
 
@@ -82,6 +85,10 @@ def fake_voice_audio(voice_id, text, profil=None, user_id=None):
     return {"audio_url": f"/audio/{voice_id}.mp3", "cached": False, "profile": "masal"}
 
 
+# v2.3: /voice/clone paket üretimini arka plana atıyor. Bu suite ses paketini
+# ÖLÇMÜYOR (aylık limiti ölçüyor) ve üretim iş parçacığı gerçek ElevenLabs'e
+# çıkardı — kuyruk kapatılıyor.
+voice_uretim.kuyruga_al = lambda pid: None
 voice_svc.clone_voice = fake_clone_voice
 voice_svc.delete_voice = fake_delete_voice
 voice_router.voice_svc = voice_svc
@@ -206,27 +213,56 @@ try:
     _son_klon = {p.elevenlabs_voice_id: p.last_cloned_at for p in _profiller}
 finally:
     _db.close()
-check("5c) Eski satır 'replaced', yeni satır 'ready'",
-      _durumlar.get("voice-1") == "replaced" and _durumlar.get("voice-2") == "ready",
-      str(_durumlar))
+# v2.3: yeni satır artık "ready" DEĞİL "cloning" ile açılıyor — paket arka
+# planda üretilecek. Eski satırın voice_id'si de NULL'lanıyor (ses silindi),
+# bu yüzden anahtar None olarak görünür.
+check("5c) Eski satır 'replaced', yeni satır 'cloning' (üretim kuyrukta)",
+      _durumlar.get("voice-2") == "cloning"
+      and "replaced" in _durumlar.values(), str(_durumlar))
 check("5d) Yeni satırda last_cloned_at DOLU",
       _son_klon.get("voice-2") is not None, str(_son_klon))
 
 
 # =============================================================================
-# 9) 'replaced' voiceId ile /generate → 410
+# 9) v2.3 — /generate ÜRETİM YAPMAZ: hazırsa imzalı URL, değilse 409
 # =============================================================================
+# v2.2'de bu bölüm "silinmiş voiceId → 410" kuralını ölçüyordu. v2.3'te istek
+# gövdesindeki voiceId'nin bir anlamı KALMADI: paket her zaman ÇAĞIRANIN kendi
+# profilinden okunuyor, dolayısıyla başkasının voiceId'si zaten işe yaramaz.
 r_gen = client.post("/api/v1/voice/generate", headers=H(t1),
-                    json={"voiceId": "voice-1", "text": "merhaba"})
-check("9a) Silinmiş (replaced) ses ile üretim → 410",
-      r_gen.status_code == 410, f"{r_gen.status_code} {r_gen.text[:160]}")
-check("9b) 410 mesajı güncel sesi nereden alacağını söylüyor",
-      "voice-status" in r_gen.text, r_gen.text[:160])
+                    json={"voiceId": "voice-1", "storyId": "ninni_dandini"})
+check("9a) Paket hazır değilken → 409 (410 değil: içerik var, hazır değil)",
+      r_gen.status_code == 409, f"{r_gen.status_code} {r_gen.text[:160]}")
+check("9b) Mesaj Türkçe ve ne olduğunu söylüyor",
+      "hazır değil" in r_gen.json().get("detail", ""), r_gen.text[:160])
+
+# Paket hazır hâle getirilince aynı uç imzalı bağlantı döner.
+from api.services import storage as _storage                       # noqa: E402
+from api.models import VoiceAudio as _VA                           # noqa: E402
+
+_db = SessionLocal()
+try:
+    # `created_at` SANİYE hassasiyetinde; aynı saniyede açılmış iki profil
+    # berabere kalıp sıralamayı rastgeleleştiriyor (bkz. _son_profil docstring).
+    # Router hangi profili seçiyorsa testin de ONU seçmesi gerekiyor.
+    _p = (_db.query(VoiceProfile)
+          .filter(VoiceProfile.user_id == uid_of(t1),
+                  VoiceProfile.status != "replaced").first())
+    _yol = _storage.ses_yolu(_p.user_id, _p.id, "ninni_dandini")
+    _storage.depo().yaz(_yol, b"ID3\x04\x00" + b"\x00" * 100)
+    _db.add(_VA(voice_profile_id=_p.id, content_id="ninni_dandini",
+                storage_path=_yol, bytes=105))
+    _db.commit()
+finally:
+    _db.close()
 
 r_gen2 = client.post("/api/v1/voice/generate", headers=H(t1),
-                     json={"voiceId": "voice-2", "text": "merhaba"})
-check("9c) GÜNCEL ses ile üretim çalışıyor (gerileme yok)",
-      r_gen2.status_code == 200, f"{r_gen2.status_code} {r_gen2.text[:160]}")
+                     json={"voiceId": "voice-2", "storyId": "ninni_dandini"})
+check("9c) Hazır içerik → 200 + imzalı bağlantı",
+      r_gen2.status_code == 200 and "/media/" in r_gen2.json().get("audio_url", ""),
+      f"{r_gen2.status_code} {r_gen2.text[:160]}")
+check("9d) cached=True (üretim yapılmadı)",
+      r_gen2.json().get("cached") is True, r_gen2.text[:160])
 
 
 # =============================================================================

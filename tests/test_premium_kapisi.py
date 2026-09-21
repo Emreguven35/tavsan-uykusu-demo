@@ -46,6 +46,7 @@ os.environ["MAIL_PROVIDER"] = "disabled"
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy")
 os.environ["ELEVENLABS_API_KEY"] = "test-key"
 os.environ["ELEVENLABS_VOICE_ID"] = "ANLATICI_SESI"
+os.environ["MEDIA_ROOT"] = str(Path(tempfile.gettempdir()) / "premium_medya")
 os.environ["BETA_MODE"] = "true"                  # bu süreç beta modunda
 os.environ.pop("BETA_PREMIUM_ALL", None)
 
@@ -54,6 +55,8 @@ from api.db import Base, SessionLocal, engine          # noqa: E402
 from api.models import VoiceProfile                    # noqa: E402
 from api.routers import voice as voice_router          # noqa: E402
 from api.services import voice as voice_svc            # noqa: E402
+from api.services import storage as _storage           # noqa: E402
+from api.services import voice_uretim as _vu           # noqa: E402
 
 results: list[tuple[str, bool, str]] = []
 
@@ -94,6 +97,9 @@ def fake_voice_audio(voice_id, text, profil=None, user_id=None):
     return {"audio_url": f"/audio/{voice_id}.mp3", "cached": False, "profile": "masal"}
 
 
+# v2.3: /voice/clone üretimi arka plana atıyor; bu suite premium KAPISINI
+# ölçüyor, üretimi değil.
+_vu.kuyruga_al = lambda pid: None
 voice_svc.clone_voice = fake_clone_voice
 voice_svc.delete_voice = fake_delete_voice
 voice_svc.list_cloned_voices = fake_list_cloned_voices
@@ -130,9 +136,35 @@ def klonla(tok, ad="Ses"):
                        data={"name": ad})
 
 
+HAZIR_ICERIK = "ninni_dandini"
+
+
+def paketi_hazirla(tok):
+    """v2.3 — /voice/generate artık ÜRETMİYOR, hazır dosyayı sunuyor.
+
+    Premium kapısını `generate` üzerinden ölçebilmek için önce o kullanıcının
+    paketinde hazır bir içerik olmalı; yoksa kapı geçilse bile 409 döner."""
+    from api.models import VoiceAudio
+    db = SessionLocal()
+    try:
+        p = (db.query(VoiceProfile)
+             .filter(VoiceProfile.user_id == uid_of(tok),
+                     VoiceProfile.status != "replaced").first())
+        if p is None:
+            return None
+        yol = _storage.ses_yolu(p.user_id, p.id, HAZIR_ICERIK)
+        _storage.depo().yaz(yol, b"ID3" + b"fake" * 13)
+        db.add(VoiceAudio(voice_profile_id=p.id, content_id=HAZIR_ICERIK,
+                          storage_path=yol, bytes=55))
+        db.commit()
+        return yol
+    finally:
+        db.close()
+
+
 def uret(tok, voice_id):
     return client.post("/api/v1/voice/generate", headers=H(tok),
-                       json={"voiceId": voice_id, "text": "Bir varmış bir yokmuş"})
+                       json={"voiceId": voice_id, "storyId": HAZIR_ICERIK})
 
 
 def hak_ver(tok):
@@ -162,6 +194,7 @@ check("1a) BETA_MODE=true: ücretsiz hesapla /voice/clone → 200",
       r.status_code == 200, f"{r.status_code} {r.text[:160]}")
 _vid = r.json().get("voiceId")
 
+paketi_hazirla(t_beta)
 rg = uret(t_beta, _vid)
 check("1b) BETA_MODE=true: ücretsiz hesapla /voice/generate → 200",
       rg.status_code == 200, f"{rg.status_code} {rg.text[:160]}")
@@ -384,6 +417,7 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy")
 os.environ["ELEVENLABS_API_KEY"] = "test-key"
 os.environ.pop("BETA_MODE", None)               # KAPALI
 os.environ.pop("BETA_PREMIUM_ALL", None)
+os.environ["MEDIA_ROOT"] = str(Path(tempfile.gettempdir()) / "premium_medya_alt")
 
 from api import tts
 from api.db import Base, SessionLocal, engine
@@ -392,6 +426,8 @@ from api.routers import voice as voice_router
 from api.services import voice as voice_svc
 
 voice_svc.clone_voice = lambda *a, **k: {"ok": True, "voice_id": "VS1"}
+from api.services import voice_uretim as _vu2
+_vu2.kuyruga_al = lambda pid: None
 voice_svc.delete_voice = lambda v: {"ok": True, "error": None, "status": 200}
 voice_svc.list_cloned_voices = lambda: {"ok": True, "voices": []}
 voice_router.voice_svc = voice_svc
@@ -415,7 +451,7 @@ rc = c.post("/api/v1/voice/clone", headers=H(tok),
             files={"audio": ("s.mp3", io.BytesIO(b"A" * 900), "audio/mpeg")},
             data={"name": "Ses"})
 rg = c.post("/api/v1/voice/generate", headers=H(tok),
-            json={"voiceId": "VS1", "text": "merhaba"})
+            json={"voiceId": "VS1", "storyId": "ninni_dandini"})
 st = c.get("/api/v1/subscriptions/status", headers=H(tok)).json()
 
 # Aktif abonelikli kullanıcı: kapı aboneliği de tanımalı
@@ -425,12 +461,21 @@ s = SessionLocal()
 try:
     s.add(Subscription(user_id=uid, platform="ios", product_id="premium_monthly",
                        status="active", receipt_data="A1b2C3real=="))
-    s.add(VoiceProfile(user_id=uid, elevenlabs_voice_id="VS1", status="ready"))
+    prof = VoiceProfile(user_id=uid, elevenlabs_voice_id="VS1", status="ready")
+    s.add(prof)
+    s.commit()
+    # v2.3 — generate hazır dosyayı sunuyor; kapıyı ölçmek için paket hazır olmalı.
+    from api.models import VoiceAudio
+    from api.services import storage as _st_depo
+    yol = _st_depo.ses_yolu(uid, prof.id, "ninni_dandini")
+    _st_depo.depo().yaz(yol, b"ID3" + b"fake" * 13)
+    s.add(VoiceAudio(voice_profile_id=prof.id, content_id="ninni_dandini",
+                     storage_path=yol, bytes=55))
     s.commit()
 finally:
     s.close()
 rg2 = c.post("/api/v1/voice/generate", headers=H(tok2),
-             json={"voiceId": "VS1", "text": "merhaba"})
+             json={"voiceId": "VS1", "storyId": "ninni_dandini"})
 st2 = c.get("/api/v1/subscriptions/status", headers=H(tok2)).json()
 
 import json

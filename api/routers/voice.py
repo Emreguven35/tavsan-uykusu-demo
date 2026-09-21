@@ -1,14 +1,18 @@
 """
 voice router — /api/v1/voice/*
 
-- POST /clone: multipart ses (30sn) → ElevenLabs voice clone → {voiceId, sampleUrl};
-  voice_profiles'a kaydeder + kısa bir örnek seslendirir (sampleUrl).
-- GET /voice-status: kullanıcının klon durumu.
-- GET /stories: masal/ninni kataloğu (5 masal + 3 ninni).
-- POST /generate: {voiceId, text|storyId, profile?} → ElevenLabs flash v2.5 + TTS
-  metin işleme → {audio_url, cached, profile}. Ses data/audio_cache'e yazılır,
-  /audio ile sunulur. Profil varsayılanı 'masal' (yavaş, duraklamalı anlatım);
-  'sohbet' normal hızdır (bkz. tts.SES_PROFILLERI).
+v2.3 — "ÜRET VE BIRAK": ElevenLabs'te klon sesi KALICI TUTULMAZ.
+  POST /clone → ses klonlanır → paket ARKA PLANDA üretilip depoya yazılır →
+  ElevenLabs'teki ses SİLİNİR → anne kendi depomuzdan dinler.
+Sebep: hesabın 10 klon slotu var, 94+ kullanıcı. Slot artık yalnız üretim
+süresince (dakikalar) tutuluyor.
+
+- POST /clone: multipart ses (30sn) → ElevenLabs voice clone → status=cloning,
+  sonra generating. DB yazımı başarısızsa ElevenLabs sesi HEMEN silinir.
+- GET /voice-status: status + progress{done,total} + hazır içerik sayısı.
+- GET /stories: katalog + her içerik için "hazır mı" + imzalı bağlantı.
+- POST /generate: ÜRETİM YAPMAZ. Hazır dosyanın 1 saatlik imzalı bağlantısını
+  döner; hazır değilse 409. Yanıt şeması eski istemciler için AYNI.
 
 Hepsi auth korumalı. Dış servis hatası (key yok/kota) → anlamlı JSON + uygun kod.
 """
@@ -26,11 +30,15 @@ from api import tts
 from api.db import get_db
 from api.deps import get_current_user, require_premium
 from api.models import User, VoiceProfile
+from api.models import VoiceAudio
 from api.schemas.voice import (
-    StoriesResp, VoiceCloneResp, VoiceGenerateReq, VoiceGenerateResp, VoiceStatusResp,
+    Progress, StoriesResp, StoryItem, VoiceCloneResp, VoiceGenerateReq,
+    VoiceGenerateResp, VoiceStatusResp,
 )
+from api.services import storage
 from api.services import usage as usage_svc
 from api.services import voice as voice_svc
+from api.services import voice_paket, voice_uretim
 
 logger = logging.getLogger("tavsan.voice.router")
 router = APIRouter(prefix="/voice", tags=["voice"])
@@ -183,25 +191,43 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
     usage_svc.kaydet(usage_svc.SERVIS_ELEVENLABS, usage_svc.OP_VOICE_CLONE,
                      model="voice-clone", user_id=user.id)
 
-    # Kısa örnek seslendir (klonun çalıştığının kanıtı + mobil önizleme).
-    sample = tts.voice_audio(voice_id, SAMPLE_TEXT, user_id=user.id)
-    sample_url = sample.get("audio_url")
+    # --- DB kaydı + ROLLBACK (Faz 2.1) -----------------------------------
+    # Satır açılamazsa ElevenLabs'teki ses ÖKSÜZ kalır: kimse ona sahip
+    # olmadığı için silinmez, slotu süresiz tutar. O yüzden yazım başarısız
+    # olursa ses HEMEN silinir.
+    try:
+        profile = VoiceProfile(
+            user_id=user.id, elevenlabs_voice_id=voice_id, sample_url=None,
+            status="cloning", progress_done=0,
+            progress_total=voice_paket.paket_boyutu(),
+            last_cloned_at=datetime.now(timezone.utc))
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+    except Exception:
+        db.rollback()
+        logger.exception("Voice profil satırı yazılamadı — ElevenLabs sesi "
+                         "geri alınıyor: user=%s voice_id=%s", user.id, voice_id)
+        voice_svc.delete_voice(voice_id)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail=SES_SERVIS_MESAJ)
 
-    profile = VoiceProfile(user_id=user.id, elevenlabs_voice_id=voice_id,
-                           sample_url=sample_url, status="ready",
-                           last_cloned_at=datetime.now(timezone.utc))
-    db.add(profile)
-    db.commit()
-    logger.info("Voice clone tamam: user=%s voice_id=%s", user.id, voice_id)
+    logger.info("Voice clone tamam: user=%s voice_id=%s profil=%s",
+                user.id, voice_id, profile.id)
 
-    # ESKİ SESİ TEMİZLE — yeni klon KAYDEDİLDİKTEN sonra. Sıra önemli: silme
-    # önce yapılsaydı ve klonlama sonradan patlasaydı kullanıcı sessiz kalırdı.
-    # Silme BEST-EFFORT: başarısız olursa yeni ses yine geçerli (bkz. delete_voice).
-    _eski_sesleri_temizle(db, user, yeni_voice_id=voice_id)
-    return VoiceCloneResp(voiceId=voice_id, sampleUrl=sample_url)
+    # ESKİ SESİ ve ESKİ PAKETİ TEMİZLE (Faz 4.3 — tek aktif ses).
+    _eski_sesleri_temizle(db, user, yeni_voice_id=voice_id,
+                          yeni_profil_id=profile.id)
+
+    # Paket üretimini arka plana al (en fazla 2 eşzamanlı).
+    voice_uretim.kuyruga_al(profile.id)
+    # sampleUrl artık ÜRETİLMİYOR: ses dakikalar içinde silineceği için ayrı bir
+    # örnek dosya hem kota harcar hem yanıltıcı olur. Paketin kendisi örnektir.
+    return VoiceCloneResp(voiceId=voice_id, sampleUrl=None)
 
 
-def _eski_sesleri_temizle(db: Session, user: User, yeni_voice_id: str) -> None:
+def _eski_sesleri_temizle(db: Session, user: User, yeni_voice_id: str,
+                          yeni_profil_id=None) -> None:
     """Kullanıcının ÖNCEKİ klon seslerini ElevenLabs'ten sil, satırı işaretle.
 
     Neden: her klon ElevenLabs'te bir slot tutuyor ve ücretlendiriliyor; ayrıca
@@ -220,87 +246,141 @@ def _eski_sesleri_temizle(db: Session, user: User, yeni_voice_id: str) -> None:
         sonuc = voice_svc.delete_voice(eski.elevenlabs_voice_id)
         if sonuc.get("ok"):
             eski.status = "replaced"
-            logger.info("Eski klon sesi silindi: user=%s voice_id=%s",
-                        user.id, eski.elevenlabs_voice_id)
+            eski.elevenlabs_voice_id = None
+            logger.info("Eski klon sesi silindi: user=%s", user.id)
         else:
             logger.warning("Eski klon sesi SİLİNEMEDİ (user=%s voice_id=%s): %s "
                            "— slot/ücret birikebilir, elle temizlik gerekebilir",
                            user.id, eski.elevenlabs_voice_id, sonuc.get("error"))
-    if eskiler:
+
+    # Faz 4.3 — TEK AKTİF SES: eski paketlerin dosyaları da gider. Aksi hâlde
+    # anne yeni ses kaydettikten sonra eski sesiyle üretilmiş masalları
+    # dinlemeye devam eder ve depo sonsuza kadar büyür.
+    eski_profiller = (db.query(VoiceProfile)
+                      .filter(VoiceProfile.user_id == user.id,
+                              VoiceProfile.id != yeni_profil_id)
+                      .all()) if yeni_profil_id is not None else []
+    for eski in eski_profiller:
+        try:
+            silinen = storage.depo().klasor_sil(
+                storage.ses_klasoru(user.id, eski.id))
+            if silinen:
+                logger.info("Eski ses paketi silindi: profil=%s dosya=%d",
+                            eski.id, silinen)
+        except Exception:
+            logger.exception("Eski ses paketi silinemedi: profil=%s", eski.id)
+        db.query(VoiceAudio).filter(
+            VoiceAudio.voice_profile_id == eski.id).delete()
+    if eskiler or eski_profiller:
         db.commit()
 
 
 @router.get("/voice-status", response_model=VoiceStatusResp)
 def voice_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Faz 3.1 — paket durumu + ilerleme.
+
+    `status` mobilin ekran kararını verir:
+      cloning/generating → "hazırlanıyor" + progress çemberi
+      ready/released     → dinlenebilir
+      failed             → "olmadı, tekrar dene" (hak zaten iade edildi)"""
     profile = _son_profil(db, user)
     # Klonlama hakkı POST /clone ile AYNI fonksiyondan hesaplanıyor: mobilin
     # gösterdiği tarih ile sunucunun uyguladığı sınır ayrışamaz.
     durum = _klon_durumu(profile)
     if profile is None:
-        return VoiceStatusResp(status="none", can_clone=True)
+        return VoiceStatusResp(status="none", can_clone=True,
+                               progress=Progress(done=0, total=0))
+    hazir = (db.query(VoiceAudio)
+             .filter(VoiceAudio.voice_profile_id == profile.id).count())
     return VoiceStatusResp(
         status=profile.status, voiceId=profile.elevenlabs_voice_id,
         sampleUrl=profile.sample_url, created_at=profile.created_at,
         last_cloned_at=_son_klonlama(profile),
         can_clone=durum["can_clone"],
         next_clone_available_at=durum["next_clone_available_at"],
-        retry_after_days=durum["retry_after_days"])
+        retry_after_days=durum["retry_after_days"],
+        progress=Progress(done=profile.progress_done or 0,
+                          total=profile.progress_total or 0),
+        hazir_icerik=hazir,
+        error=profile.error,
+        released_at=profile.released_at)
 
 
 @router.get("/stories", response_model=StoriesResp)
-def stories(user: User = Depends(get_current_user)):
-    """Masal/ninni kataloğu. Metinler /generate'e storyId ile verilir (yanıtta değil)."""
+def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Faz 3.2 — katalog + her içerik için "hazır mı" + imzalı bağlantı.
+
+    Metinler yanıtta DÖNMEZ (v1'den beri böyle). Hazır içerikler 1 saatlik
+    imzalı bağlantı taşır; bağlantı her istekte YENİDEN üretilir, saklanmaz."""
     cat = voice_svc.load_stories()
-    return StoriesResp(masallar=cat.get("masallar", []),
-                       ninniler=cat.get("ninniler", []))
+    profile = _son_profil(db, user)
+    hazir_yollar: dict[str, str] = {}
+    if profile is not None:
+        hazir_yollar = {
+            a.content_id: a.storage_path
+            for a in db.query(VoiceAudio).filter(
+                VoiceAudio.voice_profile_id == profile.id).all()}
+    paket_idler = [x["id"] for x in voice_paket.paket_icerikleri()]
+    uretilemeyen = set()
+    if profile is not None and (profile.error or "").startswith("Üretilemedi:"):
+        uretilemeyen = {p.strip() for p in
+                        profile.error.split(":", 1)[1].split(",") if p.strip()}
+
+    def _item(x: dict) -> StoryItem:
+        yol = hazir_yollar.get(x["id"])
+        if yol:
+            durum = "hazir"
+        elif x["id"] in uretilemeyen:
+            durum = "uretilemedi"
+        else:
+            durum = "hazirlaniyor"
+        return StoryItem(
+            id=x["id"], type=x.get("type", ""), title=x.get("title", ""),
+            duration_hint=x.get("duration_hint"),
+            hazir=bool(yol), durum=durum,
+            audio_url=storage.imzali_url(yol) if yol else None)
+
+    return StoriesResp(
+        masallar=[_item(x) for x in cat.get("masallar", [])],
+        ninniler=[_item(x) for x in cat.get("ninniler", [])],
+        paket=voice_paket.paket_adi(), paket_icerikleri=paket_idler)
 
 
-@router.post("/generate", response_model=VoiceGenerateResp)
+@router.post("/generate", response_model=VoiceGenerateResp,
+             responses={409: {"description": "İçerik henüz hazır değil"}})
 def generate(req: VoiceGenerateReq, db: Session = Depends(get_db),
              user: User = Depends(require_premium)):
-    # Faz G3: voiceId SAHİPLİK doğrulaması. Önceden gövdedeki voiceId doğrudan
-    # ElevenLabs'e gidiyordu; başkasının voice_id'sini bilen onun (klonlu, biyometrik)
-    # sesiyle üretim yaptırıp kredi harcatabiliyordu. Artık voiceId, çağıranın kendi
-    # voice_profiles kaydıyla eşleşmeli; yoksa 403.
-    sahip = (db.query(VoiceProfile)
-             .filter(VoiceProfile.user_id == user.id,
-                     VoiceProfile.elevenlabs_voice_id == req.voiceId)
-             .first())
-    if sahip is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Bu ses profili size ait değil")
-    # Yenisi alınmış ses ARTIK ELEVENLABS'TE YOK (eski klon siliniyor). Eski
-    # voiceId'yi elinde tutan istemci buraya gelirse anlamsız bir upstream
-    # hatası yerine net bir yanıt alsın.
-    if sahip.status == "replaced":
+    """Faz 3.3 — ÜRETİM YAPMAZ; hazır dosyanın imzalı bağlantısını döner.
+
+    v2.3'te ses paketi klonlamadan hemen sonra toplu üretiliyor ve ElevenLabs'teki
+    klon sesi siliniyor, dolayısıyla istek anında üretim MÜMKÜN DEĞİL. Yanıt
+    şeması eski istemciler kırılmasın diye AYNI kaldı (`cached` her zaman True).
+
+    Hazır değilse 409 — 404 DEĞİL: içerik var, yalnız henüz üretilmedi."""
+    profile = _son_profil(db, user)
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Henüz ses kaydınız yok")
+    # Eski istemciler gövdede voiceId gönderiyor. Ses artık silindiği için
+    # eşleşme ZORUNLU DEĞİL; ama başkasının voiceId'siyle gelen istek de
+    # kabul edilmemeli: paket her zaman ÇAĞIRANIN kendi profilinden okunur.
+    content_id = req.storyId
+    if not content_id:
+        # Eski istemci düz metin gönderdiyse hangi içerik olduğunu bilemeyiz.
         raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail=("Bu ses kaydı yenilendiği için artık kullanılamıyor. "
-                    "Güncel ses kimliğini /voice/voice-status ile alın."))
-
-    # storyId verildiyse katalogdan metni çöz; yoksa doğrudan text.
-    if req.storyId:
-        story = voice_svc.find_story(req.storyId)
-        if story is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                                detail="Masal/ninni bulunamadı")
-        text = story["text"]
-    else:
-        text = req.text
-
-    # Masal/ninni anlatımı varsayılan: yavaş, sakin, duraklamalı (tts.SES_PROFILLERI).
-    # İstemci 'sohbet' göndererek normal hızı seçebilir (şema doğruluyor).
-    profil = req.profile or tts.MASAL_PROFILI
-
-    result = tts.voice_audio(req.voiceId, text, profil=profil, user_id=user.id)
-    if result.get("audio_url") is None:
-        # TTS anahtarı yok / upstream hata → ses üretilemedi.
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail=SES_SERVIS_MESAJ)
-    logger.info("Voice generate: user=%s voice=%s profil=%s cached=%s",
-                user.id, req.voiceId, profil, result["cached"])
-    return VoiceGenerateResp(audio_url=result["audio_url"],
-                             cached=result["cached"], profile=profil)
+            status_code=status.HTTP_409_CONFLICT,
+            detail=("Bu içerik henüz hazır değil. Ses paketiniz hazırlandığında "
+                    "masal ve ninniler listede görünecek."))
+    ses = (db.query(VoiceAudio)
+           .filter(VoiceAudio.voice_profile_id == profile.id,
+                   VoiceAudio.content_id == content_id)
+           .one_or_none())
+    if ses is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Bu içerik henüz hazır değil")
+    logger.info("Voice sunum: user=%s icerik=%s", user.id, content_id)
+    return VoiceGenerateResp(audio_url=storage.imzali_url(ses.storage_path),
+                             cached=True, profile=tts.MASAL_PROFILI)
 
 
 def _klon_hata_mesaji(r: dict) -> str:

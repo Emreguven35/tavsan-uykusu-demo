@@ -10,6 +10,7 @@ from api.models.sleep_plan import SleepPlan
 from api.models.subscription import Subscription
 from api.models.chat_message import ChatMessage
 from api.models.voice_profile import VoiceProfile
+from api.models.voice_audio import VoiceAudio
 from api.models.refresh_token import RefreshToken
 from api.models.password_reset_token import PasswordResetToken
 from api.models.push_token import PushToken
@@ -25,7 +26,7 @@ from api.models.api_usage import ApiUsage
 
 __all__ = [
     "User", "Baby", "SleepLog", "SilinenSleepLog", "SleepPlan",
-    "Subscription", "ChatMessage", "VoiceProfile",
+    "Subscription", "ChatMessage", "VoiceProfile", "VoiceAudio",
     "RefreshToken", "PasswordResetToken",
     "PushToken", "SentNotification",
     # Faz T — anne topluluğu

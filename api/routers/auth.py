@@ -214,6 +214,12 @@ def delete_account(db: Session = Depends(get_db),
     """KVKK silme hakkı: kullanıcı + ilişkili TÜM veriler (babies, logs, plans,
     subscriptions, chat, voice, tokens) cascade ile silinir."""
     user_id = user.id
+    # Faz 4.2 — cascade DB satırlarını siliyor ama depodaki MP3'leri ve
+    # ElevenLabs'te kalmış olabilecek klon sesini SİLMİYOR. Biyometrik veriden
+    # türetilmiş dosyalar hesap silindikten sonra diskte kalamaz.
+    from api.services import voice_temizlik
+    voice_temizlik.kullanici_seslerini_sil(db, user)
+
     db.delete(user)                      # relationship cascade + FK ON DELETE CASCADE
     db.commit()
     logger.info("Hesap silindi (KVKK): user_id=%s", user_id)

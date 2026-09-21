@@ -43,6 +43,8 @@ from api.routers import notifications # noqa: E402 — Faz 6.2 (push token + ter
 from api.routers import community      # noqa: E402 — Faz T (anne topluluğu)
 from api.routers import admin          # noqa: E402 — maliyet raporu (moderatör)
 from api.services import notifier     # noqa: E402 — Faz 6.2 (bildirim zamanlayıcısı)
+from api.services import storage       # noqa: E402 — medya deposu (ses paketleri)
+from api.services import voice_temizlik, voice_uretim  # noqa: E402 — Faz 4 (v2.3)
 
 # Yapılandırılmış logging: süre/durum/hata bilgisini tek biçimde ver.
 logging.basicConfig(
@@ -51,6 +53,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger("tavsan.api")
 settings = get_settings()
+
+# --- Günlük ses temizliği (Faz 4.1) -----------------------------------------
+# Ayrı bir zamanlayıcı: bildirim zamanlayıcısı dakikalık, bu günlük. Aynı
+# scheduler'a binmek iki işin ömrünü birbirine bağlardı.
+_ses_scheduler = None
+SES_TEMIZLIK_SAAT = 3            # UTC 03:00 — trafiğin en düşük olduğu saat
+
+
+def _ses_temizligi_baslat() -> bool:
+    global _ses_scheduler
+    if not settings.is_production or _ses_scheduler is not None:
+        return False
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+    except ImportError:
+        logger.warning("APScheduler yok — günlük ses temizliği devre dışı")
+        return False
+    _ses_scheduler = BackgroundScheduler(timezone="UTC")
+    _ses_scheduler.add_job(voice_temizlik.gunluk_temizlik, "cron",
+                           hour=SES_TEMIZLIK_SAAT, id="ses_temizlik",
+                           max_instances=1, coalesce=True)
+    _ses_scheduler.start()
+    logger.info("Günlük ses temizliği başladı (her gün %02d:00 UTC)",
+                SES_TEMIZLIK_SAAT)
+    return True
+
+
+def _ses_temizligi_durdur() -> None:
+    global _ses_scheduler
+    if _ses_scheduler is not None:
+        _ses_scheduler.shutdown(wait=False)
+        _ses_scheduler = None
+
 
 # --- Sürüm damgası -----------------------------------------------------------
 # NEDEN: sağlık kontrolünün 200 dönmesi YENİ KODUN CANLI OLDUĞUNU KANITLAMAZ —
@@ -61,7 +96,7 @@ settings = get_settings()
 # sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
 #
 # Sentry'den ÖNCE tanımlı olmak zorunda: release etiketi olarak oraya geçiyor.
-APP_VERSION = os.getenv("APP_VERSION", "v2.2.2")
+APP_VERSION = os.getenv("APP_VERSION", "v2.3")
 
 # Hata izleme — YALNIZ production + SENTRY_DSN. Uygulama nesnesi kurulmadan ÖNCE
 # başlatılır ki Starlette/FastAPI entegrasyonları middleware zincirini sarabilsin.
@@ -110,10 +145,23 @@ async def lifespan(app: FastAPI):
 
     # Bildirim zamanlayıcısı (Faz 6.2) — yalnız production'da başlar.
     notifier.start_scheduler()
+
+    # v2.3 — yarım kalmış ses paketi üretimleri kaldığı yerden devam eder.
+    # Bu olmadan restart, anneyi sonsuza kadar "hazırlanıyor" ekranında
+    # bırakırdı (Faz 2.6).
+    try:
+        voice_uretim.bekleyenleri_devam_ettir()
+    except Exception:
+        logger.exception("Yarım ses paketleri devam ettirilemedi")
+
+    # Günlük ses temizliği (Faz 4.1) — ElevenLabs'te artık ses bırakmayalım.
+    _ses_temizligi_baslat()
     try:
         yield
     finally:
         notifier.shutdown_scheduler()
+        voice_uretim.kapat()
+        _ses_temizligi_durdur()
 
 
 # Faz G4: production'da interaktif dokümantasyon + OpenAPI şeması KAPALI —
@@ -344,6 +392,27 @@ def avatar_session():
         "is_sandbox": r["is_sandbox"],
         "mode": r["mode"],
     }
+
+
+@app.get("/media/{yol:path}")
+def media(yol: str, exp: int = 0, sig: str = ""):
+    """İmzalı medya sunumu — ses paketleri (PRIVATE).
+
+    Dosyalar doğrudan servis EDİLMEZ: bağlantı `exp` (bitiş) + `sig` (HMAC)
+    taşır ve 1 saat sonra ölür. Kimlik doğrulama YOK — imzanın kendisi yetkidir;
+    böylece mobil oynatıcı Authorization başlığı taşımadan da çalabilir.
+
+    404/403 ayrımı bilinçli: geçersiz imzada dosyanın VAR OLUP OLMADIĞI
+    sızdırılmaz (önce imza, sonra dosya kontrol edilir)."""
+    if not storage.yol_guvenli_mi(yol):
+        raise HTTPException(status_code=400, detail="geçersiz yol")
+    if not storage.imza_gecerli_mi(yol, exp, sig):
+        raise HTTPException(status_code=403,
+                            detail="Bağlantının süresi doldu, listeyi yenileyin")
+    p = storage.yerel_dosya(yol)
+    if p is None:
+        raise HTTPException(status_code=404, detail="dosya bulunamadı")
+    return FileResponse(p, media_type="audio/mpeg")
 
 
 @app.get("/audio/{dosya}")

@@ -42,6 +42,7 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy")
 os.environ.pop("ELEVENLABS_API_KEY", None)          # G3'te mock'la yöneteceğiz
 os.environ.pop("BETA_PREMIUM_ALL", None)
 os.environ.pop("BETA_MODE", None)          # G5 'source=none' bekliyor
+os.environ["MEDIA_ROOT"] = str(Path(tempfile.gettempdir()) / "faz_g_medya")
 
 from fastapi.testclient import TestClient            # noqa: E402
 from sqlalchemy import text                          # noqa: E402
@@ -226,16 +227,36 @@ def test_g3():
     finally:
         dbs.close()
 
-    # Sahip olunmayan voiceId → 403
+    # v2.3 — /voice/generate ÜRETİM YAPMAZ; paket ÇAĞIRANIN kendi profilinden
+    # okunur. Bu, G3'ün koruduğu şeyi (başkasının klon sesiyle üretim) daha
+    # baştan imkânsız kılar: gövdedeki voiceId artık hiçbir şeye erişim vermez.
+    from api.models import VoiceAudio
+    from api.services import storage
+
     r_bad = client.post("/api/v1/voice/generate", headers=_auth(tok),
-                        json={"voiceId": "SOMEONE_ELSE_VOICE", "text": "Merhaba dünya"})
-    check("G3.1 sahip olunmayan voiceId → 403", r_bad.status_code == 403,
+                        json={"voiceId": "SOMEONE_ELSE_VOICE",
+                              "storyId": "ninni_dandini"})
+    check("G3.1 başkasının voiceId'si ses VERMİYOR (409, üretim yok)",
+          r_bad.status_code == 409,
           f"status={r_bad.status_code} body={r_bad.text[:120]}")
 
-    # Sahip olunan voiceId → 200
+    # Kendi paketi hazır olunca aynı uç imzalı bağlantı döner.
+    dbs = SessionLocal()
+    try:
+        prof = (dbs.query(VoiceProfile)
+                .filter(VoiceProfile.user_id == uid).first())
+        yol = storage.ses_yolu(uid, prof.id, "ninni_dandini")
+        storage.depo().yaz(yol, b"ID3\x04\x00" + b"\x00" * 50)
+        dbs.add(VoiceAudio(voice_profile_id=prof.id, content_id="ninni_dandini",
+                           storage_path=yol, bytes=55))
+        dbs.commit()
+    finally:
+        dbs.close()
+
     r_ok = client.post("/api/v1/voice/generate", headers=_auth(tok),
-                       json={"voiceId": "MY_OWN_VOICE", "text": "Merhaba dünya"})
-    check("G3.2 sahip olunan voiceId → 200", r_ok.status_code == 200,
+                       json={"voiceId": "MY_OWN_VOICE", "storyId": "ninni_dandini"})
+    check("G3.2 kendi hazır içeriği → 200 + imzalı bağlantı",
+          r_ok.status_code == 200 and "/media/" in r_ok.json().get("audio_url", ""),
           f"status={r_ok.status_code} body={r_ok.text[:120]}")
 
 
