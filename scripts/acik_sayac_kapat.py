@@ -40,6 +40,7 @@ Zaten yazılmış tam-16-saatlik kayıtlar `--duzelt-16saat` ile onarılır.
 
     railway ssh
     python scripts/acik_sayac_kapat.py --rapor
+    python scripts/acik_sayac_kapat.py --duzelt-gunduz-uzun
     python scripts/acik_sayac_kapat.py
     python scripts/acik_sayac_kapat.py --uygula
 
@@ -68,6 +69,13 @@ UYKU_TIPLERI = ("sleep", "nap")
 TERK_SAAT = 16                 # mutlak tavan: bundan uzun açık kayıt "terk edilmiş"
 ASGARI_DK = 60                 # kapanış başlangıcın gerisine düşerse
 TZ_OFFSET_MIN = 180            # UTC+3 — motorla aynı
+# --duzelt-gunduz-uzun: bu betiğin ÖNCEKİ sürümlerinin çalıştığı pencere.
+# v2.2'de gündüz başlayan `sleep` kayıtlarına GECE tavanı uygulanıyordu; kapanış
+# "sonraki kaydın başlangıcına" kadar uzayıp arka arkaya zincirlenmiş dev
+# gündüz uykuları üretti (ölçüldü: 7 kayıt / 4 bebek, 139–601 dk). Onarım
+# hedefini bu zaman damgasıyla ayırt ediyoruz: o koşularda dokunulan satırların
+# `updated_at`'i bu aralıkta, annenin kendi kayıtlarınınki değil.
+ONARIM_PENCERESI = ("2026-09-21T16:45:00+00:00", "2026-09-21T17:30:00+00:00")
 # Gece uykusu penceresi (yerel): bu saatten sonra ya da bu saatten önce başlayan
 # `sleep` kaydı gece uykusudur; arası gündüz uykusudur.
 GECE_BASLANGIC_DK = 18 * 60    # 18:00
@@ -172,6 +180,9 @@ def main():
                     help="Kaç günlük pencere taransın (varsayılan 7)")
     ap.add_argument("--rapor", action="store_true",
                     help="Yalnız sayımları yazdır (bozuk kayıt türleri dahil)")
+    ap.add_argument("--duzelt-gunduz-uzun", action="store_true",
+                    help="Bu betiğin önceki sürümünün GÜNDÜZ kayıtlarda "
+                         "bıraktığı aşırı uzun kapanışları K17 ile onar")
     ap.add_argument("--duzelt-16saat", action="store_true",
                     help="Daha önce TAM 16 saate kapatılmış kayıtları onar "
                          "(ilk sürümün bıraktığı yapay kayıtlar)")
@@ -186,6 +197,9 @@ def main():
             return
         if getattr(a, "duzelt_16saat", False):
             _duzelt_16saat(db, a.gun, a.uygula)
+            return
+        if getattr(a, "duzelt_gunduz_uzun", False):
+            _duzelt_gunduz_uzun(db, a.uygula)
             return
 
         adaylar = _adaylar(db, a.gun)
@@ -217,6 +231,60 @@ def main():
         print(f"\n{len(adaylar)} açık sayaç kaydı kapatıldı.")
     finally:
         db.close()
+
+
+def _duzelt_gunduz_uzun(db, uygula: bool) -> None:
+    """v2.2 temizliğinin GÜNDÜZ kayıtlarda bıraktığı uzun kapanışları onar.
+
+    Hedef: `updated_at`'i ONARIM_PENCERESI içinde olan, YEREL gündüz saatinde
+    (06:00-18:00) başlayan ve süresi bandın planlanan uyku süresini AŞAN
+    sleep/nap kayıtları. Yeni bitiş K17'nin kuralıdır: başlangıç + planlanan
+    süre.
+
+    Annenin KENDİ girdiği uzun kayıtlara dokunulmaz — onların `updated_at`'i
+    bu pencerede değil."""
+    bas_p = datetime.fromisoformat(ONARIM_PENCERESI[0])
+    bit_p = datetime.fromisoformat(ONARIM_PENCERESI[1])
+    rows = (db.query(SleepLog)
+            .filter(SleepLog.type.in_(UYKU_TIPLERI),
+                    SleepLog.ended_at.isnot(None))
+            .all())
+
+    plan = []
+    for r in rows:
+        guncel = _utc(r.updated_at)
+        if guncel is None or not (bas_p <= guncel <= bit_p):
+            continue
+        bas = _utc(r.started_at)
+        yerel = bas + timedelta(minutes=TZ_OFFSET_MIN)
+        yerel_dk = yerel.hour * 60 + yerel.minute
+        if not (GUNDUZ_BASLANGIC_DK <= yerel_dk < GECE_BASLANGIC_DK):
+            continue                       # gece uykusu — 16 saat tavanı geçerli
+        nap_dk, _gece = _bant_sureleri(db, r.baby_id)
+        sure = (_utc(r.ended_at) - bas).total_seconds() / 60
+        if sure <= nap_dk:
+            continue
+        plan.append((r, bas + timedelta(minutes=nap_dk), sure, nap_dk))
+
+    if not plan:
+        print("Onarılacak gündüz kaydı yok.")
+        return
+
+    print(f"Onarılacak gündüz kaydı: {len(plan)} "
+          f"({len({r.baby_id for r, _k, _s, _n in plan})} bebek)\n")
+    for r, yeni, sure, nap_dk in plan:
+        y = _utc(r.started_at) + timedelta(minutes=TZ_OFFSET_MIN)
+        print(f"  {r.id}  baby={str(r.baby_id)[:8]}  {r.type:5s}  "
+              f"{y.strftime('%m-%d %H:%M')}  {sure:.0f} dk → {nap_dk} dk")
+
+    if not uygula:
+        print("\n(KURU KOŞU — hiçbir kayıt değişmedi. Uygulamak için "
+              "--uygula ekleyin.)")
+        return
+    for r, yeni, _s, _n in plan:
+        r.ended_at = yeni
+    db.commit()
+    print(f"\n{len(plan)} kayıt onarıldı.")
 
 
 def _duzelt_16saat(db, gun: int, uygula: bool) -> None:
