@@ -32,6 +32,13 @@ class SleepLogResp(BaseModel):
     notes: str | None
     client_id: str | None
     created_at: datetime
+    # K19.2 — uyku kayıtlarının SINIFI. Mobil artık anneye uyku tipi sordurmuyor
+    # ("Uyudu"/"Uyandı"); ekranda gösterilecek etiketi backend veriyor.
+    # `type` alanı istemcinin GÖNDERDİĞİ ham değerdir ve sınıfı BELİRLEMEZ:
+    # `nap` tipiyle gelen 21:00 kaydı gece uykusudur.
+    # Uyku olmayan kayıtlarda (feed/wake/night_wake) ikisi de None.
+    kategori: str | None = None            # gece_uykusu | gunduz_uykusu
+    kategori_etiket: str | None = None     # "Gece uykusu" | "Gündüz uykusu"
 
     model_config = {"from_attributes": True}
 

@@ -39,6 +39,18 @@ kopya; sonuç 5 gündüz uykusu ve "şablonda olmayan ilave uyku"):
   X5  açık nap + wake 07:15 → nap 07:15'te kapanır
   X6  toplam uyku açık kayıtta None/NaN üretmez; ŞİMDİYE kadarki süre sayılır
 
+v2.2.2 — K19/K20 (ürün kararı: mobil artık uyku tipi sordurmuyor; anne yalnız
+"Uyudu"/"Uyandı" diyor, gündüz/gece ayrımını BACKEND yapar):
+  Y1  sleep 09:50-10:40      → gündüz uykusu
+  Y2  sleep 20:30 açık       → gece uykusu
+  Y3  nap tipi 21:00         → gece uykusu (type sınıfı BELİRLEMEZ)
+  Y4  sleep 18:00-19:00 60dk → gündüz (17:00-19:00 kısa kayıt istisnası)
+  Y5  sekerleme 13:00-13:30  → gündüz uykusu (eski istemci tipi)
+  Z1  14:00-14:36 + 14:36-15:46 (bitişik)   → tek uyku 14:00-15:46
+  Z2  08:26-09:36 + 09:50-11:00 (14 dk)     → tek uyku 08:26-11:00
+  Z3  09:00-09:40 + 10:00-10:30 (20 dk)     → İKİ ayrı uyku
+  Z4  Gerçek vaka (Ahmet Kerem, 6,3 ay)     → 3 gündüz uykusu, "ilave uyku" yok
+
 Çalıştırma: python tests/test_kayit_semantigi.py
 """
 import os
@@ -519,14 +531,20 @@ check("X1e) 'ilave uyku' notu YOK (yuvalar taşmadı)",
       not any("ilave" in (b.get("note") or "") for b in _x1_naplar),
       str([b.get("note") for b in _x1_naplar]))
 
-# Sonraki açık kayıt bant süresinden ÖNCE başlıyorsa kapanış oraya çekilir
+# İki açık kayıt bant süresinden yakınsa: K16.2 ilkini sonrakinin başlangıcında
+# kapatır, ardından K20 aradaki 0 dk boşluğu görüp ikisini BİRLEŞTİRİR —
+# yani "sayacı durdurup hemen yeniden başlattı" tek uyku sayılır.
 x1b = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, S8.wake),
                   L("nap", TODAY, 8 * 60),
                   L("nap", TODAY, 8 * 60 + 30)], now_minute=9 * 60)
 _x1b = [b for b in naplar(x1b) if b.get("kaynak") == "kayit"]
-check("X1f) Kapanış min(sonraki başlangıç, bant süresi) — 08:30'a çekildi",
-      bool(_x1b) and _x1b[0]["end_minute"] == 8 * 60 + 30,
+check("X1f) Yakın iki açık kayıt TEK uyku oldu (K16.2 + K20)",
+      len(_x1b) == 1 and _x1b[0]["start_minute"] == 8 * 60,
       str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _x1b]))
+check("X1g) Birleşme adaptation'a yazıldı",
+      len(x1b["adaptation"]["birlesen_kayitlar"]) == 1
+      and len(x1b["adaptation"]["birlesen_kayitlar"][0]) == 2,
+      str(x1b["adaptation"]["birlesen_kayitlar"]))
 
 
 # =============================================================================
@@ -698,6 +716,181 @@ check("X6e) Bozuk blok toplamı çökertmiyor",
            {"type": "nap", "start_minute": 0, "end_minute": 30}], 100)))
 
 # Temizlik
+_db = SessionLocal()
+try:
+    _db.query(SleepLog).filter(SleepLog.baby_id == BID8).delete()
+    _db.commit()
+finally:
+    _db.close()
+
+
+# =============================================================================
+# Y1-Y5 — K19: uyku tipi SAATE göre belirlenir, type'a göre DEĞİL
+# =============================================================================
+def sinif(bas_dk, bit_dk=None, gun_ofset=0):
+    """uyku_sinifi_ham — ORM/ham datetime yolu (GET /logs bunu kullanıyor)."""
+    g = TODAY + timedelta(days=gun_ofset)
+    return pa.uyku_sinifi_ham(utc(g, bas_dk),
+                              None if bit_dk is None else utc(g, bit_dk), TZ)
+
+
+check("Y1) sleep 09:50-10:40 → gündüz uykusu",
+      sinif(9 * 60 + 50, 10 * 60 + 40) == pa.GUNDUZ_UYKUSU,
+      sinif(9 * 60 + 50, 10 * 60 + 40))
+check("Y2) sleep 20:30 AÇIK → gece uykusu",
+      sinif(20 * 60 + 30) == pa.GECE_UYKUSU, sinif(20 * 60 + 30))
+check("Y3) `nap` tipiyle 21:00 → gece uykusu (type sınıfı belirlemez)",
+      sinif(21 * 60, 22 * 60) == pa.GECE_UYKUSU, sinif(21 * 60, 22 * 60))
+check("Y4) sleep 18:00-19:00 (60 dk) → gündüz (akşam istisnası)",
+      sinif(18 * 60, 19 * 60) == pa.GUNDUZ_UYKUSU, sinif(18 * 60, 19 * 60))
+check("Y4b) 18:00 başlayıp 120 dk süren → gece (istisna 90 dk ile sınırlı)",
+      sinif(18 * 60, 20 * 60) == pa.GECE_UYKUSU, sinif(18 * 60, 20 * 60))
+check("Y4c) 18:00 AÇIK kayıt → gece (süre bilinmiyorsa istisna yok)",
+      sinif(18 * 60) == pa.GECE_UYKUSU, sinif(18 * 60))
+check("Y5) `sekerleme` tipi 13:00-13:30 → gündüz uykusu",
+      sinif(13 * 60, 13 * 60 + 30) == pa.GUNDUZ_UYKUSU,
+      sinif(13 * 60, 13 * 60 + 30))
+check("Y6) 05:30 başlayan uyku → gece (06:00 öncesi)",
+      sinif(5 * 60 + 30, 7 * 60) == pa.GECE_UYKUSU, sinif(5 * 60 + 30, 7 * 60))
+check("Y7) Gece yarısını AŞAN kayıt her koşulda gece",
+      pa.uyku_sinifi_ham(utc(TODAY, 16 * 60),
+                         utc(TODAY + timedelta(days=1), 2 * 60), TZ)
+      == pa.GECE_UYKUSU, "")
+
+# `sekerleme` tipi motor içinde de normal gündüz uykusu gibi işlenir
+y5 = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, S8.wake),
+                 L("sekerleme", TODAY, 13 * 60, TODAY, 13 * 60 + 30)])
+check("Y5b) `sekerleme` kaydı çizelgede gündüz uykusu bloğu oldu",
+      any(b.get("kaynak") == "kayit" and b["start_minute"] == 13 * 60
+          for b in naplar(y5)),
+      str([(b["key"], hhmm(b["start_minute"]), b.get("kaynak"))
+           for b in naplar(y5)]))
+
+# GET /logs yanıtı kategori + etiket taşıyor (K19.2)
+_db = SessionLocal()
+try:
+    _db.query(SleepLog).filter(SleepLog.baby_id == BID8).delete()
+    _db.add_all([
+        SleepLog(user_id=UID, baby_id=BID8, type="sleep",
+                 started_at=utc(TODAY, 9 * 60 + 50),
+                 ended_at=utc(TODAY, 10 * 60 + 40)),
+        SleepLog(user_id=UID, baby_id=BID8, type="nap",
+                 started_at=utc(TODAY, 21 * 60), ended_at=None),
+        SleepLog(user_id=UID, baby_id=BID8, type="feed",
+                 started_at=utc(TODAY, 12 * 60), ended_at=None),
+    ])
+    _db.commit()
+finally:
+    _db.close()
+_gl = client.get(f"/api/v1/logs?date={TODAY.isoformat()}&baby_id={BID8}",
+                 headers=H).json()
+_kat = {r["type"]: (r.get("kategori"), r.get("kategori_etiket")) for r in _gl}
+check("Y8) GET /logs: 09:50 sleep → kategori gunduz_uykusu + etiket",
+      _kat.get("sleep") == ("gunduz_uykusu", "Gündüz uykusu"), str(_kat))
+check("Y9) GET /logs: 21:00 nap → kategori gece_uykusu + etiket",
+      _kat.get("nap") == ("gece_uykusu", "Gece uykusu"), str(_kat))
+check("Y10) GET /logs: `feed` kaydında kategori YOK (uyku değil)",
+      _kat.get("feed") == (None, None), str(_kat))
+
+
+# =============================================================================
+# Z1-Z3 — K20: parça kayıt birleştirme
+# =============================================================================
+GECE_TABAN = L("sleep", DUN, 21 * 60 + 50, TODAY, S8.wake)
+
+z1 = S8.hesapla([GECE_TABAN,
+                 L("nap", TODAY, 14 * 60, TODAY, 14 * 60 + 36),
+                 L("nap", TODAY, 14 * 60 + 36, TODAY, 15 * 60 + 46)])
+_z1 = [b for b in naplar(z1) if b.get("kaynak") == "kayit"]
+check("Z1a) Bitişik iki kayıt TEK uyku oldu", len(_z1) == 1,
+      str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _z1]))
+check("Z1b) Birleşik uyku 14:00-15:46",
+      bool(_z1) and _z1[0]["start_minute"] == 14 * 60
+      and _z1[0]["end_minute"] == 15 * 60 + 46,
+      str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _z1]))
+check("Z1c) birlesen_kayitlar'da bir çift var",
+      len(z1["adaptation"]["birlesen_kayitlar"]) == 1
+      and len(z1["adaptation"]["birlesen_kayitlar"][0]) == 2,
+      str(z1["adaptation"]["birlesen_kayitlar"]))
+
+z2 = S8.hesapla([GECE_TABAN,
+                 L("nap", TODAY, 8 * 60 + 26, TODAY, 9 * 60 + 36),
+                 L("sleep", TODAY, 9 * 60 + 50, TODAY, 11 * 60)])
+_z2 = [b for b in naplar(z2) if b.get("kaynak") == "kayit"]
+check("Z2a) 14 dk boşluklu iki kayıt TEK uyku oldu", len(_z2) == 1,
+      str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _z2]))
+check("Z2b) Birleşik uyku 08:26-11:00",
+      bool(_z2) and _z2[0]["start_minute"] == 8 * 60 + 26
+      and _z2[0]["end_minute"] == 11 * 60,
+      str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _z2]))
+
+z3 = S8.hesapla([GECE_TABAN,
+                 L("nap", TODAY, 9 * 60, TODAY, 9 * 60 + 40),
+                 L("nap", TODAY, 10 * 60, TODAY, 10 * 60 + 30)])
+_z3 = [b for b in naplar(z3) if b.get("kaynak") == "kayit"]
+check("Z3a) 20 dk boşluk → İKİ ayrı uyku (eşik 15 dk)", len(_z3) == 2,
+      str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _z3]))
+check("Z3b) Birleştirme yapılmadı",
+      z3["adaptation"]["birlesen_kayitlar"] == [],
+      str(z3["adaptation"]["birlesen_kayitlar"]))
+check("Z3c) Eşik adaptation'da raporlanıyor",
+      z3["adaptation"]["parca_birlestirme_dk"] == pa.PARCA_BIRLESTIRME_DK,
+      str(z3["adaptation"].get("parca_birlestirme_dk")))
+
+
+# =============================================================================
+# Z4 — GERÇEK VAKA: Ahmet Kerem (36498964…), 6,3 aylık, 2026-09-19
+# =============================================================================
+# Kayıtlar prod'dan birebir alındı (saatler yerel). Beklenen: bandın öngördüğü
+# 3 gündüz uykusu ve "şablonda olmayan ilave uyku" notu YOK.
+S6 = Sablon("Ahmet Kerem", 192)          # ≈ 6,3 ay → 6-8 ay bandı, 3 uyku
+_db = SessionLocal()
+try:
+    BID6 = _db.query(Baby).filter(Baby.id == _uuid.UUID(S6.baby_id)).one().id
+finally:
+    _db.close()
+
+z4_loglar = [
+    L("sleep", DUN, 14 * 60 + 20, TODAY, 8 * 60 + 25, baby_id=BID6),   # gece
+    L("sleep", TODAY, 4 * 60 + 40, TODAY, 4 * 60 + 40, baby_id=BID6),  # sıfır
+    L("sleep", TODAY, 6 * 60 + 30, TODAY, 7 * 60 + 15, baby_id=BID6),  # gece içi
+    L("nap", TODAY, 8 * 60 + 26, TODAY, 9 * 60 + 36, baby_id=BID6),
+    L("sleep", TODAY, 9 * 60 + 50, TODAY, 11 * 60, baby_id=BID6),
+    L("sleep", TODAY, 14 * 60, TODAY, 14 * 60 + 36, baby_id=BID6),
+    L("sleep", TODAY, 14 * 60 + 36, TODAY, 15 * 60 + 46, baby_id=BID6),
+    L("sleep", TODAY, 16 * 60 + 55, TODAY, 18 * 60 + 5, baby_id=BID6),
+    L("sleep", TODAY, 20 * 60 + 45, TODAY + timedelta(days=1), 7 * 60 + 45,
+      baby_id=BID6),
+]
+z4 = S6.hesapla(z4_loglar)
+_z4 = naplar(z4)
+check("Z4a) Bant 6-8 ay, 3 gündüz uykusu bekleniyor",
+      S6.n_nap == 3 and S6.bant["id"] == "6-8_ay",
+      f"bant={S6.bant.get('id')} n_nap={S6.n_nap}")
+check("Z4b) TAM 3 gündüz uykusu üretildi (önce 5-6 görünüyordu)",
+      len(_z4) == 3,
+      str([(b["key"], hhmm(b["start_minute"]), hhmm(b["end_minute"]))
+           for b in _z4]))
+check("Z4c) 'Şablonda olmayan ilave uyku' notu YOK",
+      not any("ilave" in (b.get("note") or "") for b in _z4),
+      str([b.get("note") for b in _z4]))
+check("Z4d) Üçü de gerçek kayıttan geldi",
+      all(b.get("kaynak") == "kayit" for b in _z4),
+      str([(b["key"], b.get("kaynak")) for b in _z4]))
+check("Z4e) 06:30 parçası gece uykusunun içinde sayıldı",
+      any(y.get("kod") == "gece_icinde"
+          for y in z4["adaptation"]["yok_sayilan_kayitlar"]),
+      str(z4["adaptation"]["yok_sayilan_kayitlar"]))
+check("Z4f) İki parça çifti birleştirildi (08:26+09:50, 14:00+14:36)",
+      len(z4["adaptation"]["birlesen_kayitlar"]) == 2,
+      str(z4["adaptation"]["birlesen_kayitlar"]))
+check("Z4g) Sabah uyanışı gece uykusunun bitişi (08:25)",
+      z4["adaptation"]["sabah_uyanis_gercek"] == "08:25",
+      z4["adaptation"]["sabah_uyanis_gercek"])
+_z4g, _z4ge = pa.gun_uyku_toplamlari(z4["schedule"], 23 * 60)
+check("Z4h) Toplam uyku hesaplandı (None/NaN yok)",
+      isinstance(_z4g, int) and _z4g > 0, f"gunduz={_z4g} gece={_z4ge}")
+
 _db = SessionLocal()
 try:
     _db.query(SleepLog).filter(SleepLog.baby_id == BID8).delete()

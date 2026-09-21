@@ -11,6 +11,8 @@ logs router — /api/v1/logs
 - GET /logs?from=&to=&baby_id=: tarih aralığı sorgusu (started_at'e göre).
 - GET /logs?date=YYYY-MM-DD: K14.1 "o günün kayıtları" — gece yarısını aşan ve
   hâlâ açık olan kayıtlar da döner (bkz. _gun_filtresi).
+- Uyku kayıtları yanıtta `kategori` + `kategori_etiket` taşır (K19.2): sınıfı
+  saat belirler, istemcinin gönderdiği `type` DEĞİL.
 - GET /logs/weekly-summary: haftalık agregasyon (mobil grafikleri tüketir).
 
 Hepsi user_id scoped; baby_id kullanıcıya ait değilse o kayıt atlanır (skipped).
@@ -30,7 +32,9 @@ from api.models import Baby, SleepLog, User
 from api.schemas.log import (
     BatchReq, BatchResult, DaySummary, SleepLogResp, WeeklySummaryResp,
 )
-from api.services.plan_adapter import TZ_OFFSET_MIN
+from api.services.plan_adapter import (
+    TZ_OFFSET_MIN, UYKU_ETIKETLERI, uyku_sinifi_ham,
+)
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -117,6 +121,10 @@ UYKU_TIPLERI = ("sleep", "nap")
 
 # K18.2 — client_id taşımayan kayıtlarda "aynı kayıt" penceresi.
 KOPYA_PENCERE = timedelta(minutes=3)
+
+# K19.2 — yanıtta kategori taşıyacak tipler. `nap_skipped` HARİÇ: o bir uyku
+# değil, "bu uykuyu hiç yapmadı" beyanıdır.
+UYKU_TIPLERI_TUM = ("sleep", "nap", "sekerleme")
 
 
 def _kopya_bul(db: Session, user: User, item) -> SleepLog | None:
@@ -336,7 +344,21 @@ def list_logs(
             q = q.filter(SleepLog.started_at >= from_)
         if to is not None:
             q = q.filter(SleepLog.started_at <= to)
-    return q.order_by(SleepLog.started_at.desc()).all()
+    return [_kategorili(r) for r in q.order_by(SleepLog.started_at.desc()).all()]
+
+
+def _kategorili(row: SleepLog) -> SleepLogResp:
+    """K19.2 — satırı yanıta çevirirken uyku SINIFINI ekle.
+
+    Sınıf motorla AYNI fonksiyondan (plan_adapter.uyku_sinifi_ham) gelir; iki
+    yerde ayrı yazılsaydı mobilin bastığı etiket ile çizelgenin hesabı
+    ayrışabilirdi."""
+    resp = SleepLogResp.model_validate(row)
+    if row.type in UYKU_TIPLERI_TUM:
+        resp.kategori = uyku_sinifi_ham(row.started_at, row.ended_at,
+                                        TZ_OFFSET_MIN)
+        resp.kategori_etiket = UYKU_ETIKETLERI.get(resp.kategori)
+    return resp
 
 
 def _as_utc(dt: datetime) -> datetime:

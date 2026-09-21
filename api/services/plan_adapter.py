@@ -38,6 +38,7 @@ Kullanıcı bazlı timezone alanı henüz YOK; TZ_OFFSET_MIN varsayılanı Türk
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
@@ -131,6 +132,37 @@ GECE_UYANMA_VARSAYILAN_DK = 10
 # uyanma sayımı bu eşiğe BAKMAZ; eskiden bakıyordu ve 3 uyanmalı bir gece
 # "0 uyanma" olarak raporlanıyordu (beta verisinde ölçüldü).
 UZUN_UYANMA_MIN_DK = SELF_SOOTHE_FAIL_MIN
+
+# --- K19 — UYKU TİPİ SAATE GÖRE BELİRLENİR (v2.2.2) -------------------------
+# ÜRÜN KARARI: mobil artık anneye uyku tipi sordurmuyor. Anne yalnız "Uyudu" /
+# "Uyandı" diyor; gündüz/gece ayrımını BACKEND yapıyor. İstemcinin gönderdiği
+# type (sleep/nap/sekerleme) artık yalnız "bu bir uyku" bilgisidir; SINIFI
+# aşağıdaki fonksiyon verir. DB'deki type'a DOKUNULMAZ — eski istemciler
+# (build 16/18) farklı type göndermeye devam edebilir ve hepsi desteklenir.
+#
+# Eski kural başlangıç saatini SABAH HEDEFİYLE karşılaştırıyordu; hedef
+# kullanıcıdan kullanıcıya değiştiği için aynı saatteki kayıt bir bebekte gece,
+# diğerinde gündüz sayılabiliyordu. Yeni kural mutlak duvar saatidir.
+GUNDUZ_UYKUSU = "gunduz_uykusu"
+GECE_UYKUSU = "gece_uykusu"
+UYKU_ETIKETLERI = {GUNDUZ_UYKUSU: "Gündüz uykusu", GECE_UYKUSU: "Gece uykusu"}
+
+GUNDUZ_PENCERE_BAS = 6 * 60      # 06:00 — bundan önce başlayan uyku gecedir
+GUNDUZ_PENCERE_BIT = 17 * 60     # 17:00 — bundan sonra başlayan uyku gecedir
+# İSTİSNA: 17:00-19:00 arası başlayan KISA ve KAPALI kayıt geç bir şekerlemedir,
+# gece yatışı değil. Açık kayıtta istisna UYGULANMAZ: süresi bilinmeyen bir
+# 18:00 kaydını "kısa" varsaymak, akşam yatışını gündüz uykusuna çevirirdi.
+AKSAM_ISTISNA_BIT = 19 * 60      # 19:00
+AKSAM_ISTISNA_MAX_DK = 90
+
+# --- K20 — parça kayıt birleştirme ------------------------------------------
+# Anne uzun bir uykuyu birden çok kayda bölüyor (14:00-14:36 + 14:36-15:46) ya
+# da kısa bir uyanıklıktan sonra yeniden uyutuyor (09:36 bitiş, 09:50 başlangıç).
+# Bunlar ne kopya ne çakışma; K13/K18 hiçbiri yakalamıyordu ve gün 3 yerine 5
+# gündüz uykusu görünüyordu (gerçek vakada ölçüldü).
+#
+# EŞİK METODOLOJİ SAHİBİNE SORULACAK — o yüzden env ile değiştirilebilir.
+PARCA_BIRLESTIRME_DK = int(os.getenv("PARCA_BIRLESTIRME_DK") or 15)
 
 # --- K16/K17 — açık (ended_at null) kayıt kuralları (v2.2.1) ----------------
 # Gerçek vaka: aynı bebekte 06:30, 08:24 ve 08:26 başlangıçlı ÜÇ açık uyku
@@ -470,31 +502,58 @@ def _log_alanlari(lg: Any, tz_offset_min: int) -> dict | None:
     }
 
 
-def _gece_uykusu_mu(k: dict, hedef_minute: int, gun: date | None = None) -> bool:
-    """K5 — bu `sleep` kaydı gerçekten GECE uykusu mu?
+# Bir kaydın "uyku" sayıldığı tipler. `sekerleme` eski istemcilerin gönderdiği
+# ad; motor açısından normal bir gündüz uykusudur (sınıfı saat belirler).
+UYKU_TIPLERI = ("sleep", "nap", "sekerleme")
 
-    Ölçüt BAŞLANGIÇ saatidir, süre değil: gece uykusu sabah hedefinden ÖNCE
-    başlar. İki biçimi vardır ve ikisi de takvimden türer, uydurma duvar
-    saatinden değil:
-      1. Bir ÖNCEKİ yerel günde başlamış (gece uykusu gece yarısını aşar), ya da
-      2. Aynı gün ama sabah hedefinden ÖNCE başlamış — gece uyanmasından sonra
-         tekrar dalmış bebeğin gece PARÇASI (ör. 05:00-07:10).
-    09:30'da başlayan 70 dakikalık bir `sleep` kaydı ikisini de sağlamaz →
-    gündüz uykusu olarak işlenir (süre ölçütü bu parçayı yanlış eliyordu).
 
-    K12.4 — ÜÇÜNCÜ biçim: HENÜZ BİTMEMİŞ (ended_at null) ve BUGÜNDEN ÖNCE
-    başlamış kayıt. Eskiden bu düşüyordu: bitişi olmadığı için (1) sağlanmıyor,
-    başlangıcı akşam olduğu için (2) de sağlanmıyordu; sonra `bas_gun != gun`
-    filtresine takılıp TAMAMEN görünmez oluyordu. Sonucu: anne akşam sayacı
-    başlatıp sabah durdurmayınca gece uykusu hiç olmamış sayılıyor ve sabah
-    uyanışı varsayılan hedefte kalıyordu (beta verisinde ölçülen 4. hata)."""
-    if k["type"] != "sleep":
-        return False
-    if k["bit_gun"] is not None and k["bit_gun"] > k["bas_gun"]:
-        return True
-    if k["bit_dk"] is None and gun is not None and k["bas_gun"] < gun:
-        return True
-    return k["bas_dk"] < hedef_minute
+def uyku_tipi_belirle(kayit: dict, bant: dict | None = None) -> str:
+    """K19.1 — bir uyku kaydının SINIFI: gündüz mü gece mi.
+
+    TEK KURAL, BAŞLANGIÇ SAATİ:
+      • 06:00–17:00 arası başlayan → gündüz uykusu,
+      • 17:00–06:00 arası başlayan → gece uykusu,
+      • İSTİSNA: 17:00–19:00 arası başlayan, KAPALI ve 90 dk'dan kısa kayıt
+        gündüz sayılır (geç şekerleme).
+
+    DB'deki `type` sınıfı BELİRLEMEZ: `nap` tipiyle gelen 21:00 kaydı gece
+    uykusudur, `sleep` tipiyle gelen 09:50 kaydı gündüz uykusudur. Eski
+    istemcilerin `sekerleme` tipi de normal gündüz uykusu gibi işlenir.
+
+    `bant` şimdilik KULLANILMIYOR ama imzada duruyor: istisna penceresinin yaşa
+    göre daralması gündeme gelirse (metodoloji sahibine sorulacak) çağıranların
+    hepsini değiştirmek gerekmesin."""
+    # Gece yarısını AŞAN kayıt her koşulda gece uykusudur: 16:00'da başlayıp
+    # ertesi gün 02:00'de biten bir kayıt takvimsel olarak gündüz uykusu olamaz.
+    # Bu, saat kuralının tek fiziksel istisnasıdır.
+    if (kayit.get("bit_gun") is not None and kayit.get("bas_gun") is not None
+            and kayit["bit_gun"] > kayit["bas_gun"]):
+        return GECE_UYKUSU
+    bas = kayit["bas_dk"]
+    if GUNDUZ_PENCERE_BAS <= bas < GUNDUZ_PENCERE_BIT:
+        return GUNDUZ_UYKUSU
+    sure = kayit.get("sure_dk")
+    if (GUNDUZ_PENCERE_BIT <= bas < AKSAM_ISTISNA_BIT
+            and kayit.get("bit_dk") is not None
+            and sure is not None and sure < AKSAM_ISTISNA_MAX_DK):
+        return GUNDUZ_UYKUSU
+    return GECE_UYKUSU
+
+
+def uyku_sinifi_ham(started_at: datetime, ended_at: datetime | None = None,
+                    tz_offset_min: int = TZ_OFFSET_MIN) -> str:
+    """K19.2 — ORM satırı / ham datetime için sınıf (GET /logs yanıtı).
+
+    `uyku_tipi_belirle` ile AYNI kuralı uygular; iki yerde ayrı yazılırsa
+    mobilin bastığı etiket ile motorun hesabı ayrışır."""
+    bas_gun, bas_dk = _local_minute(started_at, tz_offset_min)
+    sure = bit_dk = bit_gun = None
+    if ended_at is not None:
+        bit_gun, bit_dk = _local_minute(ended_at, tz_offset_min)
+        sure = max(0, int((ended_at - started_at).total_seconds() // 60))
+    return uyku_tipi_belirle({"bas_dk": bas_dk, "bit_dk": bit_dk,
+                              "bas_gun": bas_gun, "bit_gun": bit_gun,
+                              "sure_dk": sure})
 
 
 def _atlandi_mi(k: dict) -> bool:
@@ -581,6 +640,7 @@ def _cakismalari_coz(kayitlar: list[dict], out: dict) -> list[dict]:
 def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
                   tz_offset_min: int = TZ_OFFSET_MIN, *,
                   nap_sure_dk: int | None = None,
+                  gece_sure_dk: int | None = None,
                   now_minute: int | None = None) -> dict:
     """Ham kayıtları BUGÜNE ait rollere ayır (K2 — yalnız bugünün verisi).
 
@@ -605,7 +665,9 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
         çalışır, uydurma bir süre varsayılmaz).
     """
     out = {"gece_uykulari": [], "gunduz_uykulari": [], "atlananlar": [],
-           "wake_kayitlari": [], "gece_uyanmalari": [], "yok_sayilan": []}
+           "wake_kayitlari": [], "gece_uyanmalari": [], "yok_sayilan": [],
+           "uyaniklik_kanitlari": [], "birlesen": []}
+    wake_adaylari: list[dict] = []
     for lg in logs or []:
         k = _log_alanlari(lg, tz_offset_min)
         if k is None:
@@ -616,41 +678,38 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
         if tip in ("wake", "night_wake"):
             if k["bas_gun"] != gun:
                 continue
-            # `night_wake` tipi zaten gece uyanmasıdır; `wake` ise YALNIZ 06:00
-            # öncesindeyse gece uyanması sayılır (K12.2). 06:00 öncesi `wake`
-            # kaydı AYRICA wake_kayitlari'nda kalır: K10.1'in "erken uyandı,
-            # tekrar uyumadı → gün 06:00'dan" yolu bu adaya ihtiyaç duyuyor.
-            if tip == "night_wake" or k["bas_dk"] < GUN_BASLANGICI_EN_ERKEN:
+            if tip == "night_wake":
                 out["gece_uyanmalari"].append(k)
-            if tip == "wake":
-                out["wake_kayitlari"].append(k)
+            else:
+                wake_adaylari.append(k)     # K19.4 — döngüden SONRA çözülür
             continue
 
         if tip == "feed":
             continue            # beslenme çizelgeyi etkilemez (v1'de de etkilemiyordu)
 
-        if tip not in ("nap", "sleep", ATLANDI_TIPI):
+        if tip != ATLANDI_TIPI and tip not in UYKU_TIPLERI:
             if k["bas_gun"] == gun:
                 _yok_say(out, k, "taninmayan_tip",
                          f"tanınmayan kayıt tipi: {tip!r}")
             continue
 
-        # Gece uykusu BUGÜNE, bittiği güne göre bağlanır (dün 20:30 → bugün 07:00).
-        if tip == "sleep" and _gece_uykusu_mu(k, hedef_minute, gun):
+        # "Atlandı" beyanı sınıflandırmaya girmez (uyku YAPILMAMIŞTIR).
+        if k["bas_gun"] == gun and _atlandi_mi(k):
+            out["atlananlar"].append(k)
+            continue
+
+        # --- K19.1 — SINIF SAATTEN gelir, type'tan DEĞİL --------------------
+        if uyku_tipi_belirle(k) == GECE_UYKUSU:
+            # Gece uykusu BUGÜNE, bittiği güne göre bağlanır (dün 20:30 → bugün 07:00).
             if k["bit_gun"] == gun:
                 out["gece_uykulari"].append(k)
             elif k["bit_dk"] is None and k["bas_gun"] < gun:
-                # K12.4/K14.1 — dün başlamış, HÂLÂ AÇIK gece uykusu. Bugünün
-                # kaydıdır: sabah uyanışı bunun kapanışından türer.
+                # K12.4/K14.1 — dün başlamış, HÂLÂ AÇIK gece uykusu.
                 out["gece_uykulari"].append(dict(k, _devam=True))
             continue            # bugün akşam başlayan açık gece uykusu: yarının
 
         if k["bas_gun"] != gun:
             continue            # başka güne ait kayıt bugünün planına girmez (K2)
-
-        if _atlandi_mi(k):
-            out["atlananlar"].append(k)
-            continue
 
         # --- K12.1 — yuvaya eşlenebilirlik ----------------------------------
         if k["bit_dk"] is None:
@@ -669,12 +728,21 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
         else:
             out["gunduz_uykulari"].append(k)
 
+    # --- K19.4 — `wake` kayıtlarının rolü -----------------------------------
+    _wake_kayitlarini_coz(out, wake_adaylari)
+
     # --- K13 — çakışanları tekilleştir (yuvalara girmeden ÖNCE) -------------
     out["gunduz_uykulari"] = _cakismalari_coz(out["gunduz_uykulari"], out)
     out["gece_uykulari"] = _cakismalari_coz(out["gece_uykulari"], out)
 
+    # K19.1 — gece uykusunun İÇİNDE kalan "gündüz" parçalarını ayıkla
+    out["gunduz_uykulari"] = _gece_icindekileri_ayikla(out, gun)
+
     # --- K16.2/K17 — açık kayıtları çöz -------------------------------------
-    _acik_kayitlari_coz(out, nap_sure_dk, now_minute)
+    _acik_kayitlari_coz(out, nap_sure_dk, now_minute, gece_sure_dk)
+
+    # --- K20 — ardışık parçaları birleştir (yuvalara girmeden ÖNCE) ---------
+    out["gunduz_uykulari"] = _parcalari_birlestir(out["gunduz_uykulari"], out)
 
     for anahtar in ("gece_uykulari", "gunduz_uykulari", "atlananlar",
                     "wake_kayitlari", "gece_uyanmalari"):
@@ -696,7 +764,8 @@ def _kaydi_kapat(k: dict, bit_dk_lin: int, sebep: str) -> None:
 
 
 def _acik_kayitlari_coz(out: dict, nap_sure_dk: int | None,
-                        now_minute: int | None) -> None:
+                        now_minute: int | None,
+                        gece_sure_dk: int | None = None) -> None:
     """K16.2 + K17 — açık uyku kayıtlarını hesapta kapat.
 
     DB'DEKİ KAYIT DEĞİŞMEZ. Burası "düzeltilmemiş eski veriyi doğru oku"
@@ -728,8 +797,10 @@ def _acik_kayitlari_coz(out: dict, nap_sure_dk: int | None,
                      min(acik[i + 1]["bas_dk"], acik[i]["bas_dk"] + nap_sure_dk),
                      "yeni_kayit")
 
-    # 2) K17.2 — sonraki `wake` kaydı açık nap'i kapatır
-    wakeler = sorted(w["bas_dk"] for w in out["wake_kayitlari"])
+    # 2) K17.2 — sonraki `wake` kaydı açık nap'i kapatır.
+    # Sabah adaylığından ELENEN wake'ler de burada sayılır: bebeğin uyandığını
+    # yine de kanıtlıyorlar (K19.4 onları yalnız "sabah uyanışı" rolünden alır).
+    wakeler = sorted(w["bas_dk"] for w in out["uyaniklik_kanitlari"])
     for k in out["gunduz_uykulari"]:
         if not k.get("_devam"):
             continue
@@ -742,10 +813,13 @@ def _acik_kayitlari_coz(out: dict, nap_sure_dk: int | None,
         for k in out["gunduz_uykulari"]:
             if k.get("_devam") and (now_minute - k["bas_dk"]) >= bayat_esik:
                 _kaydi_kapat(k, k["bas_dk"] + nap_sure_dk, "bayat")
+        # K19.3 — gece uykusunun eşiği bandın GECE ALT SINIRINDAN türer; bant
+        # yoksa sabit 14 saate düşülür.
+        gece_esik = max(int(gece_sure_dk or 0), K17_GECE_ESIK_DK)
         for g in out["gece_uykulari"]:
             # Açık gece uykusu bir ÖNCEKİ günde başlar; bugünün dakikasına
             # göre geçen süre +24 saattir.
-            if g.get("_devam") and (now_minute + 1440 - g["bas_dk"]) >= K17_GECE_ESIK_DK:
+            if g.get("_devam") and (now_minute + 1440 - g["bas_dk"]) >= gece_esik:
                 g["_bayat"] = True
 
     # Kapanış çok kısa kaldıysa kayıt yuvaya giremez.
@@ -759,6 +833,149 @@ def _acik_kayitlari_coz(out: dict, nap_sure_dk: int | None,
             continue
         kalan.append(k)
     out["gunduz_uykulari"] = kalan
+
+
+def _gece_icindekileri_ayikla(out: dict, gun: date) -> list[dict]:
+    """Gece uykusunun ARALIĞINA düşen "gündüz" kaydını ele.
+
+    K19'un saat kuralı sabah 06:00'dan sonra başlayan her uykuyu gündüz sayıyor.
+    Ama bebek gece uykusundan 08:25'te uyanmışsa, 06:30-07:15 arasındaki kayıt
+    bir gündüz uykusu OLAMAZ — gece uykusunun içinde, gece uyanmasından sonra
+    tekrar dalmanın ayrı kaydıdır. Gerçek vakada bu parça 4. bir gündüz uykusu
+    üretiyordu (ölçüldü).
+
+    Bu, K13'ün "aynı uyku iki kez kaydedilmiş" kuralının KOVALAR ARASI hâlidir:
+    gece kaydı zaten o aralığı kapsıyor, parça tekrar sayılmamalı. Süresi gece
+    uykusunun brütüne DAHİL (aynı aralık) olduğu için ayrıca eklenmez.
+
+    Yalnız TAM KAPSANAN kayıtlar elenir; kısmen taşan bir kayıt (ör. 05:30-09:00)
+    gerçek bir sabah uykusu olabilir, ona dokunulmaz."""
+    geceler = []
+    for g in out["gece_uykulari"]:
+        bit = g.get("bit_dk_lin")
+        if bit is None:
+            continue                      # açık gece uykusu: kapsama belirsiz
+        # `bas_dk`/`bit_dk_lin` KAYDIN BAŞLADIĞI günün eksenindedir. Bugünün
+        # eksenine çekmek için İKİSİ BİRDEN kaydırılır — yalnız birini
+        # kaydırmak aralığı 24 saat uzatıp bütün günü yutuyordu (ölçüldü).
+        kaydir = 0
+        if g.get("bas_gun") is not None and g["bas_gun"] < gun:
+            kaydir = 1440 * (gun - g["bas_gun"]).days
+        geceler.append((g["bas_dk"] - kaydir, bit - kaydir))
+    if not geceler:
+        return out["gunduz_uykulari"]
+
+    kalan = []
+    for k in out["gunduz_uykulari"]:
+        k_bit = k.get("bit_dk_lin")
+        if k_bit is None:
+            kalan.append(k)
+            continue
+        icinde = any(gb <= k["bas_dk"] and k_bit <= ge for gb, ge in geceler)
+        if icinde:
+            _yok_say(out, k, "gece_icinde",
+                     f"{_fmt(k['bas_dk'])}-{_fmt(k_bit)} kaydı gece uykusunun "
+                     "içinde kalıyor — gündüz uykusu sayılmadı")
+            continue
+        kalan.append(k)
+    return kalan
+
+
+def _wake_kayitlarini_coz(out: dict, wake_adaylari: list[dict]) -> None:
+    """K19.4 — `wake` kayıtlarının rolünü belirle.
+
+    Yeni mobil `wake` GÖNDERMEYECEK (anne "Uyandı" deyince uyku kaydı kapanıyor).
+    Eski istemcilerden (build 16/18) gelmeye devam edecek, o yüzden üç rol ayrı
+    ayrı tanımlı:
+
+      • 06:00 ÖNCESİ  → gece uyanması. AYRICA sabah adayı olarak kalır: K10.1'in
+        "erken uyandı ve tekrar uyumadı → gün 06:00'dan + şekerleme" yolu bu
+        adaya dayanıyor.
+      • 06:00 SONRASI + AÇIK gece uykusu var → gece uykusunu o saatte kapatır
+        (sabah adayı olur, K12.4).
+      • 06:00 SONRASI + gece uykusu kaydı HİÇ YOK → yine sabah adayı olur.
+        Spec bu durumu "yok say" diye tanımlıyordu; UYGULANMADI, çünkü o zaman
+        günün tek çıpası kaybolur ve "anne sadece Uyandı'ya bastı" senaryosunda
+        gün varsayılan hedefe düşer (mevcut G5 senaryosu bunu ölçüyor).
+      • 06:00 SONRASI + KAPALI gece uykusu var → GEREKSİZ. Sabah uyanışı zaten
+        gece uykusunun bitişinden geliyor; kayıt yok_sayilan'a yazılır.
+
+    Elenen `wake` kayıtları `uyaniklik_kanitlari`nda KALIR: bebeğin o saatte
+    uyanık olduğu bilgisi doğrudur ve zincirin geriye düşmesini engeller (K7/E)
+    ile açık nap'in kapanmasında (K17.2) kullanılır."""
+    acik_gece = any(g.get("_devam") or g.get("bit_dk") is None
+                    for g in out["gece_uykulari"])
+    kapali_gece = any(g.get("bit_dk") is not None for g in out["gece_uykulari"])
+
+    for w in sorted(wake_adaylari, key=lambda x: x["bas_dk"]):
+        if w["bas_dk"] < GUN_BASLANGICI_EN_ERKEN:
+            out["gece_uyanmalari"].append(w)
+            out["wake_kayitlari"].append(w)
+            out["uyaniklik_kanitlari"].append(w)
+            continue
+        out["uyaniklik_kanitlari"].append(w)
+        if acik_gece or not kapali_gece:
+            out["wake_kayitlari"].append(w)
+        else:
+            _yok_say(out, w, "gereksiz_wake",
+                     f"{_fmt(w['bas_dk'])} uyanma kaydı — sabah uyanışı gece "
+                     "uykusunun bitişinden alındı, kayıt çizelgeye girmedi")
+
+
+def _parcalari_birlestir(kayitlar: list[dict], out: dict) -> list[dict]:
+    """K20 — aralarındaki boşluk ≤ PARCA_BIRLESTIRME_DK olan uykuları BİRLEŞTİR.
+
+    Anne uzun bir uykuyu birden çok kayda bölüyor (14:00-14:36 + 14:36-15:46,
+    bitişik) ya da kısa bir uyanıklıktan sonra yeniden uyutuyor (09:36 bitiş →
+    09:50 başlangıç). Bunlar kopya DEĞİL (K18), çakışma da DEĞİL (K13) —
+    hiçbiri yakalamıyordu ve gün 3 yerine 5 gündüz uykusu görünüyordu.
+
+    Yalnız OKUMA anında yapılır; DB'ye yazılmaz (K20.2). Birleşen kayıtların
+    id'leri `out["birlesen"]`e yazılır, oradan adaptation'a taşınır (K20.3).
+
+    AÇIK kayıt birleştirmeye KAPATIR: "sürüyor" bilgisi kaybolmasın diye açık
+    kayıt ancak dizinin SONUNDA olabilir ve kendinden öncekini yutabilir.
+
+    Gece uykuları bu işlemden GEÇMEZ: gece parçaları zaten tek bir brüt/net
+    toplamda birleşiyor (bkz. _gece_uykusu_ozeti) ve aradaki boşluk gece
+    uyanması olarak ayrıca sayılıyor (K20.1'in ikinci cümlesi)."""
+    if len(kayitlar) < 2 or PARCA_BIRLESTIRME_DK <= 0:
+        return kayitlar
+
+    sirali = sorted(kayitlar, key=lambda k: k["bas_dk"])
+    out_list: list[dict] = [sirali[0]]
+    for k in sirali[1:]:
+        onceki = out_list[-1]
+        onceki_bit = onceki.get("bit_dk_lin")
+        if onceki_bit is None:          # açık kayıt yutulamaz
+            out_list.append(k)
+            continue
+        bosluk = k["bas_dk"] - onceki_bit
+        if bosluk > PARCA_BIRLESTIRME_DK or bosluk < 0:
+            out_list.append(k)
+            continue
+
+        # Birleştir: başlangıç öncekinin, bitiş sonrakinin.
+        birlesik = dict(onceki)
+        birlesik["_parcalar"] = (onceki.get("_parcalar") or [onceki["id"]]) + [k["id"]]
+        if k.get("bit_dk_lin") is None:                 # sonraki AÇIK → birleşik açık
+            birlesik["bit_dk"] = None
+            birlesik["bit_dk_lin"] = None
+            birlesik["sure_dk"] = None
+            birlesik["_devam"] = True
+        else:
+            birlesik["bit_dk_lin"] = max(onceki_bit, k["bit_dk_lin"])
+            birlesik["bit_dk"] = birlesik["bit_dk_lin"] % 1440
+            birlesik["sure_dk"] = birlesik["bit_dk_lin"] - birlesik["bas_dk"]
+            birlesik["_devam"] = False
+        # Otomatik kapanış işareti birleşmede anlamını yitirir.
+        birlesik.pop("_otomatik_kapandi", None)
+        out_list[-1] = birlesik
+
+    for k in out_list:
+        if k.get("_parcalar"):
+            out["birlesen"].append([i for i in k["_parcalar"] if i])
+    return out_list
 
 
 def gece_uyanma_suresi(k: dict) -> int:
@@ -1007,11 +1224,16 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
     _tpl_naplar = _sablon_naplari(sablon)
     if bant is not None:
         _nap_sure = int(yas_bantlari.cizelge_parametreleri(bant)["uyku_suresi_dk"])
+        # K19.3 — gece tarafının ölçüsü bandın gece uykusu ALT sınırıdır.
+        _gece_sure = (bant.get("gece_uykusu_dk") or [None])[0]
+        _gece_sure = int(_gece_sure) if _gece_sure else None
     else:
         _nap_sure = _tpl_naplar[0]["sure_dk"] if _tpl_naplar else None
+        _gece_sure = None
 
     kayitlar = gun_kayitlari(todays_logs, gun, sabit_wake, tz_offset_min,
-                             nap_sure_dk=_nap_sure, now_minute=now_minute)
+                             nap_sure_dk=_nap_sure, gece_sure_dk=_gece_sure,
+                             now_minute=now_minute)
     sabah = sabah_uyanisi(kayitlar, sabit_wake)
 
     uyarilar: list[str] = list(sabah["uyarilar"])
@@ -1087,7 +1309,9 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
     kanit = sabah["zincir_baslangici"]
     for a in kayitlar["atlananlar"]:
         kanit = max(kanit, a["bas_dk"])
-    for w in kayitlar["wake_kayitlari"]:
+    for w in kayitlar["uyaniklik_kanitlari"]:
+        # K19.4 — sabah adaylığından elenen `wake` de bebeğin uyanık olduğunu
+        # KANITLAR; zincir onun gerisine düşemez.
         kanit = max(kanit, w["bas_dk"])
 
     cursor = sabah["zincir_baslangici"]
@@ -1221,6 +1445,11 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
         "min_uyaniklik_penceresi_dk": ww_min_k15,
         # K12.2/K14.2 — gece uyanma sayımı ve brüt/net gece uykusu.
         "gece_uykusu": sabah.get("gece_uykusu"),
+        # K20.3 — okuma anında birleştirilen parça kayıtların id'leri.
+        # DB'de hiçbir şey değişmedi; mobil "bu iki kaydı tek uyku saydık"
+        # bilgisini buradan gösterebilir.
+        "birlesen_kayitlar": kayitlar.get("birlesen") or [],
+        "parca_birlestirme_dk": PARCA_BIRLESTIRME_DK,
         "uyarilar": uyarilar,
     }
     return {"schedule": schedule, "adaptation": adaptation}
