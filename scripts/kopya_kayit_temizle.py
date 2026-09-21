@@ -22,9 +22,19 @@ KÜME MANTIĞI: ±3 dk zincirleme uygulanmaz. Küme, İLK kaydın başlangıcın
 itibaren 3 dakikalık pencereyle kapanır; aksi hâlde 3'er dakika kayan uzun bir
 zincir tek kümede birleşip gerçek uykuları yutardı.
 
-TİP AYRIMI BİLİNÇLİ: prod'da `sleep` + `nap` olarak İKİ KEZ gönderilmiş aynı
-uykular da var. Spec "type eşit" dediği için bu betik onlara DOKUNMAZ; motor
-zaten okuma anında K13 ile tekilleştiriyor (çakışma çözümü tipe bakmaz).
+İKİNCİ GEÇİŞ — ÇAPRAZ TİP (`--capraz-tip`): prod'da `sleep` + `nap` olarak İKİ
+KEZ gönderilmiş aynı uykular da var (27 çift ölçüldü) — mobil aynı uykuyu iki
+farklı tiple yolluyor. Varsayılan geçiş "type eşit" dediği için bunlara
+dokunmaz; `--capraz-tip` bu çiftleri de tekilleştirir.
+
+Güvenli olmasının sebebi FİZİKSEL: bir bebek 3 dakika arayla İKİ AYRI uykuya
+başlayamaz. Dolayısıyla aynı bebekte ±3 dk içinde başlayan iki `sleep`/`nap`
+kaydı, tipi ne olursa olsun, AYNI uykudur. (`feed`/`wake`/`night_wake` bu
+geçişe GİRMEZ: beslenme gerçekten kısa aralıklarla tekrarlanabilir.)
+
+Motor zaten okuma anında K13 ile tekilleştirdiği için plan çıktısı bu geçiş
+olmadan da doğrudur; geçiş DB'deki fazlalığı temizler (haftalık özet ve ham
+kayıt listesi de sadeleşir).
 
 GERİ ALINABİLİR: silinen her satır `silinen_sleep_logs` tablosuna TAM JSON
 olarak kopyalanır. `notes` alanına not düşmek işe yaramazdı — satırla birlikte
@@ -117,17 +127,29 @@ def _satir_json(r) -> str:
     }, ensure_ascii=False)
 
 
-def _plan(db, gun: int):
-    """(kume sayısı, [(silinecek, kazanan)]) — hiçbir şey değiştirmez."""
+UYKU_TIPLERI = ("sleep", "nap")
+
+
+def _plan(db, gun: int, capraz: bool = False):
+    """(kume sayısı, [(silinecek, kazanan)]) — hiçbir şey değiştirmez.
+
+    `capraz=False`: aynı bebek + AYNI type (spec K18.3).
+    `capraz=True` : aynı bebek, type'a BAKMADAN, yalnız sleep/nap kayıtları."""
     basla = datetime.now(timezone.utc) - timedelta(days=gun)
     rows = db.query(SleepLog).filter(SleepLog.started_at >= basla).all()
     grup = defaultdict(list)
     for r in rows:
-        grup[(r.baby_id, r.type)].append(r)
+        if capraz:
+            if r.type in UYKU_TIPLERI:
+                grup[r.baby_id].append(r)       # type AYRIMI YOK
+        else:
+            grup[(r.baby_id, r.type)].append(r)
 
     kumeler, silinecek = [], []
     for kayitlar in grup.values():
         for kume in _kumele(kayitlar):
+            if capraz and len({r.type for r in kume}) == 1:
+                continue        # tek tipli küme birinci geçişin işi
             kumeler.append(kume)
             kazanan = _kazanan(kume)
             for r in kume:
@@ -136,9 +158,10 @@ def _plan(db, gun: int):
     return kumeler, silinecek
 
 
-def rapor(db, gun: int) -> None:
-    kumeler, silinecek = _plan(db, gun)
-    print(f"=== Son {gun} gün — kopya taraması ===")
+def rapor(db, gun: int, capraz: bool = False) -> None:
+    kumeler, silinecek = _plan(db, gun, capraz)
+    print(f"=== Son {gun} gün — kopya taraması "
+          f"({'ÇAPRAZ TİP' if capraz else 'aynı type'}) ===")
     print(f"  kopya kümesi        : {len(kumeler)}")
     print(f"  silinecek kayıt     : {len(silinecek)}")
     print(f"  etkilenen bebek     : {len({k[0].baby_id for k in silinecek})}")
@@ -149,32 +172,21 @@ def rapor(db, gun: int) -> None:
     print(f"  küme boyutu dağılımı: "
           f"{dict(Counter(len(k) for k in kumeler))}")
 
-    # Spec dışı kalan: aynı saatte FARKLI type ile gönderilmiş kopyalar
-    basla = datetime.now(timezone.utc) - timedelta(days=gun)
-    rows = db.query(SleepLog).filter(SleepLog.started_at >= basla,
-                                     SleepLog.type.in_(("sleep", "nap"))).all()
-    capraz = 0
-    per_baby = defaultdict(list)
-    for r in rows:
-        per_baby[r.baby_id].append(r)
-    for l in per_baby.values():
-        l.sort(key=lambda r: _utc(r.started_at))
-        for i in range(len(l)):
-            for j in range(i + 1, len(l)):
-                if (_utc(l[j].started_at) - _utc(l[i].started_at)) > PENCERE:
-                    break
-                if l[i].type != l[j].type:
-                    capraz += 1
-    print(f"\n  NOT — aynı saatte FARKLI type (sleep/nap) kopya çifti: {capraz}")
-    print("  Bunlara DOKUNULMUYOR (spec 'type eşit' diyor); motor okuma anında")
-    print("  K13 ile zaten tekilleştiriyor.")
+    if not capraz:
+        _c_kume, _c_sil = _plan(db, gun, capraz=True)
+        print(f"\n  ÇAPRAZ TİP (sleep+nap aynı saatte): {len(_c_kume)} küme, "
+              f"{len(_c_sil)} kayıt")
+        print("  Varsayılan geçiş bunlara DOKUNMAZ (spec 'type eşit').")
+        print("  Temizlemek için: --capraz-tip")
 
 
-def temizle(db, gun: int, uygula: bool) -> None:
-    kumeler, silinecek = _plan(db, gun)
+def temizle(db, gun: int, uygula: bool, capraz: bool = False) -> None:
+    kumeler, silinecek = _plan(db, gun, capraz)
+    etiket = "ÇAPRAZ TİP" if capraz else "aynı type"
     if not silinecek:
-        print(f"Son {gun} günde silinecek kopya yok.")
+        print(f"Son {gun} günde silinecek kopya yok ({etiket}).")
         return
+    print(f"[{etiket}]")
 
     print(f"Kopya kümesi: {len(kumeler)} | silinecek kayıt: {len(silinecek)} | "
           f"etkilenen bebek: {len({r.baby_id for r, _k in silinecek})}\n")
@@ -193,11 +205,11 @@ def temizle(db, gun: int, uygula: bool) -> None:
         return
 
     for r, kazanan in silinecek:
+        sebep = (f"K18.3 çapraz tip kopya (±3 dk, {r.type} → {kazanan.type})"
+                 if capraz else f"K18.3 kopya (±3 dk, type={r.type})")
         db.add(SilinenSleepLog(
             sleep_log_id=r.id, user_id=r.user_id, baby_id=r.baby_id,
-            veri=_satir_json(r),
-            sebep=f"K18.3 kopya (±3 dk, type={r.type})",
-            korunan_log_id=kazanan.id))
+            veri=_satir_json(r), sebep=sebep, korunan_log_id=kazanan.id))
         db.delete(r)
     db.commit()
     print(f"\n{len(silinecek)} kopya silindi; tamamı silinen_sleep_logs'a "
@@ -235,6 +247,9 @@ def main():
     ap.add_argument("--gun", type=int, default=14,
                     help="Kaç günlük pencere taransın (varsayılan 14)")
     ap.add_argument("--rapor", action="store_true", help="Yalnız sayımlar")
+    ap.add_argument("--capraz-tip", action="store_true",
+                    help="İkinci geçiş: aynı saatte FARKLI type (sleep+nap) "
+                         "gönderilmiş kopyalar")
     ap.add_argument("--geri-al", metavar="SILINEN_ID",
                     help="silinen_sleep_logs'tan bir kaydı geri yükle")
     ap.add_argument("--uygula", action="store_true",
@@ -243,12 +258,13 @@ def main():
 
     db = SessionLocal()
     try:
+        _capraz = getattr(a, "capraz_tip", False)
         if a.geri_al:
             geri_al(db, a.geri_al, a.uygula)
         elif a.rapor:
-            rapor(db, a.gun)
+            rapor(db, a.gun, _capraz)
         else:
-            temizle(db, a.gun, a.uygula)
+            temizle(db, a.gun, a.uygula, _capraz)
     finally:
         db.close()
 
