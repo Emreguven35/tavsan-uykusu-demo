@@ -96,6 +96,23 @@ def main():
         return
 
     print("\nÜretim başlıyor (her paket bitince ElevenLabs sesi silinir)...")
+    # `ready` v2.2'de "ses klonlandı, kullanılabilir" demekti; v2.3'te "paket
+    # hazır" demek ve `uret()` onu BİTMİŞ sayıp hemen dönüyor. Geçişte durumu
+    # açıkça `cloning`e çekiyoruz — yeni modelde bu profillerin gerçek durumu
+    # budur: ses var, paket henüz yok.
+    import uuid as _uuid
+    db = SessionLocal()
+    try:
+        for pid in idler:
+            p = db.get(VoiceProfile, _uuid.UUID(pid))
+            if p is not None and p.status in HEDEF_DURUMLAR:
+                p.status = "cloning"
+                p.progress_total = voice_paket.paket_boyutu()
+                p.progress_done = 0
+        db.commit()
+    finally:
+        db.close()
+
     basarili = 0
     for pid in idler:
         sonuc = voice_uretim.uret(pid)
