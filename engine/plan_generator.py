@@ -263,7 +263,7 @@ G) BEBEK ARABASI GÜVENLİK KURALI: Bebek arabasıyla (veya hareketle/sallayarak
 
 H) SON GÜNDÜZ UYKUSU BİTİŞ SAATİ ESNEKTİR: Günlük programda son gündüz uykusu için bir bitiş saati (örn. 16:00) belirtildiğinde, o satırın/tablonun altına şu içerikte bir not ekle: "Not: Bu bitiş saati katı değildir. Önceliğimiz, bebeğin gün içinde uyuması gereken minimum uykuyu tamamlamasıdır. Bebek yaşına uygun minimum gündüz uyku süresini (YAŞ PARAMETRELERİ'ndeki gunduz_uyku_total değeri) ya da günlük toplam uyku hedefini dolduramadıysa, bu bitiş saati aşılsa bile İLAVE bir gündüz uykusu yaptırın; yani bebek yeterince uyumadıysa uykuyu 16:00'da bitirmenin bir kıymeti yoktur. Bu ilave uykudan sonra, bebeği yaşına uygun uyanıklık penceresi kadar uyanık tutup gece uykusuna geçin — gece uykusu biraz gecikse bile minimum gündüz/toplam uyku önceliklidir." Bu kural yalnızca alışma evresinde değil, eğitim tamamlandıktan sonra da geçerlidir. İlave uyku gerektiğinde, o yaşın normal gündüz uyku sayısının bir fazlasına çıkılabilir (ör. 8 ay: 3 yerine 4 uyku). Bu nottaki sayısal değerleri YAŞ PARAMETRELERİ bölümündeki gerçek değerlerden al; tabloda olmayan bir yaş için değer uydurma.
 
-I) EVRENSEL KESTİRME KURALI (HER YAŞTA GEÇERLİ — MUTLAKA YAZ): Bebek yaşına uygun GÜNDÜZ TOPLAM UYKU MİNİMUMUNU tamamlayamazsa, ilave bir kestirme uykusu yaptırılır. Bu kestirme {param.get('kestirme_protokolu', {}).get('sure_dk', 30)} DAKİKADIR ve süre dolunca bebek UYANDIRILIR. Bu kestirmeden uyandıktan {param.get('kestirme_protokolu', {}).get('gece_uykusuna_gecis_dk', 60)} dakika (1 saat) sonra bile gece uykusuna geçilebilir — yani gece uykusu bir miktar gecikse dahi minimum gündüz uykusunu tamamlamak önceliklidir. Bu kuralı "Günlük Program" bölümünün altında ayrı bir not olarak yaz; süreyi ve 1 saat kuralını AÇIKÇA belirt. Minimum gündüz uyku süresini YAŞ PARAMETRELERİ'ndeki gunduz_uyku_total değerinden al, uydurma.
+I) EVRENSEL KESTİRME KURALI (HER YAŞTA GEÇERLİ — MUTLAKA YAZ): Bebek yaşına uygun GÜNDÜZ TOPLAM UYKU MİNİMUMUNU tamamlayamazsa, GÜNÜN SONUNDA ilave bir kestirme uykusu yaptırılır. Bu kestirme {param.get('kestirme_protokolu', {}).get('sure_dk_min', 30)} DAKİKADIR (gece yatışına {param.get('kestirme_protokolu', {}).get('gece_yatisina_kalan_min_dk', 150)} dakikadan fazla varsa {param.get('kestirme_protokolu', {}).get('sure_dk_max', 60)} dakikaya çıkarılabilir) ve süre dolunca bebek UYANDIRILIR. TETİKLEYİCİ ERKEN UYANMA DEĞİL, GÜNDÜZ UYKU AÇIĞIDIR. Bu kestirmeden uyandıktan {param.get('kestirme_protokolu', {}).get('gece_uykusuna_gecis_dk', 60)} dakika (1 saat) sonra bile gece uykusuna geçilebilir — yani gece uykusu bir miktar gecikse dahi minimum gündüz uykusunu tamamlamak önceliklidir. Bu kuralı "Günlük Program" bölümünün altında ayrı bir not olarak yaz; süreyi ve 1 saat kuralını AÇIKÇA belirt. Minimum gündüz uyku süresini YAŞ PARAMETRELERİ'ndeki gunduz_uyku_total değerinden al, uydurma.
 
 J) 24 SAATLİK TOPLAM UYKU İHTİYACI (MUTLAKA YAZ): YAŞ PARAMETRELERİ'ndeki toplam_uyku_24h değeri, bebeğin gündüz + gece toplam uyku ihtiyacıdır. "Günlük Program" bölümünde bu değeri AÇIKÇA belirt ve anneye şunu anlat: bebeğin yeterince uyuyup uymadığının ölçütü tek tek uyku süreleri değil, 24 saatteki TOPLAMDIR. Gündüz ve gece toplamı bu değerin altında kalıyorsa önce gündüz uykularını (kestirme kuralıyla), sonra gece yatış saatini öne çekerek tamamlayın. Bu sayıyı YAŞ PARAMETRELERİ'nden aynen al, uydurma veya yuvarlama yapma.
 
@@ -503,13 +503,10 @@ def _fallback_plan(param: dict) -> str:
     # Evrensel kestirme kuralı (Faz Y) — her yaşta geçerli, plandan düşmemeli.
     kestirme = param.get("kestirme_protokolu") or {}
     if kestirme:
-        lines.append(f"**Kestirme uykusu kuralı:** Bebeğiniz gündüz toplam uyku "
-                     f"minimumunu ({p.get('gunduz_uyku_total', '-')}) tamamlayamazsa "
-                     f"ilave {kestirme.get('sure_dk', 30)} dakikalık bir kestirme "
-                     f"uykusu yaptırın; {kestirme.get('sure_dk', 30)} dakika dolunca "
-                     f"uyandırın. Bu kestirmeden uyandıktan "
-                     f"{kestirme.get('gece_uykusuna_gecis_dk', 60)} dakika (1 saat) "
-                     "sonra bile gece uykusuna geçebilirsiniz.")
+        from engine.parameter_engine import _kestirme_metni
+        lines.append("**Kestirme uykusu kuralı:** "
+                     + _kestirme_metni(kestirme,
+                                       str(p.get("gunduz_uyku_total", "-"))))
         lines.append("")
 
     # Bölüm 5: Eğitim Planı

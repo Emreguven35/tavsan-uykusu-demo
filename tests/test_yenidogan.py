@@ -360,8 +360,8 @@ check("9b) Çakışma kaydı KB'ye yazıldı (tutarsizlik_raporu)",
       any("0-6_hafta" in str(r.get("yas", ""))
           for r in chatbot._load_kb_safe().get("tutarsizlik_raporu", [])),
       "")
-check("9c) Alt bantlar 0-3 ay BANDININ İÇİNDE (tek kaynak, v1.3)",
-      yb.tablo()["version"] == "1.3"
+check("9c) Alt bantlar 0-3 ay BANDININ İÇİNDE (tek kaynak, v1.4)",
+      yb.tablo()["version"] == "1.4"
       and len(yb.alt_bantlar()) == 3
       # yenidogan_ritim'de ARTIK KOPYA YOK — ikinci kaynak kalmadı.
       and yb.tablo().get("yenidogan_ritim", {}).get("alt_bantlar") is None,

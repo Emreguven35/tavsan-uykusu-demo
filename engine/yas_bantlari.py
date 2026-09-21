@@ -342,8 +342,13 @@ def kestirme_degerlendir(bant: dict, gunduz_uyku_dk: float | None) -> dict:
     """Gündüz toplam uyku minimumu tutmadıysa ilave kestirme gerekir mi?
 
     Dönen: {gerekli, eksik_dk, min_gunduz_dk, gerceklesen_dk, sure_dk,
-            gece_uykusuna_gecis_dk, aciklama}
-    gunduz_uyku_dk None (kayıt yok) → gerekli False, `gerceklesen_dk` None."""
+            sure_dk_min, sure_dk_max, gece_yatisina_kalan_min_dk,
+            saat_penceresi, gece_uykusuna_gecis_dk, aciklama}
+    gunduz_uyku_dk None (kayıt yok) → gerekli False, `gerceklesen_dk` None.
+
+    v1.4 — süre artık ARALIK: 30 dk taban, gece yatışına yeterince varsa 60 dk.
+    `sure_dk` GERİYE UYUM için tabanı taşır; çizelgeyi kuran taraf
+    `sure_dk_min`/`sure_dk_max` ile gece yatışına kalan süreye bakarak seçer."""
     proto = kestirme_protokolu()
     min_dk = int(bant["gunduz_uyku_toplam_dk"][0] or 0)
     sonuc = {
@@ -351,7 +356,11 @@ def kestirme_degerlendir(bant: dict, gunduz_uyku_dk: float | None) -> dict:
         "eksik_dk": 0,
         "min_gunduz_dk": min_dk,
         "gerceklesen_dk": None if gunduz_uyku_dk is None else int(gunduz_uyku_dk),
-        "sure_dk": proto["sure_dk"],
+        "sure_dk": proto.get("sure_dk_min", proto.get("sure_dk", 30)),
+        "sure_dk_min": proto.get("sure_dk_min", 30),
+        "sure_dk_max": proto.get("sure_dk_max", 60),
+        "gece_yatisina_kalan_min_dk": proto.get("gece_yatisina_kalan_min_dk", 150),
+        "saat_penceresi": list(proto.get("saat_penceresi") or ["17:00", "19:00"]),
         "gece_uykusuna_gecis_dk": proto["gece_uykusuna_gecis_dk"],
         "aciklama": proto["aciklama"],
     }
@@ -592,9 +601,12 @@ def bant_metinleri() -> list[dict]:
         "text": (
             "Kestirme uykusu kuralı (tüm yaş bantlarında geçerli): "
             f"{proto['aciklama']} Tetik: {proto['tetik']}. "
-            f"Kestirme süresi {proto['sure_dk']} dakikadır ve süre dolunca bebek "
-            f"uyandırılır. Bu kestirmeden uyandıktan {proto['gece_uykusuna_gecis_dk']} "
-            "dakika (1 saat) sonra bile gece uykusuna geçilebilir."
+            f"Kestirme süresi {proto['sure_dk_min']} dakikadır; gece yatışına "
+            f"{proto['gece_yatisina_kalan_min_dk']} dakikadan fazla varsa "
+            f"{proto['sure_dk_max']} dakikaya çıkarılabilir. Süre dolunca bebek "
+            f"uyandırılır. Kestirme {proto['saat_penceresi'][0]}-"
+            f"{proto['saat_penceresi'][1]} arasında yapılır ve gece uykusundan en "
+            f"az {proto['gece_uykusuna_gecis_dk']} dakika önce biter."
         ),
     })
 

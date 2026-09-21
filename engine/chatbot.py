@@ -508,12 +508,9 @@ def yas_bandi_blok(bantlar: list[str], yas_ay: float | None = None) -> str:
         try:
             from engine import yas_bantlari
             proto = yas_bantlari.kestirme_protokolu()
-            satirlar.append(
-                f"[Tüm yaşlarda geçerli kural] Gündüz toplam uyku minimumu "
-                f"tamamlanamazsa ilave {proto['sure_dk']} dakikalık kestirme uykusu "
-                f"yaptırılır ({proto['sure_dk']} dakika dolunca uyandırılır); bu "
-                f"kestirmeden uyandıktan {proto['gece_uykusuna_gecis_dk']} dakika "
-                "(1 saat) sonra bile gece uykusuna geçilebilir.")
+            from engine.parameter_engine import _kestirme_metni
+            satirlar.append("[Tüm yaşlarda geçerli kural] "
+                            + _kestirme_metni(proto))
         except Exception:
             pass
 

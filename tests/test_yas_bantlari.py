@@ -199,7 +199,7 @@ _sahte = {"id": "test", "ad": "test", "ay_min": 0, "ay_max": 1,
           "uyaniklik_penceresi_devir": "12-18_ay.tek_uyku"}
 _devir, _kaynak = yb._pencere_devral(_sahte)
 check("2c) Devralma mekanizması korunuyor (eksik pencere → komşu bant + kaynak)",
-      _devir == [240, 360] and _kaynak == "12-18_ay.tek_uyku",
+      _devir == [300, 360] and _kaynak == "12-18_ay.tek_uyku",
       f"devir={_devir} kaynak={_kaynak}")
 
 
@@ -278,8 +278,10 @@ check("4) 12-18 ay iki uyku: 3-4 saat pencere, 2 uyku, min 2 saat",
       and _iki["gunduz_uyku_sayisi"] == [2, 2]
       and _iki["gunduz_uyku_toplam_dk"] == [120, None],
       f"{_iki['uyaniklik_penceresi_dk']} {_iki['gunduz_uyku_sayisi']}")
-check("4b) 12-18 ay tek uyku: 4-6 saat pencere, 1 uyku, min 2 saat",
-      _tek["uyaniklik_penceresi_dk"] == [240, 360]
+# v1.4 — İlayda: "tek uykuda uyanıklık süreleri 5-6 saattir". Tablodaki 4 saat
+# alt sınırı buna aykırıydı; 240 → 300.
+check("4b) 12-18 ay tek uyku: 5-6 saat pencere, 1 uyku, min 2 saat",
+      _tek["uyaniklik_penceresi_dk"] == [300, 360]
       and _tek["gunduz_uyku_sayisi"] == [1, 1]
       and _tek["gunduz_uyku_toplam_dk"] == [120, None],
       f"{_tek['uyaniklik_penceresi_dk']} {_tek['gunduz_uyku_sayisi']}")
@@ -340,10 +342,21 @@ check("4j) Hiçbir şart ölçülmemiş → tek uykuya GEÇİLMEZ (şüphede 2 u
 # 5) EVRENSEL KESTİRME KURALI — 30 dk + 1 saat sonra gece uykusu
 # =============================================================================
 _proto = yb.kestirme_protokolu()
-check("5) Kestirme protokolü sözleşmesi (tetik/sure_dk/gece_uykusuna_gecis_dk)",
+# v1.4 — `sure_dk` skaleri kalktı, yerine ARALIK geldi (İlayda: "30 dakika
+# minimum süredir; gece uykusunu geciktirmiyorsak bir saat de yapabilir").
+check("5) Kestirme protokolü sözleşmesi (tetik/süre aralığı/geçiş)",
       _proto["tetik"] == "gündüz min süre tamamlanmadı"
-      and _proto["sure_dk"] == 30 and _proto["gece_uykusuna_gecis_dk"] == 60,
-      str({k: _proto[k] for k in ("tetik", "sure_dk", "gece_uykusuna_gecis_dk")}))
+      and _proto["sure_dk_min"] == 30 and _proto["sure_dk_max"] == 60
+      and _proto["gece_uykusuna_gecis_dk"] == 60,
+      str({k: _proto.get(k) for k in
+           ("tetik", "sure_dk_min", "sure_dk_max", "gece_uykusuna_gecis_dk")}))
+check("5a) Kestirme penceresi ve gece yatışına kalan alt sınırı tabloda",
+      _proto["saat_penceresi"] == ["17:00", "19:00"]
+      and _proto["gece_yatisina_kalan_min_dk"] == 150,
+      str({k: _proto.get(k) for k in
+           ("saat_penceresi", "gece_yatisina_kalan_min_dk")}))
+check("5a2) Eski `sure_dk` anahtarı KALDIRILDI (tek kaynak aralık)",
+      "sure_dk" not in _proto, str(list(_proto)))
 
 # 6-8 ay: gündüz minimum 3 saat (180 dk)
 _b7 = yb.yas_bandi_getir(7)
@@ -354,7 +367,8 @@ _k_yok = yb.kestirme_degerlendir(_b7, None)         # kayıt yok → tetiklenmez
 
 check("5b) Gündüz minimum tutmadı (150 < 180) → kestirme GEREKLİ, 30 dk eksik",
       _k_eksik["gerekli"] is True and _k_eksik["eksik_dk"] == 30
-      and _k_eksik["sure_dk"] == 30 and _k_eksik["gece_uykusuna_gecis_dk"] == 60,
+      and _k_eksik["sure_dk"] == 30 and _k_eksik["sure_dk_max"] == 60
+      and _k_eksik["gece_uykusuna_gecis_dk"] == 60,
       str(_k_eksik))
 check("5c) Gündüz minimum TAM tutuldu (180) → kestirme gerekmez",
       _k_tam["gerekli"] is False and _k_tam["eksik_dk"] == 0, str(_k_tam))
@@ -611,7 +625,7 @@ _param = parametre_uret({"bebek_ad": "Test", "dogum_tarihi": _dogum.isoformat(),
                          "dogum_haftasi": 40})
 check("8) parametre_uret yapılandırılmış bandı ve kestirme kuralını taşır",
       _param["yas_bandi"]["id"] == "9-12_ay"
-      and _param["kestirme_protokolu"]["sure_dk"] == 30,
+      and _param["kestirme_protokolu"]["sure_dk_min"] == 30,
       f"bant={_param['yas_bandi']['id']}")
 check("8b) Plan parametrelerindeki sayılar tablodan geliyor (9-12 ay)",
       _param["parametreler"]["uyaniklik_penceresi"] == "3 saat - 4 saat"

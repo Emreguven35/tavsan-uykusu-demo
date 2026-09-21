@@ -26,6 +26,32 @@ def _load_json(name: str) -> dict:
         return json.load(f)
 
 
+def _kestirme_metni(proto: dict, gunduz_min: str | None = None) -> str:
+    """Kestirme (şekerleme) kuralının TEK metin kaynağı.
+
+    v1.4'e kadar protokolde tek bir `sure_dk` vardı ve metin üç ayrı dosyada
+    kopyalanmıştı. İlayda'nın cevabından sonra süre ARALIK oldu (30 dk minimum,
+    gece yatışına yeterince varsa 60 dk) — kopyalar ayrışmasın diye metin tek
+    yerden üretiliyor."""
+    lo = proto.get("sure_dk_min", proto.get("sure_dk", 30))
+    hi = proto.get("sure_dk_max", lo)
+    kalan = proto.get("gece_yatisina_kalan_min_dk", 150)
+    gecis = proto.get("gece_uykusuna_gecis_dk", 60)
+    pencere = proto.get("saat_penceresi") or ["17:00", "19:00"]
+    hedef = f" ({gunduz_min})" if gunduz_min else ""
+    metin = (f"Bebek gündüz toplam uyku minimumunu{hedef} tamamlayamazsa GÜNÜN "
+             f"SONUNDA ilave bir kestirme uykusu yaptırılır. Süre {lo} "
+             "dakikadır")
+    if hi and hi > lo:
+        metin += (f"; gece yatışına {kalan} dakikadan fazla varsa {hi} "
+                  "dakikaya çıkarılabilir")
+    metin += (f". Kestirme {pencere[0]}-{pencere[1]} arasında yapılır ve gece "
+              f"uykusundan en az {gecis} dakika önce biter; süre dolunca bebek "
+              "UYANDIRILIR. Tetikleyici erken uyanma değil, gündüz uyku "
+              "açığıdır.")
+    return metin
+
+
 def load_kb() -> dict:
     """master_knowledge_base.json — audio + visual + coverage birleşik veritabanı."""
     return _load_json("master_knowledge_base.json")
@@ -219,7 +245,7 @@ def on_hazirlik_belirle(profile: dict, yas: dict) -> list[dict]:
             "aksiyon": (
                 "Memeyle uyutmayı bırakıp sallanarak uyutmaya geç. "
                 "En az 3 başarılı seans sonra eğitime başlayabilirsiniz. "
-                "Beslenme uykudan en az 30-45 dakika önce bitsin."
+                "Beslenme her uykudan en az 1 saat önce bitmiş olmalı; ek gıdaya geçen bebekte ek gıda da dahil."
             ),
         })
     elif "salla" in destek:
@@ -302,7 +328,7 @@ def on_hazirlik_belirle(profile: dict, yas: dict) -> list[dict]:
             "konu": "Beslenme zamanlaması",
             "sure": "Hemen",
             "aksiyon": (
-                "Beslenmeyi uykudan en az 30 dakika, ideal 45-60 dakika ÖNCE bitirin. "
+                "Beslenme her uykudan en az 1 saat önce bitmiş olmalı; ek gıdaya geçen bebekte ek gıda da dahil. "
                 "Beslenme rutinden ayrı bir aktivite olmalı. Memeyle/mamayla uyutmayın."
             ),
         })
@@ -437,7 +463,8 @@ def gece_beslenme_planla(profile: dict, yas: dict) -> dict | None:
             "yas_grup": "6 ay altı",
             "ogun_sayisi": "İhtiyaca göre (uykudayken besle)",
             "saatler": "Bebek talep ettiğinde",
-            "kural": "Uyandığında DEĞİL, uykudayken besle. 30-45 dk öncesinden bitir.",
+            "kural": ("Uyandığında DEĞİL, uykudayken besle. Beslenme her uykudan "
+                      "en az 1 saat önce bitmiş olmalı."),
         }
     elif ay < 9:
         kilo_iyi = _lowstr(profile.get("kilo_durumu")).startswith("iyi") or "normal" in _lowstr(profile.get("kilo_durumu"))
@@ -596,13 +623,8 @@ def _bant_parametreleri(bant: dict) -> dict:
         # KB'nin toplam_uyku_24h değeri (ör. 6 ay için "12-15 Saat") tabloyla
         # çelişiyor (İlayda: 14 saat) — tablo üstüne yazar.
         "toplam_uyku_24h": yas_bantlari._aralik(bant["toplam_gunluk_uyku_dk"]),
-        "kestirme_protokolu": (
-            f"Gündüz toplam uyku minimumu ({yas_bantlari._aralik(bant['gunduz_uyku_toplam_dk'])}) "
-            f"tamamlanamazsa ilave {proto['sure_dk']} dakikalık kestirme uykusu "
-            f"yaptırılır; {proto['sure_dk']} dakika dolunca bebek uyandırılır. Bu "
-            f"kestirmeden uyandıktan {proto['gece_uykusuna_gecis_dk']} dakika "
-            "(1 saat) sonra bile gece uykusuna geçilebilir."
-        ),
+        "kestirme_protokolu": _kestirme_metni(
+            proto, yas_bantlari._aralik(bant["gunduz_uyku_toplam_dk"])),
         "yas_bandi_notlari": list(bant.get("notlar") or []),
     }
 
