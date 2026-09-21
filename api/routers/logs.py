@@ -1,6 +1,10 @@
 """
 logs router — /api/v1/logs
 
+- POST /logs/batch: KAYIT BAZLI kabul/ret. Her kalem ayrı doğrulanır;
+  geçerliler yazılır, geçersizler `skipped` listesinde sebebiyle döner. Yanıt
+  daima 200 — 422 yalnız gövdenin kendisi bozuksa (bkz. BatchReq). Eskiden tek
+  bozuk kayıt bütün batch'i düşürüyordu.
 - POST /logs/batch: mobil SQLite sync-manager için toplu upsert. client_id ile
   idempotent: aynı (user_id, client_id) ikinci kez gelirse GÜNCELLENİR.
   client_id YOKSA (eski istemci) aynı bebek + aynı type + başlangıcı ±3 dk
@@ -23,14 +27,17 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import ValidationError
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from api.db import get_db
 from api.deps import get_current_user
 from api.models import Baby, SleepLog, User
 from api.schemas.log import (
-    BatchReq, BatchResult, DaySummary, SleepLogResp, WeeklySummaryResp,
+    BatchReq, BatchResult, DaySummary, SkippedEntry, SleepLogIn, SleepLogResp,
+    SyncedEntry, WeeklySummaryResp,
 )
 from api.services.plan_adapter import (
     TZ_OFFSET_MIN, UYKU_ETIKETLERI, uyku_sinifi_ham,
@@ -43,19 +50,85 @@ def _owned_baby_ids(db: Session, user: User) -> set:
     return {b.id for b in db.query(Baby.id).filter(Baby.user_id == user.id)}
 
 
+# --- Kayıt bazlı ret sebepleri ----------------------------------------------
+# `reason` makine tarafı, `detail` anneye/geliştiriciye gösterilecek Türkçe.
+_ALAN_SEBEBI = {
+    "type": ("invalid_type", "Kayıt tipi geçersiz"),
+    "started_at": ("invalid_time", "Başlangıç zamanı geçersiz"),
+    "ended_at": ("invalid_time", "Bitiş zamanı geçersiz"),
+    "baby_id": ("invalid_baby", "Bebek kimliği geçersiz"),
+    "client_id": ("invalid", "client_id geçersiz"),
+    "notes": ("invalid", "Not alanı geçersiz"),
+}
+
+
+def _dogrulama_sebebi(exc: ValidationError) -> tuple[str, str]:
+    """Pydantic hatasını (reason, Türkçe detail) çiftine indir.
+
+    İLK hata yeterli: mobil kaydı zaten tümüyle reddedecek, ikinci alanın da
+    bozuk olması kararı değiştirmiyor."""
+    hatalar = exc.errors()
+    if not hatalar:
+        return "invalid", "Kayıt geçersiz"
+    h = hatalar[0]
+    alan = next((str(x) for x in reversed(h.get("loc") or ())
+                 if isinstance(x, str)), "")
+    if h.get("type") == "missing":
+        return "missing_field", f"Zorunlu alan eksik: {alan or 'bilinmiyor'}"
+    kod, metin = _ALAN_SEBEBI.get(alan, ("invalid", "Kayıt geçersiz"))
+    if alan == "type":
+        metin += " (beklenen: sleep, nap, sekerleme, wake, feed, night_wake, "
+        metin += "nap_skipped)"
+    return kod, metin
+
+
+def _client_id_oku(ham: dict) -> str | None:
+    """Doğrulama patlasa bile mobilin kaydı eşleyebilmesi için client_id.
+
+    Kaydın geri kalanı bozuk olsa da bu alan okunabiliyorsa okunur — yoksa
+    mobil hangi yerel satırın reddedildiğini bilemez ve onu sonsuza kadar
+    yeniden gönderir."""
+    cid = ham.get("client_id")
+    return cid if isinstance(cid, str) and cid else None
+
+
 @router.post("/batch", response_model=BatchResult)
 def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
                  user: User = Depends(get_current_user)):
-    owned = _owned_baby_ids(db, user)
-    created = updated = skipped = 0
-    out: list[SleepLog] = []
+    """Kayıt bazlı kabul/ret — geçerliler yazılır, geçersizler sebebiyle döner.
 
-    for item in req.logs:
-        if item.baby_id not in owned:            # başka kullanıcının bebeği → atla
-            skipped += 1
+    Yanıt DAİMA 200'dür (gövdenin kendisi bozuk değilse). Tüm kalemler geçersiz
+    olsa bile 200 + hepsi `skipped` döner: mobil o kayıtları kalıcı reddedip
+    kuyruktan düşürebilsin. 422 dönmek, mobili "hangisi bozuktu" diye ikili
+    bölmeye zorluyordu."""
+    owned = _owned_baby_ids(db, user)
+    created = updated = 0
+    out: list[SleepLog] = []
+    skipped: list[SkippedEntry] = []
+    synced: list[SyncedEntry] = []
+
+    for ham in req.logs:
+        if not isinstance(ham, dict):
+            skipped.append(SkippedEntry(
+                reason="invalid",
+                detail="Kayıt bir nesne değil (JSON object bekleniyor)"))
+            continue
+        cid = _client_id_oku(ham)
+        try:
+            item = SleepLogIn.model_validate(ham)
+        except ValidationError as e:
+            kod, detay = _dogrulama_sebebi(e)
+            skipped.append(SkippedEntry(client_id=cid, reason=kod, detail=detay))
+            continue
+
+        if item.baby_id not in owned:            # başka kullanıcının bebeği
+            skipped.append(SkippedEntry(
+                client_id=cid, reason="not_owned",
+                detail="Bu bebek hesabınıza ait değil"))
             continue
 
         row = None
+        kopya = False
         if item.client_id is not None:
             # Birincil idempotency anahtarı. Bebek de süzülüyor: tekillik
             # (baby_id, client_id) üzerinde de tanımlı (K18.1).
@@ -69,28 +142,49 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
                        .filter(SleepLog.user_id == user.id,
                                SleepLog.client_id == item.client_id)
                        .one_or_none())
+            kopya = row is not None
         else:
             # K18.2 — client_id yok: zaman penceresiyle kopya ara.
             row = _kopya_bul(db, user, item)
+            kopya = row is not None
 
-        if row is None:                          # yeni kayıt
-            row = SleepLog(
-                user_id=user.id, baby_id=item.baby_id, type=item.type,
-                started_at=item.started_at, ended_at=item.ended_at,
-                notes=item.notes, client_id=item.client_id,
-            )
-            db.add(row)
-            created += 1
-        else:                                    # mevcut → güncelle (idempotent)
-            row.baby_id = item.baby_id
-            row.type = item.type
-            row.started_at = item.started_at
-            row.ended_at = item.ended_at
-            row.notes = item.notes
-            updated += 1
+        # Her kayıt KENDİ savepoint'inde yazılır: birinin kısıt ihlali
+        # (ör. yarışan aynı client_id) diğerlerini geri almasın.
+        try:
+            with db.begin_nested():
+                if row is None:                  # yeni kayıt
+                    row = SleepLog(
+                        user_id=user.id, baby_id=item.baby_id, type=item.type,
+                        started_at=item.started_at, ended_at=item.ended_at,
+                        notes=item.notes, client_id=item.client_id,
+                    )
+                    db.add(row)
+                    created += 1
+                else:                            # mevcut → güncelle (idempotent)
+                    row.baby_id = item.baby_id
+                    row.type = item.type
+                    row.started_at = item.started_at
+                    row.ended_at = item.ended_at
+                    row.notes = item.notes
+                    updated += 1
+                db.flush()                       # aynı batch'te sonraki aramalar görsün
+        except SQLAlchemyError:
+            logging.getLogger("tavsan.logs").exception(
+                "Batch kaydı yazılamadı (user=%s client_id=%s)", user.id, cid)
+            skipped.append(SkippedEntry(
+                client_id=cid, reason="db_error",
+                detail="Kayıt veritabanına yazılamadı, tekrar denenecek"))
+            continue
 
-        db.flush()                               # aynı batch'te sonraki aramalar görsün
         out.append(row)
+        synced.append(SyncedEntry(client_id=row.client_id, id=row.id))
+        if kopya:
+            # Spec: kopya HEM synced'de mevcut id ile döner HEM skipped'de
+            # işaretlenir. Mobil "duplicate" sebebini BAŞARILI sayıyor
+            # (kayıt zaten sunucuda) — kuyruktan düşer, yeniden gönderilmez.
+            skipped.append(SkippedEntry(
+                client_id=cid, id=row.id, reason="duplicate",
+                detail="Bu kayıt zaten kaydedilmişti, güncellendi"))
 
     # K13.3 — AÇIK SAYACI KAPAT. Anne sayacı başlatıp durdurmuyor, sonra aynı
     # uykuyu elle giriyor; iki kayıt iki ayrı uyku sanılıyordu. Hesap tarafı
@@ -113,7 +207,7 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
     # çizelge matematiği, LLM/ağ YOK) ve içerik değişmediyse DB'ye yazılmaz.
     plan_updated = _plani_tazele(db, user, {r.baby_id for r in out})
     return BatchResult(created=created, updated=updated, skipped=skipped,
-                       logs=out, plan_updated=plan_updated,
+                       synced=synced, logs=out, plan_updated=plan_updated,
                        timer_closed=timer_closed)
 
 

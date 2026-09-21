@@ -1,6 +1,7 @@
 """Sleep log şemaları — mobil SQLite sync-manager sözleşmesi (batch upsert)."""
 import uuid
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -28,7 +29,16 @@ class SleepLogIn(BaseModel):
 
 
 class BatchReq(BaseModel):
-    logs: list[SleepLogIn] = Field(min_length=1, max_length=1000)
+    """Batch gövdesi — kalemler HAM alınır, TEK TEK doğrulanır.
+
+    `list[SleepLogIn]` DEĞİL: Pydantic tek bozuk kalemde bütün isteği 422 ile
+    düşürüyordu. BATCH_SIZE 200 olduğu için tek bozuk kayıt 199 sağlam kaydı
+    birlikte gömüyor, mobil tarafta sessiz veri kaybına yol açıyordu (mobil
+    bunu ikili bölmeyle telafi etmeye çalışıyor — artık gerek kalmıyor).
+
+    422 YALNIZ gövdenin kendisi bozuksa döner: `logs` yok, liste değil ya da
+    boş. Kalemlerin geçerliliği `batch_upsert` içinde kayıt bazında ölçülür."""
+    logs: list[Any] = Field(min_length=1, max_length=1000)
 
 
 class SleepLogResp(BaseModel):
@@ -51,10 +61,38 @@ class SleepLogResp(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SyncedEntry(BaseModel):
+    """Sunucuya YAZILAN kayıt: mobilin yerel satırı eşleyebilmesi için."""
+    client_id: str | None = None
+    id: uuid.UUID
+
+
+class SkippedEntry(BaseModel):
+    """Yazılmayan ya da kopya olduğu için yeniden yazılmayan kayıt.
+
+    `reason` MAKİNE tarafı (mobil buna göre karar verir), `detail` kullanıcıya
+    gösterilebilecek Türkçe cümledir.
+
+    reason değerleri: duplicate | invalid_type | invalid_time | invalid_baby |
+    not_owned | missing_field | invalid | db_error
+    "duplicate" mobilde BAŞARILI sayılır (kayıt zaten sunucuda)."""
+    client_id: str | None = None
+    id: uuid.UUID | None = None
+    reason: str
+    detail: str
+
+
 class BatchResult(BaseModel):
     created: int
     updated: int
-    skipped: int                    # sahibi olunmayan baby_id vb. nedeniyle atlanan
+    # v2.3.1 — SAYI DEĞİL LİSTE. Mobil (sync-batch.ts) iki şekli de kabul
+    # ediyor; sayı gelince hangi kaydın elendiğini bilemediği için hiçbirini
+    # suçlayamıyor ve hepsini "gitti" sayıyordu. Liste ile eleme kayıt bazında
+    # `rejected`a yazılabiliyor.
+    skipped: list[SkippedEntry] = []
+    # Yazılan kayıtların (client_id → sunucu id) eşlemesi. `logs` alanı eski
+    # istemciler için AYNEN duruyor; bu alan aynı bilginin sade hâli.
+    synced: list[SyncedEntry] = []
     logs: list[SleepLogResp]
     # v2/K8: bu senkron sonucunda BUGÜNÜN çizelgesi değişti mi. true ise mobil
     # plans/today sorgusunu invalidate etmelidir.
