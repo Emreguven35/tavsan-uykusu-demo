@@ -12,7 +12,15 @@ class SleepLogIn(BaseModel):
     # nap_skipped (v2/K7): "bu uykuyu HİÇ yapmadı". Gün içi kayma motoru bunu
     # gördüğünde o uykuyu çizelgeden düşürür ve sonraki blokları öne çeker.
     # ended_at bu tipte anlamsızdır; started_at "ne zaman uyuması gerekiyordu"dur.
-    type: str = Field(pattern="^(sleep|nap|wake|feed|night_wake|nap_skipped)$")
+    #
+    # `sekerleme` (v2.2.2/K19): eski istemcilerin (build 16/18) gönderdiği ad.
+    # Motor açısından normal bir uykudur — GÜNDÜZ mü GECE mi olduğunu `type`
+    # DEĞİL, başlangıç saati belirler (plan_adapter.uyku_tipi_belirle).
+    # Şemada açıkça kabul edilmesi ŞART: aksi hâlde kayıt 422 ile tümüyle
+    # DÜŞÜYOR ve annenin uykusu hiç kaydedilmemiş oluyor (prod duman testinde
+    # yakalandı). Yeni istemci yalnız sleep/nap gönderiyor.
+    type: str = Field(
+        pattern="^(sleep|nap|sekerleme|wake|feed|night_wake|nap_skipped)$")
     started_at: datetime
     ended_at: datetime | None = None
     notes: str | None = None
