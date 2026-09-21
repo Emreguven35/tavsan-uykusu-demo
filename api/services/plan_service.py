@@ -183,11 +183,75 @@ def uyarilari_turet(baby: Baby, logs: Iterable[SleepLog], today: date,
     hafta = etkin_dogum_haftasi(baby, dogum_haftasi)
     yas = hesapla_yas_ay(baby.birth_date.isoformat(), hafta)
     gu = gece_uyanma_kaynagi(baby, logs, today)
+    # v1.4 — kartın asıl ölçütü: son 7 gecede kaç gecede 20 dk+ süren ve
+    # müdahale gerektiren uyanma oldu. Kayıt yoksa None → beyana düşülür.
+    uzun = uzun_uyanma_gece_sayisi(logs, today) if gu["gece_sayisi"] else None
     sonuc = egitim_uygunlugu_kontrol(
         yas["duzeltilmis_ay"], hafta, getattr(baby, "saglik_problemi", None),
-        ilk_tam_sayi(gu["deger"]), gu["kaynak"])
+        ilk_tam_sayi(gu["deger"]), gu["kaynak"],
+        uzun_uyanma_gece_sayisi=uzun)
     return {"uygun_mu": sonuc["uygun_mu"], "uyarilar": sonuc["uyarilar"],
-            "gece_uyanma": gu, "yas": yas}
+            "gece_uyanma": gu, "yas": yas,
+            "uzun_uyanma_gece_sayisi": uzun}
+
+
+# Anne "evet, kendi dönüyor" dediyse kart bu kadar gün gösterilmez.
+REGRESYON_SESSIZLIK_GUN = 7
+
+
+def regresyon_cevabi(baby: Baby, today: date) -> bool | None:
+    """Annenin "kendi uykuya dönüyor mu?" cevabı — süresi geçmişse None.
+
+    "Evet" cevabı REGRESYON_SESSIZLIK_GUN boyunca kartı kapatır; sonra durum
+    değişmiş olabileceği için yeniden sorulur. "Hayır" cevabının süresi yoktur:
+    akış 45 gün kapısına göre ilerler."""
+    cevap = getattr(baby, "regresyon_kendi_donuyor", None)
+    if cevap is not True:
+        return cevap
+    verildi = getattr(baby, "regresyon_cevap_at", None)
+    if verildi is None:
+        return True
+    if verildi.tzinfo is None:
+        verildi = verildi.replace(tzinfo=timezone.utc)
+    if (today - verildi.date()).days >= REGRESYON_SESSIZLIK_GUN:
+        return None                      # süre doldu → yeniden sor
+    return True
+
+
+def uzun_uyanma_gece_sayisi(logs: Iterable[SleepLog], today: date,
+                            gun: int = GECE_UYANMA_PENCERE_GUN) -> int:
+    """Son `gun` gecede, 20 dk+ süren gece uyanmasının görüldüğü GECE sayısı.
+
+    İlayda (S6): "Bu uyanmada 20 dakikanın üzerinde uyanık kalıp kendi
+    dönemiyorsa sorundur bizim için." Süre girilmemişse
+    GECE_UYANMA_VARSAYILAN_DK (10 dk) varsayılır ve eşiğin altında kalır —
+    yani "bilinmiyor" otomatik olarak sorun sayılmaz.
+
+    Gece anahtarı: öğleden önceki uyanmalar BİR ÖNCEKİ gecenin sayılır
+    (detect_regression ile aynı kural)."""
+    basla = today - timedelta(days=gun - 1)
+    geceler: set = set()
+    for lg in logs or []:
+        if getattr(lg, "type", None) != "night_wake":
+            continue
+        bitis = getattr(lg, "ended_at", None)
+        if bitis is None:
+            sure = plan_adapter.GECE_UYANMA_VARSAYILAN_DK
+        else:
+            bas = lg.started_at
+            if bas.tzinfo is None:
+                bas = bas.replace(tzinfo=timezone.utc)
+            if bitis.tzinfo is None:
+                bitis = bitis.replace(tzinfo=timezone.utc)
+            sure = (bitis - bas).total_seconds() / 60
+        if sure < plan_adapter.UZUN_UYANMA_MIN_DK:
+            continue
+        g, dakika = plan_adapter._local_minute(lg.started_at,
+                                               plan_adapter.TZ_OFFSET_MIN)
+        gece = g - timedelta(days=1) if dakika < 12 * 60 else g
+        if basla <= gece <= today:
+            geceler.add(gece)
+    return len(geceler)
 
 
 def bucket_params(baby: Baby, dogum_haftasi: int | None = None
@@ -628,7 +692,9 @@ def _adaptation_meta(result: dict, summary: dict, required: bool) -> dict:
     meta.update({
         "regenerate_required": required,
         "regression_detected": result["regression_detected"],
-        "restart_program_suggested": result["restart_program_suggested"],
+        "regresyon_karti": result.get("regresyon_karti"),
+        "egitim_baslangic_gunu": result.get("egitim_baslangic_gunu"),
+        "kirkbes_gun_doldu": bool(result.get("kirkbes_gun_doldu")),
         "reasons": result["reasons"],
         "log_summary": summary,
     })
@@ -655,7 +721,8 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         plan = _yenidogan_bugune_tasi(db, user, baby, base_plan, today)
         return plan, {
             "regenerate_required": False, "regression_detected": False,
-            "restart_program_suggested": False, "adaptation": None,
+            "regresyon_karti": None, "egitim_baslangic_gunu": None,
+            "kirkbes_gun_doldu": False, "adaptation": None,
             "kestirme": None, "toplam_uyku": None,
             "reasons": ["0-3 ay yenidoğan ritim rehberi adapte edilmez: bu yaşta "
                         "katı uyku programı uygulanmaz, hesaplanacak çizelge yok."],
@@ -685,7 +752,9 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         base_content, params, logs,
         training_completed_at=baby.training_completed_at, today=today,
         now_minute=now_minute, yas_ay=yas_ay, tek_uyku=tek_uyku,
-        log_summary=summary)
+        log_summary=summary,
+        training_started_at=baby.training_started_at,
+        regresyon_kendi_donuyor=regresyon_cevabi(baby, today))
 
     if result["regenerate_required"]:
         content = generate_content(baby, None, dogum_haftasi,
@@ -743,6 +812,10 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         content.setdefault("adaptation", {})
         if isinstance(content["adaptation"], dict):
             content["adaptation"]["gece_uyanma"] = turetilmis["gece_uyanma"]
+            # v1.4 — kartın ASIL ölçütü bu: son 7 gecede kaç gecede 20 dk+
+            # süren, kendi dönemediği uyanma oldu. None = kayıt yok (beyana
+            # düşüldü). Mobil kartın neden çıktığını buradan gösterebilir.
+            content["adaptation"]["uzun_uyanma_gece_sayisi"] =                 turetilmis["uzun_uyanma_gece_sayisi"]
 
     plan = upsert_plan(db, user, baby, today, content)
     return plan, result
@@ -771,7 +844,8 @@ def _yenidogan_bugune_tasi(db: Session, user: User, baby: Baby,
     bayrağı eklenir. Burada sessizce eğitim planı ÜRETİLMEZ: o üretim ücretli
     bir Sonnet çağrısıdır ve bir GET isteğinin yan etkisi olamaz — mobil bayrağı
     görüp kullanıcıya "yeni planınızı oluşturalım mı?" kartını gösterir
-    (restart_program_suggested ile aynı desen)."""
+    (regresyon kartıyla aynı desen: sunucu bayrağı basar, üretimi kullanıcı
+    onayı tetikler)."""
     content = dict(base_plan.content or {})
     dogum_haftasi = content.get("dogum_haftasi", 40)
     yas = hesapla_yas_ay(baby.birth_date.isoformat(), int(dogum_haftasi or 40))

@@ -52,8 +52,9 @@ client = TestClient(app)
 TZ = pa.TZ_OFFSET_MIN
 TODAY = datetime.now(timezone.utc).date()
 
-KART = "gece çok uyanıyor"                   # beyan metninin ayırt edici parçası
-KART_OLCULEN = "Son 7 gecede ortalama"       # ölçülen metninin ayırt edici parçası
+# v1.4 — kart metni TEK. Eskiden beyan/ölçüm için iki ayrı metin vardı;
+# İlayda (S6) "sayı değil" dediği için ortalama cümlesi kalktı.
+KART = "kendi başına uykuya dönemiyor"       # kart metninin ayırt edici parçası
 
 results: list[tuple[str, bool, str]] = []
 
@@ -63,7 +64,7 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 
 
 def kart_var(uyarilar) -> bool:
-    return any(KART in u or KART_OLCULEN in u for u in uyarilar or [])
+    return any(KART in u for u in uyarilar or [])
 
 
 def utc(gun, yerel_dk: int) -> datetime:
@@ -111,8 +112,12 @@ def yas_degistir(bid: str, ay: float) -> None:
     db.close()
 
 
-def gece_uyanma_yaz(bid: str, gece_sayisi: int, uyanma_per_gece: int) -> None:
+def gece_uyanma_yaz(bid: str, gece_sayisi: int, uyanma_per_gece: int,
+                    sure_dk: int = 25) -> None:
     """Son `gece_sayisi` gecede her gece `uyanma_per_gece` adet night_wake.
+
+    `sure_dk` v1.4'te ÖNEMLİ: kart artık sayıya değil, 20 dk+ süren uyanmanın
+    kaç gecede görüldüğüne bakıyor. Varsayılan 25 dk → "uzun" sayılır.
 
     Kayıtlar yerel 23:30'a yazılır. Motor "öğleden ÖNCEKİ uyanma bir önceki
     gecenin" kuralını uyguluyor (detect_regression ile aynı); 02:00'a yazsaydık
@@ -128,7 +133,7 @@ def gece_uyanma_yaz(bid: str, gece_sayisi: int, uyanma_per_gece: int) -> None:
             bas = utc(gun, 23 * 60 + 30 + k)         # yerel 23:30, 23:31, …
             db.add(SleepLog(user_id=row.user_id, baby_id=row.id,
                             type="night_wake", started_at=bas,
-                            ended_at=bas + timedelta(minutes=25)))
+                            ended_at=bas + timedelta(minutes=sure_dk)))
     db.commit()
     db.close()
 
@@ -136,7 +141,7 @@ def gece_uyanma_yaz(bid: str, gece_sayisi: int, uyanma_per_gece: int) -> None:
 # =============================================================================
 # 1) SAF FONKSİYON — sayısal eşik (alt dize araması KALDIRILDI)
 # =============================================================================
-print("1) Eşik matrisi (yaş 9 ay, kaynak=beyan)")
+print("1) Eşik matrisi (yaş 9 ay, kaynak=beyan — KAYIT YOKKEN geçerli yol)")
 for n, beklenen in [(None, False), (0, False), (1, False), (4, False),
                     (5, True), (6, True), (10, True), (11, True), (12, True),
                     (14, True), (20, True), (25, True)]:
@@ -160,10 +165,25 @@ for metin, beklenen_sayi, beklenen_kart in [
           sayi == beklenen_sayi and kart_var(r["uyarilar"]) is beklenen_kart,
           f"sayi={sayi} uyarilar={r['uyarilar']}")
 
-check("2b) 'olculen' kaynağı metni değiştirir, eşiği DEĞİŞTİRMEZ",
-      KART_OLCULEN in egitim_uygunlugu_kontrol(9.0, 40, None, 6, "olculen")["uyarilar"][0]
-      and not kart_var(egitim_uygunlugu_kontrol(9.0, 40, None, 4, "olculen")["uyarilar"]),
-      "")
+# v1.4 — İlayda (S6): "Sayı değil, kesinlikle." Ölçülen kaynakta sayı artık
+# kartı TEK BAŞINA üretmez; ölçüt uzun_uyanma_gece_sayisi'dır.
+check("2b) 'olculen' + yüksek sayı, uzun uyanma YOK → kart YOK",
+      not kart_var(egitim_uygunlugu_kontrol(9.0, 40, None, 12, "olculen",
+                                            uzun_uyanma_gece_sayisi=0)["uyarilar"]),
+      egitim_uygunlugu_kontrol(9.0, 40, None, 12, "olculen",
+                               uzun_uyanma_gece_sayisi=0)["uyarilar"])
+check("2c) 'olculen' + düşük sayı, 3 gece uzun uyanma → kart VAR",
+      kart_var(egitim_uygunlugu_kontrol(9.0, 40, None, 1, "olculen",
+                                        uzun_uyanma_gece_sayisi=3)["uyarilar"]), "")
+check("2d) 2 gece uzun uyanma eşiğin ALTINDA → kart YOK",
+      not kart_var(egitim_uygunlugu_kontrol(9.0, 40, None, 12, "olculen",
+                                            uzun_uyanma_gece_sayisi=2)["uyarilar"]), "")
+check("2e) Ölçüm BEYANI GÖLGELER (beyan 12, ölçüm 0 → kart YOK)",
+      not kart_var(egitim_uygunlugu_kontrol(9.0, 40, None, 12, "beyan",
+                                            uzun_uyanma_gece_sayisi=0)["uyarilar"]), "")
+check("2f) 6 ay altı: 5 gece uzun uyanma olsa da kart YOK (yaş eşiği)",
+      not kart_var(egitim_uygunlugu_kontrol(5.5, 40, None, 12, "olculen",
+                                            uzun_uyanma_gece_sayisi=5)["uyarilar"]), "")
 
 # =============================================================================
 # 3) CANLI: kart koşul düşünce KALKAR (v2.0'da kalıyordu)
@@ -206,33 +226,47 @@ H3 = _tok("uyari3@example.com")
 BID3 = bebek_kur(H3, 9.0, night_wakes=8)
 plan_uret(H3, BID3)
 
-gece_uyanma_yaz(BID3, gece_sayisi=2, uyanma_per_gece=1)       # eşik altı (<3)
+# 2 gece × 25 dk uyanma: KAYIT VAR ama uzun uyanma 3 geceden az → kart YOK.
+# (v1.3'te bu senaryoda beyan 8 olduğu için kart VARDI — "sayı" ölçütü kalktı.)
+gece_uyanma_yaz(BID3, gece_sayisi=2, uyanma_per_gece=1)
 c3 = bugun(H3, BID3)
 gu = c3["adaptation"]["gece_uyanma"]
-check("5) 2 gece veri → kaynak hâlâ 'beyan', kart VAR",
-      gu["kaynak"] == "beyan" and gu["deger"] == 8 and kart_var(c3["uyarilar"]),
-      gu)
+check("5) 2 gece uzun uyanma → beyan 8 olsa bile kart YOK (sayı ölçüt değil)",
+      c3["adaptation"]["uzun_uyanma_gece_sayisi"] == 2
+      and not kart_var(c3["uyarilar"]),
+      f'{gu} uzun={c3["adaptation"]["uzun_uyanma_gece_sayisi"]} '
+      f'uyarilar={c3["uyarilar"]}')
 
 gece_uyanma_yaz(BID3, gece_sayisi=3, uyanma_per_gece=1)       # eşik tamam
 c3b = bugun(H3, BID3)
 gu3b = c3b["adaptation"]["gece_uyanma"]
-check("5b) 3 gece veri → kaynak 'olculen', ortalama 1 → kart KALKTI",
+check("5b) 3 gecede 20 dk+ uyanma → kart VAR (ortalama 1 olsa bile)",
       gu3b["kaynak"] == "olculen" and gu3b["deger"] == 1
-      and not kart_var(c3b["uyarilar"]),
+      and c3b["adaptation"]["uzun_uyanma_gece_sayisi"] == 3
+      and kart_var(c3b["uyarilar"]),
       f'{gu3b} uyarilar={c3b["uyarilar"]}')
 
-gece_uyanma_yaz(BID3, gece_sayisi=7, uyanma_per_gece=6)       # gerçekten kötü
+# 7 gece × 6 uyanma AMA hepsi 10 dk: sayı yüksek, süre kısa → kart YOK.
+gece_uyanma_yaz(BID3, gece_sayisi=7, uyanma_per_gece=6, sure_dk=10)
 c3c = bugun(H3, BID3)
 gu3c = c3c["adaptation"]["gece_uyanma"]
-check("5c) 7 gece × 6 uyanma → kart 'ölçülen' metniyle GERİ GELDİ",
+check("5c) 7 gece × 6 KISA uyanma → kart YOK (20 dk altı sorun değil)",
       gu3c["kaynak"] == "olculen" and gu3c["deger"] == 6
-      and gu3c["gece_sayisi"] == 7
-      and any(KART_OLCULEN in u for u in c3c["uyarilar"]),
-      f'{gu3c} uyarilar={c3c["uyarilar"]}')
-check("5d) Ölçülen kart metni ortalamayı yazıyor",
-      any("ortalama 6 kez" in u for u in c3c["uyarilar"]), c3c["uyarilar"])
-check("5e) Ölçüm beyanı GÖLGEDE bırakıyor (beyan 8 ama metin ölçüme dayalı)",
-      not any(KART in u for u in c3c["uyarilar"]), c3c["uyarilar"])
+      and c3c["adaptation"]["uzun_uyanma_gece_sayisi"] == 0
+      and not kart_var(c3c["uyarilar"]),
+      f'{gu3c} uzun={c3c["adaptation"]["uzun_uyanma_gece_sayisi"]} '
+      f'uyarilar={c3c["uyarilar"]}')
+
+gece_uyanma_yaz(BID3, gece_sayisi=7, uyanma_per_gece=2, sure_dk=30)
+c3d = bugun(H3, BID3)
+check("5d) 7 gece × 30 dk uyanma → kart GERİ GELDİ",
+      c3d["adaptation"]["uzun_uyanma_gece_sayisi"] == 7
+      and kart_var(c3d["uyarilar"]), c3d["uyarilar"])
+check("5e) Kart metni sebebi (gündüz uykusu yetersizliği) söylüyor",
+      any("gündüz uykusunun yetersiz" in u for u in c3d["uyarilar"]),
+      c3d["uyarilar"])
+check("5f) Kart metni ARTIK sayı/ortalama yazmıyor",
+      not any("ortalama" in u for u in c3d["uyarilar"]), c3d["uyarilar"])
 
 # =============================================================================
 # 6) 5 ay altı uyarısı bebek 5 ayı doldurunca KALKAR

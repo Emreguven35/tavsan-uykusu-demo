@@ -248,17 +248,20 @@ _loglar_1fail = wake_logs(7, 10) + fail_night_logs(1)
 
 r7 = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, _loglar_2fail,
               training_completed_at=DONE_13, today=TODAY, now_minute=NOW)
-check("7) adapt: regression_detected + restart_program_suggested",
-      r7["regression_detected"] is True and r7["restart_program_suggested"] is True
+check("7) adapt: regression_detected + regresyon_karti (v1.4 1. kademe)",
+      r7["regression_detected"] is True
+      and (r7["regresyon_karti"] or {}).get("tip") == "kendi_donuyor_mu"
       and r7["regenerate_required"] is False,
-      f"det={r7['regression_detected']} restart={r7['restart_program_suggested']} "
+      f"det={r7['regression_detected']} kart={r7['regresyon_karti']} "
       f"required={r7['regenerate_required']}")
+check("7a) 'Programı baştan başlat' bayrağı KALDIRILDI",
+      "restart_program_suggested" not in r7, str(sorted(r7.keys())))
 
 r7b = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY, _loglar_1fail,
                training_completed_at=DONE_13, today=TODAY, now_minute=NOW)
 check("7b) Eşik altı → bayrak YOK",
-      r7b["regression_detected"] is False and r7b["restart_program_suggested"] is False,
-      f"det={r7b['regression_detected']}")
+      r7b["regression_detected"] is False and r7b["regresyon_karti"] is None,
+      f"det={r7b['regression_detected']} kart={r7b['regresyon_karti']}")
 
 # 7c) Regresyon, gün içi hesaplamadan BAĞIMSIZ katmandır (ikisi birlikte olabilir)
 r7c = pa.adapt(plan_with_schedule(7 * 60), BUCKET_8AY,

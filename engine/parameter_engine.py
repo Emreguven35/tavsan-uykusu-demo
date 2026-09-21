@@ -143,8 +143,14 @@ def _lowstr(v: Any) -> str:
 # (`any(n in metin for n in ["5","6",…,"10"])`) ve ölçülen sonuç şuydu:
 # 11/12/13/14/20 uyanma kartı ÜRETMİYOR ama 5 üretiyordu; "0.5 saatte bir"
 # içindeki '5' yüzünden yanlış tetikleniyordu. Artık SAYISAL karşılaştırma.
-GECE_UYANMA_ESIGI = 5
+# v1.4 (İlayda, S6): "Sayı değil, kesinlikle. ... Bu uyanmada 20 dakikanın
+# üzerinde uyanık kalıp kendi dönemiyorsa sorundur bizim için."
+# Kart artık SAYIYA değil, "20 dk+ süren ve müdahale gerektiren uyanma"nın
+# kaç GECEDE görüldüğüne bakıyor. Beyan (kayıt yokken) tek istisna: orada
+# elimizde yalnız annenin verdiği sayı var, eşik 5 kalıyor.
+GECE_UYANMA_ESIGI = 5                    # YALNIZ beyan kaynağı için
 GECE_UYANMA_YAS_ESIGI = 6.0
+UZUN_UYANMA_GECE_ESIGI = 3               # son 7 gecede kaç gece
 _RE_TAM_SAYI = re.compile(r"\d+")
 
 
@@ -165,7 +171,8 @@ def ilk_tam_sayi(deger: Any) -> int | None:
 def egitim_uygunlugu_kontrol(duzeltilmis_ay: float, dogum_haftasi: int,
                              saglik_problemi: Any = None,
                              gece_uyanma_sayisi: int | None = None,
-                             kaynak: str = "beyan") -> dict:
+                             kaynak: str = "beyan",
+                             uzun_uyanma_gece_sayisi: int | None = None) -> dict:
     """Red flag tarama — SAF FONKSİYON (v2.1 / Faz 3).
 
     Karar ağacındaki "yas_alt_siniri" ve "red_flags" kuralları. DB'ye, profile
@@ -174,9 +181,12 @@ def egitim_uygunlugu_kontrol(duzeltilmis_ay: float, dogum_haftasi: int,
     v2.0'da liste üretim anında donup kalıyordu (ölçüldü: gece uyanma 6→1
     düzeltilse bile kart ekranda kalıyordu).
 
-    gece_uyanma_sayisi None → gece uyanma kartı ÜRETİLMEZ (bilinmiyor ≠ sıfır).
-    kaynak: 'beyan' (onboarding) | 'olculen' (son 7 gecenin kayıt ortalaması) —
-    yalnız kartın METNİNİ değiştirir, eşiği değil (K11).
+    gece uyanma kartı (v1.4): ÖLÇÜT `uzun_uyanma_gece_sayisi`'dır — son 7
+    gecede 20 dk+ süren ve kendi dönemediği uyanmanın görüldüğü gece sayısı.
+    None ise kayıt yoktur ve YALNIZ o zaman annenin beyanına (sayı ≥ 5)
+    düşülür; `gece_uyanma_sayisi` None ise kart hiç üretilmez
+    (bilinmiyor ≠ sıfır). `kaynak` artık yalnız beyan/ölçüm ayrımını taşır,
+    kartın metnini değiştirmez.
 
     Dönen: {"uygun_mu": bool, "uyarilar": [str]}
     """
@@ -214,16 +224,26 @@ def egitim_uygunlugu_kontrol(duzeltilmis_ay: float, dogum_haftasi: int,
                 "Şiddetli ise doktor onayı almanız önerilir."
             )
 
-    # K11 — gece çok uyanma kartı. SAYISAL eşik; kaynak yalnız metni değiştirir.
-    if (gece_uyanma_sayisi is not None
-            and duzeltilmis_ay >= GECE_UYANMA_YAS_ESIGI
-            and gece_uyanma_sayisi >= GECE_UYANMA_ESIGI):
-        bas = ("ℹ️ Bebeğiniz 6+ aylık ve gece çok uyanıyor." if kaynak == "beyan"
-               else f"ℹ️ Son 7 gecede ortalama {gece_uyanma_sayisi} kez uyanıyor.")
+    # K11 v1.4 — "gece çok uyanıyor" kartı. ÖLÇÜT SAYI DEĞİL:
+    # son 7 gecede en az UZUN_UYANMA_GECE_ESIGI gecede, 20 dk+ süren VE
+    # müdahale gerektiren (self_soothe_fail) uyanma. İlayda: "Sayı değil,
+    # kesinlikle... 20 dakikanın üzerinde uyanık kalıp kendi dönemiyorsa
+    # sorundur bizim için." Ortalama 3 uyanma normal beklentidir.
+    #
+    # Kayıt YOKSA elimizde yalnız annenin beyanı var; orada eski sayısal eşik
+    # (5) korunuyor çünkü süre/müdahale bilgisi yok.
+    _kart = False
+    if duzeltilmis_ay >= GECE_UYANMA_YAS_ESIGI:
+        if uzun_uyanma_gece_sayisi is not None:
+            _kart = uzun_uyanma_gece_sayisi >= UZUN_UYANMA_GECE_ESIGI
+        elif kaynak == "beyan" and gece_uyanma_sayisi is not None:
+            _kart = gece_uyanma_sayisi >= GECE_UYANMA_ESIGI
+    if _kart:
         uyarilar.append(
-            f"{bas} Önce emerek uyuma "
-            "alışkanlığını değiştirme ve 3 gündüz uykusu (toplam min 3 saat) "
-            "düzeni eğitim öncesi hazırlık olarak ele alınmalı."
+            "ℹ️ Bebeğiniz gece uyandığında kendi başına uykuya dönemiyor. "
+            "En sık sebep gündüz uykusunun yetersiz kalması; özellikle direnen "
+            "son uykuyu atlayıp erken gece uykusuna geçirmek gece uyanmalarını "
+            "artırır."
         )
 
     return {"uygun_mu": uygun, "uyarilar": uyarilar}

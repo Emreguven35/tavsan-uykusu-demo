@@ -45,6 +45,28 @@ class PlanJobStatusResp(BaseModel):
     error: str | None = None
 
 
+class RegresyonCevapReq(BaseModel):
+    """POST /plans/regresyon-cevap gövdesi — annenin tek soruya cevabı.
+
+    İlayda (S9): regresyon şüphesinde ÖNCE "çocuk 20 dakika beklerken kendi
+    uykuya dönüyor mu?" sorulur. Cevap akışı belirler; bebek üzerinde saklanır
+    ki kart her açılışta yeniden sorulmasın."""
+    kendi_donuyor: bool
+
+
+class RegresyonCevapResp(BaseModel):
+    """Cevap kaydedildikten SONRAKİ kart durumu — mobil aynı yanıttan okur.
+
+    regresyon_karti None ise kart kapanmıştır ("evet" cevabı, 7 gün sessizlik).
+    "hayır" cevabında kart `devam_45` ya da `tibbi_yonlendirme` olarak döner."""
+    baby_id: uuid.UUID
+    kendi_donuyor: bool
+    cevap_at: datetime
+    regresyon_karti: dict[str, Any] | None = None
+    egitim_baslangic_gunu: int | None = None
+    kirkbes_gun_doldu: bool = False
+
+
 class PlanAdaptResp(BaseModel):
     """POST /plans/adapt yanıtı — kaydedilen plan + gün içi hesaplama kararı.
 
@@ -53,10 +75,16 @@ class PlanAdaptResp(BaseModel):
     regenerate_required: yaş bandı ihlali (bant atlama) nedeniyle plan TAM
       YENİDEN ÜRETİLDİ.
     regression_detected: İlayda protokolü — eğitim bitiminden ≥13 gün sonra son 3
-      gecenin ≥2'sinde 20dk+ süren gece uyanması (kendine dalamama) görüldü.
-    restart_program_suggested: kullanıcıya "Programı baştan başlatalım mı?" kartı
-      gösterilir. OTOMATİK HİÇBİR ŞEY ÜRETİLMEZ — onay gelirse mobil
-      POST /plans/generate çağırır ve training_started_at'i bugüne PATCH'ler.
+      gecenin ≥2'sinde gece uyanması (kendine dalamama) görüldü.
+    regresyon_karti: v1.4 — ÜÇ KADEMELİ akış. `restart_program_suggested`
+      ("Programı baştan başlatalım mı?") KALDIRILDI; İlayda o yolu reddetti,
+      45 gün dolana kadar eğitime DEVAM ediliyor.
+        {"tip": "kendi_donuyor_mu" | "devam_45" | "tibbi_yonlendirme",
+         "metin": str, "egitim_gunu": int|None, "kirkbes_gun_doldu": bool}
+      Anne cevabı POST /plans/regresyon-cevap ile gelir.
+    egitim_baslangic_gunu: eğitimin kaçıncı günü (1'den başlar) — None ise
+      eğitim başlamamış.
+    kirkbes_gun_doldu: 45 günlük "devam et" penceresi doldu mu.
 
     shift_minutes: KULLANIMDAN KALDIRILDI (v2/K1). Çizelgenin tamamını sabit bir
       dakika kadar kaydırma kavramı yok; daima 0 döner. Eski mobil sürümler
@@ -67,7 +95,9 @@ class PlanAdaptResp(BaseModel):
     shift_minutes: int = 0
     regenerate_required: bool
     regression_detected: bool
-    restart_program_suggested: bool
+    regresyon_karti: dict[str, Any] | None = None
+    egitim_baslangic_gunu: int | None = None
+    kirkbes_gun_doldu: bool = False
     reasons: list[str]
     # v2 — gün içi hesaplamanın tam izi (K4 şeması). Yenidoğan rehberinde None.
     adaptation: dict[str, Any] | None = None

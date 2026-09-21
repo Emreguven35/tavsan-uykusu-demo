@@ -1,8 +1,9 @@
 """babies — bebek profili (mobil Supabase 'babies' tablosuyla birebir alanlar)."""
 import uuid
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import Date, ForeignKey, Integer, String, Text
+from sqlalchemy import (Boolean, Date, DateTime, ForeignKey, Integer, String,
+                        Text)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.db.base import GUID, Base
@@ -43,5 +44,13 @@ class Baby(Base, TimestampMixin):
     # training_completed_at üzerinden çalışır (bkz. services/plan_adapter.py).
     training_started_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     training_completed_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # v1.4 regresyon akışı — anneye "kendi uykuya dönüyor mu?" sorulur.
+    # None: henüz sorulmadı/cevaplanmadı. True: kart 7 gün kapanır.
+    # False: 45 gün dolmadıysa "eğitime devam", dolduysa tıbbi yönlendirme.
+    regresyon_kendi_donuyor: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True)
+    regresyon_cevap_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="babies")

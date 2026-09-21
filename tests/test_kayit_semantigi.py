@@ -857,18 +857,61 @@ check("Z2b) Birleşik uyku 08:26-11:00",
       and _z2[0]["end_minute"] == 11 * 60,
       str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _z2]))
 
+# --- Z3 — v1.4: eşik İKİYE ayrıldı (İlayda S4) -------------------------------
+# İlk parça bandın kisa_uyku_esigi_dk'sının ALTINDA kaldıysa anne hedef süreyi
+# tutturmak için uğraşır → boşluk 45 dk'ya kadar AYNI uyku. İlk parça TAM bir
+# uykuysa yalnız 15 dk. S8 = 8 aylık → kısa uyku eşiği 60 dk.
+_KISA_ESIK = pa.kisa_uyku_esigi(S8.bant)
+check("Z3.0) 8 aylık bandın kısa uyku eşiği 60 dk", _KISA_ESIK == 60,
+      str(_KISA_ESIK))
+
 z3 = S8.hesapla([GECE_TABAN,
-                 L("nap", TODAY, 9 * 60, TODAY, 9 * 60 + 40),
-                 L("nap", TODAY, 10 * 60, TODAY, 10 * 60 + 30)])
+                 L("nap", TODAY, 9 * 60, TODAY, 9 * 60 + 40),      # 40 dk: KISA
+                 L("nap", TODAY, 10 * 60, TODAY, 10 * 60 + 30)])   # 20 dk boşluk
 _z3 = [b for b in naplar(z3) if b.get("kaynak") == "kayit"]
-check("Z3a) 20 dk boşluk → İKİ ayrı uyku (eşik 15 dk)", len(_z3) == 2,
+check("Z3a) KISA ilk parça + 20 dk boşluk → TEK uyku (45 dk eşiği)",
+      len(_z3) == 1 and _z3[0]["start_minute"] == 9 * 60
+      and _z3[0]["end_minute"] == 10 * 60 + 30,
       str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _z3]))
-check("Z3b) Birleştirme yapılmadı",
-      z3["adaptation"]["birlesen_kayitlar"] == [],
+check("Z3b) Birleştirme izi düşüldü",
+      len(z3["adaptation"]["birlesen_kayitlar"]) == 1,
       str(z3["adaptation"]["birlesen_kayitlar"]))
-check("Z3c) Eşik adaptation'da raporlanıyor",
-      z3["adaptation"]["parca_birlestirme_dk"] == pa.PARCA_BIRLESTIRME_DK,
-      str(z3["adaptation"].get("parca_birlestirme_dk")))
+
+z3b = S8.hesapla([GECE_TABAN,
+                  L("nap", TODAY, 9 * 60, TODAY, 9 * 60 + 40),     # 40 dk: KISA
+                  L("nap", TODAY, 10 * 60 + 30, TODAY, 11 * 60)])  # 50 dk boşluk
+_z3b = [b for b in naplar(z3b) if b.get("kaynak") == "kayit"]
+check("Z3c) KISA ilk parça + 50 dk boşluk → İKİ ayrı uyku (45 dk aşıldı)",
+      len(_z3b) == 2,
+      str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _z3b]))
+
+z3c = S8.hesapla([GECE_TABAN,
+                  L("nap", TODAY, 9 * 60, TODAY, 10 * 60 + 10),    # 70 dk: TAM
+                  L("nap", TODAY, 10 * 60 + 30, TODAY, 11 * 60)])  # 20 dk boşluk
+_z3c = [b for b in naplar(z3c) if b.get("kaynak") == "kayit"]
+check("Z3d) TAM ilk uyku + 20 dk boşluk → İKİ ayrı uyku (eşik 15 dk)",
+      len(_z3c) == 2,
+      str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _z3c]))
+
+z3d = S8.hesapla([GECE_TABAN,
+                  L("nap", TODAY, 9 * 60, TODAY, 10 * 60 + 10),    # 70 dk: TAM
+                  L("nap", TODAY, 10 * 60 + 22, TODAY, 11 * 60)])  # 12 dk boşluk
+_z3d = [b for b in naplar(z3d) if b.get("kaynak") == "kayit"]
+check("Z3e) TAM ilk uyku + 12 dk boşluk → TEK uyku (15 dk içinde)",
+      len(_z3d) == 1,
+      str([(hhmm(b["start_minute"]), hhmm(b["end_minute"])) for b in _z3d]))
+
+check("Z3f) İki eşik de adaptation'da raporlanıyor",
+      z3c["adaptation"]["parca_birlestirme_dk"] == pa.PARCA_BIRLESTIRME_DK == 15
+      and z3c["adaptation"]["parca_birlestirme_kisa_dk"]
+      == pa.PARCA_BIRLESTIRME_KISA_DK == 45,
+      f'{z3c["adaptation"].get("parca_birlestirme_dk")} / '
+      f'{z3c["adaptation"].get("parca_birlestirme_kisa_dk")}')
+check("Z3g) _parca_esigi: kısa parça 45, tam parça 15",
+      pa._parca_esigi({"sure_dk": 40}, _KISA_ESIK) == 45
+      and pa._parca_esigi({"sure_dk": 70}, _KISA_ESIK) == 15
+      and pa._parca_esigi({"sure_dk": None}, _KISA_ESIK) == 15,
+      "")
 
 
 # =============================================================================

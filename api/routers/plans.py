@@ -3,6 +3,7 @@ plans router — /api/v1/plans
 
 POST /plans/generate: bebek profili → parameter_engine + plan_generator → JSONB.
 POST /plans/adapt:   bugünün çizelgesini kayıtlardan yeniden hesaplar (elle tetik).
+POST /plans/regresyon-cevap: regresyon kartındaki "kendi dönüyor mu?" cevabı.
 GET  /plans/today:   bugünün planı; şablon + bugünün kayıtlarından HER çağrıda
                      yeniden hesaplanır (v2/K8 — "günde bir kez" kilidi yok).
 GET  /plans, GET /plans/{plan_date}: kullanıcının planlarını döndürür.
@@ -23,6 +24,7 @@ from api.deps import get_current_user, get_owned_baby
 from api.models import SleepPlan, User
 from api.schemas.plan import (
     PlanAdaptResp, PlanGenerateReq, PlanJobResp, PlanJobStatusResp, PlanResp,
+    RegresyonCevapReq, RegresyonCevapResp,
 )
 from api.services import plan_adapter, plan_jobs, plan_service
 
@@ -149,9 +151,48 @@ def adapt_plan(baby_id: uuid.UUID = Query(...), db: Session = Depends(get_db),
         shift_minutes=0,                      # kullanımdan kaldırıldı (K1)
         regenerate_required=result["regenerate_required"],
         regression_detected=result["regression_detected"],
-        restart_program_suggested=result["restart_program_suggested"],
+        regresyon_karti=result.get("regresyon_karti"),
+        egitim_baslangic_gunu=result.get("egitim_baslangic_gunu"),
+        kirkbes_gun_doldu=bool(result.get("kirkbes_gun_doldu")),
         reasons=result["reasons"],
         adaptation=result.get("adaptation"),
+    )
+
+
+@router.post("/regresyon-cevap", response_model=RegresyonCevapResp)
+def regresyon_cevapla(req: RegresyonCevapReq,
+                      baby_id: uuid.UUID = Query(...),
+                      db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
+    """Regresyon kartının 1. kademesine verilen cevabı kaydet (v1.4, İlayda S9).
+
+    - evet  → kart KAPANIR; `REGRESYON_SESSIZLIK_GUN` (7) gün boyunca aynı soru
+              sorulmaz, sonra durum yeniden değerlendirilir.
+    - hayır → 45 gün dolmadıysa "eğitime devam", dolduysa tıbbi yönlendirme.
+
+    Plan ÜRETİLMEZ ve çizelge DEĞİŞMEZ: bu uç yalnız cevabı saklar ve cevabın
+    hemen sonraki kart durumunu döndürür (mobil tek istekle kartı tazeler)."""
+    baby = get_owned_baby(baby_id, db, user)
+    simdi = datetime.now(timezone.utc)
+    baby.regresyon_kendi_donuyor = bool(req.kendi_donuyor)
+    baby.regresyon_cevap_at = simdi
+    db.commit()
+    db.refresh(baby)
+
+    today = simdi.date()
+    kart = plan_adapter.regresyon_karti(
+        baby.training_started_at, plan_service.regresyon_cevabi(baby, today),
+        today)
+    logger.info("Regresyon cevabı: baby=%s kendi_donuyor=%s kart=%s",
+                baby.id, req.kendi_donuyor, kart["tip"])
+    return RegresyonCevapResp(
+        baby_id=baby.id,
+        kendi_donuyor=bool(req.kendi_donuyor),
+        cevap_at=simdi,
+        # tip None → "evet" cevabı, gösterilecek kart yok.
+        regresyon_karti=kart if kart["tip"] else None,
+        egitim_baslangic_gunu=kart["egitim_gunu"],
+        kirkbes_gun_doldu=bool(kart["kirkbes_gun_doldu"]),
     )
 
 

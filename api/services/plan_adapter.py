@@ -27,9 +27,11 @@ Akış:
 İKİ AYRI KATMAN (karıştırılmamalı):
   • Gün içi yeniden hesaplama → o günün ritmi; yarına TAŞINMAZ (K1/K2).
   • Regresyon tespiti → eğitim TAMAMLANDIKTAN sonraki geri gidişin yakalanması.
-Regresyon hiçbir şeyi otomatik üretmez; mobil kullanıcıya "Programı baştan
-başlatmak ister misiniz?" kartını gösterir, onaylanırsa mobil POST /plans/generate
-çağırır ve training_started_at'i bugüne PATCH'ler.
+Regresyon hiçbir şeyi otomatik üretmez. v1.4'te (İlayda S9) "Programı baştan
+başlatalım mı?" kartı KALDIRILDI; yerine üç kademeli akış geldi: önce anneye
+"kendi uykuya dönüyor mu?" sorulur (POST /plans/regresyon-cevap), dönmüyorsa
+45 gün dolana kadar EĞİTİME DEVAM edilir, 45 gün dolduysa tıbbi değerlendirme
+önerilir. Bkz. `regresyon_karti()`.
 
 ZAMAN DİLİMİ: sleep_logs UTC saklanır, plan çizelgesi ise yerel duvar saatidir.
 Kullanıcı bazlı timezone alanı henüz YOK; TZ_OFFSET_MIN varsayılanı Türkiye
@@ -184,8 +186,15 @@ VARSAYILAN_KISA_UYKU_ESIGI_DK = 60
 # Bunlar ne kopya ne çakışma; K13/K18 hiçbiri yakalamıyordu ve gün 3 yerine 5
 # gündüz uykusu görünüyordu (gerçek vakada ölçüldü).
 #
-# EŞİK METODOLOJİ SAHİBİNE SORULACAK — o yüzden env ile değiştirilebilir.
+# EŞİK v1.4'te İKİYE AYRILDI (İlayda, S4): "bir uykunun bir saat sürmesi
+# gerekiyor. Ama çocuk 15 dakika uyudu. 45 dakika boyunca çocuğu uykuya geri
+# döndürmeye çalıştık ve çocuk geri uyudu... bizim için bu tek uyku."
+# Yani ilk parça KISA kaldıysa (bandın kisa_uyku_esigi_dk'sının altında) anne
+# hedef süreyi tutturmak için uzun süre uğraşır — boşluk 45 dk'ya kadar aynı
+# uykudur. İlk parça zaten TAM bir uykuysa 15 dk'lık kısa bir uyanıklık aynı
+# uykunun devamı sayılır, daha fazlası ayrı uykudur.
 PARCA_BIRLESTIRME_DK = int(os.getenv("PARCA_BIRLESTIRME_DK") or 15)
+PARCA_BIRLESTIRME_KISA_DK = int(os.getenv("PARCA_BIRLESTIRME_KISA_DK") or 45)
 
 # --- K16/K17 — açık (ended_at null) kayıt kuralları (v2.2.1) ----------------
 # Gerçek vaka: aynı bebekte 06:30, 08:24 ve 08:26 başlangıçlı ÜÇ açık uyku
@@ -781,7 +790,8 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
     _acik_kayitlari_coz(out, nap_sure_dk, now_minute, gece_sure_dk)
 
     # --- K20 — ardışık parçaları birleştir (yuvalara girmeden ÖNCE) ---------
-    out["gunduz_uykulari"] = _parcalari_birlestir(out["gunduz_uykulari"], out)
+    out["gunduz_uykulari"] = _parcalari_birlestir(out["gunduz_uykulari"], out,
+                                                  bant)
 
     for anahtar in ("gece_uykulari", "gunduz_uykulari", "atlananlar",
                     "wake_kayitlari", "gece_uyanmalari"):
@@ -961,7 +971,19 @@ def _wake_kayitlarini_coz(out: dict, wake_adaylari: list[dict]) -> None:
                      "uykusunun bitişinden alındı, kayıt çizelgeye girmedi")
 
 
-def _parcalari_birlestir(kayitlar: list[dict], out: dict) -> list[dict]:
+def _parca_esigi(onceki: dict, kisa_esik: int) -> int:
+    """Bu parçadan sonraki boşluk için geçerli birleştirme eşiği.
+
+    İlk parça bandın "kısa uyku" eşiğinin altında kaldıysa 45 dk, tam bir uyku
+    olduysa 15 dk (K20, v1.4)."""
+    sure = onceki.get("sure_dk")
+    if sure is not None and sure < kisa_esik:
+        return PARCA_BIRLESTIRME_KISA_DK
+    return PARCA_BIRLESTIRME_DK
+
+
+def _parcalari_birlestir(kayitlar: list[dict], out: dict,
+                         bant: dict | None = None) -> list[dict]:
     """K20 — aralarındaki boşluk ≤ PARCA_BIRLESTIRME_DK olan uykuları BİRLEŞTİR.
 
     Anne uzun bir uykuyu birden çok kayda bölüyor (14:00-14:36 + 14:36-15:46,
@@ -981,6 +1003,7 @@ def _parcalari_birlestir(kayitlar: list[dict], out: dict) -> list[dict]:
     if len(kayitlar) < 2 or PARCA_BIRLESTIRME_DK <= 0:
         return kayitlar
 
+    kisa_esik = kisa_uyku_esigi(bant)
     sirali = sorted(kayitlar, key=lambda k: k["bas_dk"])
     out_list: list[dict] = [sirali[0]]
     for k in sirali[1:]:
@@ -990,7 +1013,7 @@ def _parcalari_birlestir(kayitlar: list[dict], out: dict) -> list[dict]:
             out_list.append(k)
             continue
         bosluk = k["bas_dk"] - onceki_bit
-        if bosluk > PARCA_BIRLESTIRME_DK or bosluk < 0:
+        if bosluk > _parca_esigi(onceki, kisa_esik) or bosluk < 0:
             out_list.append(k)
             continue
 
@@ -1507,11 +1530,15 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
         "min_uyaniklik_penceresi_dk": ww_min_k15,
         # K12.2/K14.2 — gece uyanma sayımı ve brüt/net gece uykusu.
         "gece_uykusu": sabah.get("gece_uykusu"),
+        # v1.4 — regresyon akışının aşaması; adapt() kartı dolduruyorsa
+        # mobil buradan "soru mu, devam mı, tıbbi mi" ayrımını okur.
+        "regresyon": None,
         # K20.3 — okuma anında birleştirilen parça kayıtların id'leri.
         # DB'de hiçbir şey değişmedi; mobil "bu iki kaydı tek uyku saydık"
         # bilgisini buradan gösterebilir.
         "birlesen_kayitlar": kayitlar.get("birlesen") or [],
         "parca_birlestirme_dk": PARCA_BIRLESTIRME_DK,
+        "parca_birlestirme_kisa_dk": PARCA_BIRLESTIRME_KISA_DK,
         "uyarilar": uyarilar,
     }
     return {"schedule": schedule, "adaptation": adaptation}
@@ -1865,6 +1892,67 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
     }
 
 
+# --- Regresyon aşamaları (v1.4) ---------------------------------------------
+# İlayda (S9): "Öncelikle şunu yapıyoruz: kendi uykuya döndü mü çocuk? Bunu
+# soruyoruz önce. Kendi dönmüyorsa ve 45 günü geride bıraktıysak... 45 gün
+# dolana kadar eğitime YİNE DE DEVAM ediyoruz. 45 günü geride bıraktıysak
+# pediatri, fizyoterapi ya da ergoterapi kontrolü rica ediyoruz."
+#
+# "Programı baştan başlatalım mı?" kartı KALDIRILDI — üç kademeli akış geldi.
+REGRESYON_45_GUN = 45
+
+REGRESYON_METINLERI = {
+    "kendi_donuyor_mu": (
+        "Bebeğiniz gece uyandığında 20 dakika beklerken kendi başına uykuya "
+        "dönebiliyor mu?"),
+    "devam_45": (
+        "Eğitime 45. güne kadar aynı şekilde devam edin, bu dönemde gece "
+        "uyanmaları normaldir."),
+    "tibbi_yonlendirme": (
+        "45 gün doldu ve bebeğiniz hâlâ kendi başına uykuya dönemiyor. "
+        "Pediatri kontrolü öneriyoruz; doktorunuza demir, D vitamini ve "
+        "magnezyum düzeyleri, uyku apnesi ve geniz eti açısından değerlendirme "
+        "isteyebilirsiniz. Gerekirse fizyoterapi/ergoterapi değerlendirmesi de "
+        "düşünülebilir."),
+}
+
+
+def egitim_gunu(training_started_at: date | None,
+                today: date | None = None) -> int | None:
+    """Eğitimin kaçıncı günündeyiz (1'den başlar). Başlangıç yoksa None."""
+    if training_started_at is None:
+        return None
+    today = today or datetime.now(timezone.utc).date()
+    return (today - training_started_at).days + 1
+
+
+def regresyon_karti(training_started_at: date | None,
+                    kendi_donuyor: bool | None,
+                    today: date | None = None) -> dict:
+    """v1.4 — regresyon akışının HANGİ kademesindeyiz.
+
+    Kademeler:
+      1. `kendi_donuyor_mu` — anneye sorulur (henüz cevap yok).
+      2. `devam_45`         — kendi dönmüyor AMA 45 gün dolmadı → eğitime devam.
+      3. `tibbi_yonlendirme`— kendi dönmüyor VE 45 gün doldu → tıbbi kontrol.
+    Anne "evet, kendi dönüyor" derse kart gösterilmez (çağıran taraf karar
+    verir; burada tip None döner).
+
+    Metinler teşhis KOYMAZ — yalnız değerlendirme önerir (danışmanlık sınırı,
+    bkz. engine/chatbot.py tıbbi sınır kuralları)."""
+    gun = egitim_gunu(training_started_at, today)
+    doldu = bool(gun is not None and gun >= REGRESYON_45_GUN)
+    if kendi_donuyor is True:
+        return {"tip": None, "metin": None, "egitim_gunu": gun,
+                "kirkbes_gun_doldu": doldu}
+    if kendi_donuyor is None:
+        tip = "kendi_donuyor_mu"
+    else:
+        tip = "tibbi_yonlendirme" if doldu else "devam_45"
+    return {"tip": tip, "metin": REGRESYON_METINLERI[tip],
+            "egitim_gunu": gun, "kirkbes_gun_doldu": doldu}
+
+
 def detect_regression(training_completed_at: date | None, log_summary: dict,
                       today: date | None = None) -> tuple[bool, list[str]]:
     """İlayda regresyon protokolü — İKİ koşul birden sağlanmalı.
@@ -1986,6 +2074,8 @@ def plan_sablonu(plan_content: dict, bucket_params: dict,
 
 
 def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
+          training_started_at: date | None = None,
+          regresyon_kendi_donuyor: bool | None = None,
           today: date | None = None,
           now_minute: int | None = None,
           training_completed_at: date | None = None,
@@ -2004,7 +2094,9 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
       adaptation: {...},                 # K4 şeması (hesaplandi_at, varsayilan_bloklar…)
       regenerate_required: bool,         # ŞABLON yaş bandına aykırı → tam yeniden üretim
       regression_detected: bool,         # İlayda protokolü (eğitim sonrası geri gidiş)
-      restart_program_suggested: bool,   # kullanıcıya sorulacak ÖNERİ — otomatik üretim YOK
+      regresyon_karti: {...} | None,     # v1.4 üç kademe (soru / devam_45 / tıbbi)
+      egitim_baslangic_gunu: int | None, # eğitimin kaçıncı günü
+      kirkbes_gun_doldu: bool,           # 45 günlük "devam et" penceresi doldu mu
       kestirme: {...} | None,            # K9 — evrensel 30dk kestirme kuralı
       toplam_uyku: {...} | None,         # K9 — "24 saatte yeterince uyuyor mu?"
       reasons: [str],
@@ -2025,7 +2117,13 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
         "adaptation": None,
         "regenerate_required": False,
         "regression_detected": False,
-        "restart_program_suggested": False,
+        # v1.4 — "Programı baştan başlatalım mı?" KALDIRILDI. Yerine üç
+        # kademeli akış: önce anneye "kendi dönüyor mu?" sorulur; dönmüyorsa
+        # 45 gün dolana kadar EĞİTİME DEVAM, dolduysa tıbbi yönlendirme.
+        "regresyon_karti": None,
+        "egitim_baslangic_gunu": egitim_gunu(training_started_at, today),
+        "kirkbes_gun_doldu": bool(
+            (egitim_gunu(training_started_at, today) or 0) >= REGRESYON_45_GUN),
         "kestirme": None,
         "toplam_uyku": None,
         "reasons": reasons,
@@ -2037,7 +2135,8 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
     regression, reg_reasons = detect_regression(training_completed_at, ozet, today)
     if regression:
         result["regression_detected"] = True
-        result["restart_program_suggested"] = True     # kart kullanıcıya gösterilir
+        kart = regresyon_karti(training_started_at, regresyon_kendi_donuyor, today)
+        result["regresyon_karti"] = kart if kart["tip"] else None
         reasons.extend(reg_reasons)
 
     # --- Yaş bandı ihlali → TAM YENİDEN ÜRETİM (K8: mevcut haliyle korundu) --

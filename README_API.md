@@ -491,9 +491,11 @@ Plan içeriği artık markdown'a **ek olarak** yapısal alanlar taşır:
   "night_wake_protocol": {            // YENİ — 45-15-45 gece direnme protokolü
     "resist_minutes": 45, "routine_minutes": 15, "repeat": true, "aciklama": "..."
   },
-  "kestirme_protokolu": {             // FAZ Y — evrensel 30dk kestirme kuralı
+  "kestirme_protokolu": {             // v1.4 — evrensel kestirme (şekerleme) kuralı
     "tetik": "gündüz min süre tamamlanmadı",
-    "sure_dk": 30,                    // kestirme süresi; dolunca bebek UYANDIRILIR
+    "sure_dk_min": 30, "sure_dk_max": 60,   // v1.4: tek 30 dk değil, ARALIK
+    "gece_yatisina_kalan_min_dk": 150,      // ≥150 dk kaldıysa 60 dk yapılabilir
+    "saat_penceresi": ["17:00", "19:00"],   // günün SONUNA eklenir
     "gece_uykusuna_gecis_dk": 60,     // kestirmeden sonra 1 saatte gece uykusuna geçilebilir
     "uyandirilir": true, "tum_bantlarda_gecerli": true, "aciklama": "..."
   },
@@ -503,6 +505,7 @@ Plan içeriği artık markdown'a **ek olarak** yapısal alanlar taşır:
     "uyaniklik_penceresi_kaynak": null,   // devralındıysa kaynak bant yolu
     "gunduz_uyku_sayisi": [2, 2], "gunduz_uyku_sayisi_sabit": true,
     "gunduz_uyku_toplam_dk": [120, 180],  // ALT sınır = kestirme tetikleyicisi
+    "kisa_uyku_esigi_dk": 60,             // v1.4 — K19/K20 eşiği (<6 ay: 45)
     "gece_uykusu_dk": [600, 720],
     "toplam_gunluk_uyku_dk": [840, 840],  // 24s toplam ihtiyaç (gündüz + gece)
     "notlar": ["..."]
@@ -558,9 +561,14 @@ olarak raporlanır (`durum`: `yeterli` | `az` | `fazla` | `veri_yok`); gündüz
   Üçü sağlanmıyorsa çocuk **hâlâ 2 uyku bandındadır** (varsayılan da budur).
 - **24-36 ay öğlen uykusu reddi:** güne başlama 07:00 → hâlâ reddediyorsa 06:00 →
   hâlâ reddediyorsa öğlen uykusu kademeli kaldırılabilir.
-- **Evrensel kestirme kuralı (tüm bantlar):** gündüz toplam uyku minimumu
-  tamamlanamazsa **ilave 30 dakikalık kestirme**; 30 dk dolunca uyandırılır ve bu
-  kestirmeden **1 saat sonra bile** gece uykusuna geçilebilir.
+- **Evrensel kestirme (şekerleme) kuralı — v1.4 (tüm bantlar):** gündüz toplam
+  uyku minimumu tamamlanamazsa **günün sonuna (17:00–19:00) ilave kestirme**
+  eklenir. Süre **30 dk**, gece yatışına **≥150 dk** varsa **60 dk**. Süre
+  dolunca uyandırılır ve bu kestirmeden **1 saat sonra bile** gece uykusuna
+  geçilebilir. **Tetikleyici erken uyanma değil, gündüz uyku açığıdır.**
+- **Beslenme kuralı — v1.4 (İlayda, Eyl 2026):** beslenme her uykudan **en az
+  1 saat önce** bitmiş olmalı; ek gıdaya geçen bebekte **ek gıda da dahil**.
+  (Eski "30-45 dakika" ve "ek gıda 2 saat" ifadeleri geçersizdir.)
 
 | Endpoint | Açıklama |
 |---|---|
@@ -584,16 +592,23 @@ olarak raporlanır (`durum`: `yeterli` | `az` | `fazla` | `veri_yok`); gündüz
 | K4 | **Yatış tavanı** | Yatış = son uyku bitişi + pencere. Bandın minimum gece uykusu sabah hedefine kadar sığmalıdır; tavan aşılırsa önce son gündüz uykusu kısaltılır/kaldırılır, sonra yatış tavana çekilir. Her müdahale `adaptation.uyarilar`a yazılır. |
 | K5 | **Gece uyanması ≠ sabah** | Sabah uyanışı = günün **son** uyanışı (ilk gündüz uykusundan önceki). Ondan öncekiler **gece bölünmesi**dir (`adaptation.gece_bolunmeleri`). Bir `sleep` kaydı ancak sabah hedefinden **önce başlamışsa** gece uykusu sayılır — 70 dk'lık bir kayıt sabah uyanışı sanılmaz. Sabit `04:00` alt sınırı ve hedefe göreli **±90 dk toleransı kaldırıldı** (v2.1/K10). |
 | **K10** | **Erken uyanma** | **Gün en erken 06:00'da başlar.** 06:00'dan önce uyanıp *tekrar uyumayan* bebekte gün 06:00'dan kurulur (`sabah_uyanis_gercek` gerçek saati tutar, `wake` bloğu 06:00 + açıklayıcı `note`) ve güne **30 dk şekerleme** eklenir: `key:"sekerleme"`, başlangıç = `06:00 + bandın MİNİMUM uyanıklık penceresi` (8 ay → 08:00). Sonrası normal zincir (`nap_1 = şekerleme bitişi + normal pencere`). Gün taşarsa **şekerleme asla kaldırılmaz**; önce son gündüz uykusu kısaltılır/kaldırılır. 06:00 öncesi uyanıp tekrar uyuduysa gece bölünmesi geçerli. **06:00 ve sonrası için ÜST SINIR YOK** — 09:00'da uyanan için gün 09:00'dan. Şablon hedefi değişmez; ertesi gün yine 07:00. |
-| **K11** | **Uyarılar canlı** | `content.uyarilar` / `content.uygun_mu` / `content.yas` / `content.yas_bandi` / `content.bucket` **her GET'te** bebeğin güncel verisinden **yeniden türetilir**, plandan kopyalanmaz. Gece uyanma kartının kaynağı: son 7 gecede `ended_at`'i dolu `night_wake` kaydı olan gece **< 3** ise `beyan` (`baby.night_wakes`), **≥ 3** ise `olculen` (o gecelerin ortalaması, yukarı yuvarlanmış). Eşik her iki kaynakta aynı: `yaş ≥ 6 ay` **ve** `sayı ≥ 5`, **sayısal** karşılaştırma (alt dize araması kaldırıldı). İz: `adaptation.gece_uyanma = {kaynak, deger, gece_sayisi}`. |
+| **K11** | **Uyarılar canlı** | `content.uyarilar` / `content.uygun_mu` / `content.yas` / `content.yas_bandi` / `content.bucket` **her GET'te** bebeğin güncel verisinden **yeniden türetilir**, plandan kopyalanmaz. **v2.3 — gece uyanma kartının ölçütü SAYI DEĞİL** (İlayda: "Sayı değil, kesinlikle"): `yaş ≥ 6 ay` **ve** son 7 gecenin **≥ 3**'ünde **20 dk+ süren, kendi dönemediği** uyanma. Kayıt hiç yoksa yalnızca o zaman annenin beyanına düşülür (eşik yine 5). Kart metni tektir ve sebebi söyler (gündüz uykusu yetersizliği). İz: `adaptation.gece_uyanma = {kaynak, deger, gece_sayisi}` + `adaptation.uzun_uyanma_gece_sayisi`. |
 | K6 | **Kayıt yoksa plana uydu** | Zamanı geçtiği hâlde kaydı olmayan blok "planlandığı gibi oldu" sayılır ve `adaptation.varsayilan_bloklar` içinde listelenir. Hiç kayıt yoksa çizelge şablonun **birebir aynısıdır**. |
 | K7 | **Varsayım bozulur** | Gerçek kayıt gelince (farklı saat, kısa uyku, `nap_skipped`, ya da uyanık geçen süre) blok gerçek veriye çevrilir ve K3 zinciri yeniden akar. Geçmişe dönük kayıtlar da aynı akışı tetikler. |
 | K8 | **Kilit yok** | Hesap her `GET /plans/today` **ve** her `POST /logs/batch` sonrasında koşar; idempotenttir (aynı kayıtlar → aynı çizelge) ve LLM çağırmaz. İçerik değişmediyse DB'ye **yazılmaz**. Yaş bandı ihlali (`regenerate_required`) korundu — ama kontrol artık **şablona** uygulanır, bugün bir uyku atlandı diye plan yeniden üretilmez. |
 | K9 | **Toplam uyku kontrolü** | Yeniden hesaplanan **günün** gündüz + gece toplamı bandın aralığıyla karşılaştırılır; eksikse kestirme/ilave uyku önerilir. Bu bir **öneri kartıdır, çizelgeyi bozmaz**. |
+| **K9+K10.3 (v2.3)** | **Şekerleme — TEK mekanizma** | **Tetik: hesaplanan gündüz toplamı bandın MİNİMUMUNUN altında kalması.** Erken uyanma tek başına şekerleme ÜRETMEZ (v2.1'de üretiyordu). Yer: **son uykudan sonra, 17:00–19:00 arası**, gece yatışından **en az 60 dk önce** bitecek şekilde. Süre **30 dk**; gece yatışına **≥150 dk** varsa **60 dk**. 12-18 ay tek uyku varyantında öğle uykusu **<120 dk** ise 18:00–19:00 arası 30 dk. Gün taşarsa sıra: ① şekerleme kısaltılır/iptal edilir ② gece yatışı kırpılır — **gerçek uykular bandın minimumunun altına indirilmez** (bunun yerine uyarı düşülür). Blok başlığı süreye göre dinamiktir (`Şekerleme (30 dk)`). İz: `adaptation.sekerleme`. |
+| **K19 (v2.2.2 → v2.3)** | **Gündüz/gece sınırı 19:00** | Uyku tipini **backend** belirler. Gündüz penceresi **19:00**'a kadardır (eskiden 17:00). 19:00'dan sonra başlayan **kapalı** bir kayıt, bandın `kisa_uyku_esigi_dk` değerinden (6 aydan küçükte **45**, 6 ay ve üstünde **60** dk) kısaysa **gündüz kısa uykusu**; açık kayıt ya da eşikten uzun kayıt **gece uykusudur**. |
+| **K20 (v2.2.2 → v2.3)** | **Parça kayıt birleştirme — iki eşik** | Ardışık iki uyku kaydı arasındaki boşluk eşiğin altındaysa **tek uyku** sayılır. **İlk parça bandın kısa uyku eşiğinin altında kaldıysa eşik 45 dk** (anne hedef süreyi tutturmak için uğraşıyor), **ilk parça tam bir uykuysa 15 dk**. DB'de hiçbir şey değişmez; iz: `adaptation.birlesen_kayitlar`. |
 
-**Regresyon protokolü** (İlayda) ayrı katmandır ve değişmedi: `training_completed_at`
-dolu **ve** üzerinden **≥13 gün** geçmiş **ve** son 3 gecenin **≥2**'sinde **≥20 dk**
-süren `night_wake` varsa → `regression_detected=true`, `restart_program_suggested=true`.
+**Regresyon protokolü** (İlayda) ayrı katmandır: `training_completed_at` dolu
+**ve** üzerinden **≥13 gün** geçmiş **ve** son 3 gecenin **≥2**'sinde
+*kendine dalamama* sinyali (`night_wake`) varsa → `regression_detected=true`.
 **Otomatik hiçbir şey üretilmez.**
+
+> **v2.3 KIRICI DEĞİŞİKLİK — `restart_program_suggested` KALDIRILDI.**
+> İlayda "programı baştan başlatma" yolunu reddetti. Yerine **üç kademeli**
+> `regresyon_karti` geldi (aşağıda). Mobil eski kartı **göstermemelidir**.
 
 ### `content.adaptation` — gün hesabının izi
 
@@ -611,14 +626,62 @@ süren `night_wake` varsa → `regression_detected=true`, `restart_program_sugge
   // v2.1/K10 — erken uyanma yoksa null
   "erken_uyanma": {"gercek_saat": "04:30", "gun_baslangici": "06:00",
                    "sekerleme_eklendi": true},
-  // v2.1/K11 — kartın beslendiği sayı ve kaynağı
+  // v2.1/K11 — gece uyanma sayısı ve kaynağı (artık kartın ölçütü DEĞİL)
   "gece_uyanma": {"kaynak": "olculen", "deger": 6, "gece_sayisi": 7},
+  // v2.3/K11 — kartın ASIL ölçütü: son 7 gecede kaç gecede 20 dk+ süren,
+  // kendi dönemediği uyanma oldu. null = kayıt yok (beyana düşüldü).
+  "uzun_uyanma_gece_sayisi": 4,
+  // v2.3 — şekerleme eklendiyse gerekçesi; yoksa null
+  "sekerleme": {"tetik": "gunduz_acigi", "eksik_dk": 45, "sure_dk": 30},
+  // v2.3/K20 — parça birleştirme eşikleri (ilk parça kısaysa 45, tamsa 15 dk)
+  "parca_birlestirme_dk": 15, "parca_birlestirme_kisa_dk": 45,
   "uyaniklik_penceresi_dk": 150,
   "uyarilar": ["Bugün yatış saati bandın sınırına dayandı"],
   "regenerate_required": false, "regression_detected": false,
-  "restart_program_suggested": false, "reasons": [...], "log_summary": {...}
+  // v2.3 — üç kademeli regresyon akışı (restart_program_suggested KALKTI)
+  "regresyon_karti": null, "egitim_baslangic_gunu": 28,
+  "kirkbes_gun_doldu": false,
+  "reasons": [...], "log_summary": {...}
 }
 ```
+
+### v2.3 — regresyon kartı ve `POST /plans/regresyon-cevap`
+
+`regression_detected=true` olduğunda `regresyon_karti` **üç kademeden birini**
+taşır (İlayda S9). `null` ise gösterilecek kart yoktur.
+
+```jsonc
+"regresyon_karti": {
+  "tip": "kendi_donuyor_mu",     // kendi_donuyor_mu | devam_45 | tibbi_yonlendirme
+  "metin": "Bebeğiniz gece uyandığında 20 dakika beklerken kendi başına uykuya dönebiliyor mu?",
+  "egitim_gunu": 28,             // eğitimin kaçıncı günü (1'den başlar)
+  "kirkbes_gun_doldu": false
+}
+```
+
+| Kademe | Ne zaman | Mobil ne yapar |
+|---|---|---|
+| `kendi_donuyor_mu` | Anne henüz cevap vermedi | Evet/Hayır sorusunu gösterir |
+| `devam_45` | "Hayır" + 45 gün **dolmadı** | Bilgi kartı; eğitim aynen sürer |
+| `tibbi_yonlendirme` | "Hayır" + 45 gün **doldu** | Pediatri/fizyoterapi önerisi kartı |
+
+**`POST /api/v1/plans/regresyon-cevap?baby_id={uuid}`** → gövde
+`{"kendi_donuyor": true|false}`
+
+```jsonc
+// 200
+{"baby_id": "…", "kendi_donuyor": false, "cevap_at": "2026-09-22T…Z",
+ "regresyon_karti": {"tip": "devam_45", "metin": "…", "egitim_gunu": 10,
+                     "kirkbes_gun_doldu": false},
+ "egitim_baslangic_gunu": 10, "kirkbes_gun_doldu": false}
+```
+
+- **"evet"** → kart **7 gün** kapanır (`regresyon_karti: null`), sonra durum
+  yeniden değerlendirilir.
+- **"hayır"** → süresi yoktur; akış 45 gün kapısına göre ilerler.
+- Uç **plan üretmez**, çizelgeyi **değiştirmez**; yalnız cevabı saklar ve cevabın
+  hemen sonraki kart durumunu döndürür.
+- `404` başkasının bebeği, `422` gövde eksik, `401` kimliksiz.
 
 `schedule[]` eleman şeması **değişmedi** (`key,type,time,end,title,note,start_minute,end_minute`);
 yalnız `kaynak` (`kayit|plan|varsayilan`) ve gece bloğunda `gece_uykusu_dk` **eklendi**.
@@ -628,9 +691,9 @@ yalnız `kaynak` (`kayit|plan|varsayilan`) ve gece bloğunda `gece_uykusu_dk` **
 - **14 günlük eğitim modülü** `PATCH /babies/{id}` ile `training_started_at` (modül
   başlarken) ve `training_completed_at` (bitince) alanlarını set etmelidir.
   Bu tarihler set edilmezse regresyon tespiti **hiçbir zaman** çalışmaz.
-- `restart_program_suggested=true` geldiğinde kullanıcıya *"Programı baştan başlatmak
-  ister misiniz?"* kartı gösterilir. Onaylanırsa mobil: `POST /plans/generate` +
-  `PATCH /babies/{id}` ile `training_started_at=bugün`.
+- **v2.3:** `restart_program_suggested` **KALKTI**. Yerine `regresyon_karti`
+  gösterilir ve anne cevabı `POST /plans/regresyon-cevap` ile gönderilir.
+  "Programı baştan başlat" akışı **yoktur** — 45 gün dolana kadar eğitim sürer.
 - Dashboard `GET /plans/today` çağırır (hesabı tetikler).
 - **YENİ (v2):** `POST /logs/batch` yanıtındaki **`plan_updated: true`** geldiğinde
   mobil `plans/today` sorgusunu **invalidate etmelidir** — yoksa anne kaydı girer,
@@ -910,7 +973,7 @@ Davranış garantileri:
   `"yenidogan_suresi_doldu": true` eklenir. Sunucu kendiliğinden ücretli bir
   eğitim planı üretmez; mobil bu bayrağı görüp kullanıcıya "yeni planınızı
   oluşturalım mı?" kartını göstermeli ve onay gelirse `POST /plans/generate`
-  çağırmalıdır (`restart_program_suggested` ile aynı desen).
+  çağırmalıdır (sunucu bayrağı basar, üretimi kullanıcı onayı tetikler).
 
 ### `yas_ozel_notlar` — yaşa özel EK bölüm (Faz N-A)
 
