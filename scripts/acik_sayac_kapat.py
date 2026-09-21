@@ -10,13 +10,23 @@ Bundan SONRASI için akış düzeltildi (K13.3): POST /logs/batch, gelen manuel
 kaydın KAPSADIĞI açık sayacı otomatik kapatıyor. Bu betik yalnız GEÇMİŞİ
 temizler; kalıcı bir iş değildir.
 
-KURAL (spec Faz 3):
+KURAL:
   1. Açık kaydı KAPSAYAN kapalı bir manuel kayıt varsa (started_at <= açık
      kaydın started_at'i <= ended_at) → o kaydın `ended_at`'i ile kapat.
      Birden çok aday varsa EN ERKEN biten (sayaç en geç o an bitmiştir).
-  2. Yoksa → started_at + 16 saat.
-Kapanış başlangıçtan SONRA olmak zorunda; değilse 2. kurala düşülür (sıfır
-süreli kayıt üretmek, düzeltmeye çalıştığımız hatanın ta kendisi).
+  2. Kapsayan yoksa:
+     • `nap`   → started_at + BANDIN planlanan uyku süresi (ör. 8 ay: 60 dk),
+     • `sleep` → started_at + 16 saat.
+Kapanış başlangıçtan SONRA olmak zorunda; değilse 16 saat kuralına düşülür
+(sıfır süreli kayıt üretmek, düzeltmeye çalıştığımız hatanın ta kendisi).
+
+NEDEN `nap` İÇİN AYRI KURAL: spec'te tek bir "16 saatte kapat" kuralı vardı.
+Prod kuru koşusunda kapsayanı olmayan 81 kaydın 40'ı `nap` çıktı; hepsini 16
+saatle kapatmak 16 SAATLİK GÜNDÜZ UYKUSU kayıtları üretecekti. Bu kayıtlar
+haftalık özette gerçek uyku saati gibi toplanır ve "yeterince uyuyor mu"
+karşılaştırmasını o günlerde bozardı — yani bir bozuk veriyi başka bir bozuk
+veriyle değiştirmiş olurduk. Gece uykusunda 16 saat sınırı makul kalıyor
+(bir gece uykusu zaten saatler sürer), gündüz uykusunda değil.
 
 `nap_skipped` kayıtlarına DOKUNULMAZ: onlarda `ended_at = NULL` bir hata değil,
 "bu uykuyu hiç yapmadı" beyanıdır (K7).
@@ -46,10 +56,34 @@ from dotenv import load_dotenv                              # noqa: E402
 load_dotenv(ROOT / ".env")
 
 from api.db import SessionLocal                             # noqa: E402
-from api.models import SleepLog                             # noqa: E402
+from api.models import Baby, SleepLog                       # noqa: E402
+from engine import yas_bantlari                             # noqa: E402
+from engine.parameter_engine import hesapla_yas_ay          # noqa: E402
 
 UYKU_TIPLERI = ("sleep", "nap")
 TERK_SAAT = 16                 # bu kadar süredir açık olan kayıt "terk edilmiş"
+VARSAYILAN_NAP_DK = 60         # bant çözülemezse (doğum tarihi yok) makul uzunluk
+
+
+def _nap_suresi(db, baby_id, _onbellek: dict = {}) -> int:
+    """Bebeğin bandındaki PLANLANAN gündüz uykusu süresi (dk).
+
+    Bant çözülemezse VARSAYILAN_NAP_DK'ya düşülür — uydurma bir 16 saat yerine
+    makul bir uzunluk. Bebek başına bir kez hesaplanır."""
+    if baby_id in _onbellek:
+        return _onbellek[baby_id]
+    sure = VARSAYILAN_NAP_DK
+    try:
+        baby = db.get(Baby, baby_id)
+        if baby is not None and baby.birth_date is not None:
+            hafta = int(getattr(baby, "dogum_haftasi", None) or 40)
+            ay = hesapla_yas_ay(baby.birth_date.isoformat(), hafta)["duzeltilmis_ay"]
+            bant = yas_bantlari.yas_bandi_getir(ay)
+            sure = int(yas_bantlari.cizelge_parametreleri(bant)["uyku_suresi_dk"])
+    except Exception:            # bant tablosu/doğum tarihi sorunlu → varsayılan
+        pass
+    _onbellek[baby_id] = max(15, sure)
+    return _onbellek[baby_id]
 
 
 def _utc(t: datetime | None) -> datetime | None:
@@ -90,9 +124,13 @@ def _adaylar(db, gun: int):
                    and _utc(r.ended_at) > bas]
         if ortusen:
             out.append((a, min(ortusen), "kapsayan manuel kayıt"))
+        elif a.type == "nap":
+            dk = _nap_suresi(db, a.baby_id)
+            out.append((a, bas + timedelta(minutes=dk),
+                        f"kapsayan yok → bant uyku süresi +{dk} dk"))
         else:
             out.append((a, bas + timedelta(hours=TERK_SAAT),
-                        f"kapsayan kayıt yok → +{TERK_SAAT} saat"))
+                        f"kapsayan yok → +{TERK_SAAT} saat"))
     return out
 
 
@@ -119,9 +157,12 @@ def main():
             return
 
         kapsayan = sum(1 for _r, _k, g in adaylar if g == "kapsayan manuel kayıt")
+        bantli = sum(1 for _r, _k, g in adaylar if g.startswith("kapsayan yok → bant"))
         print(f"Son {a.gun} günde {TERK_SAAT} saatten uzun açık kayıt: {len(adaylar)}")
         print(f"  kapsayan manuel kayıtla kapanacak : {kapsayan}")
-        print(f"  +{TERK_SAAT} saat ile kapanacak      : {len(adaylar) - kapsayan}")
+        print(f"  bant uyku süresiyle (nap)         : {bantli}")
+        print(f"  +{TERK_SAAT} saat ile (sleep)            : "
+              f"{len(adaylar) - kapsayan - bantli}")
         print(f"  etkilenen bebek                   : "
               f"{len({r.baby_id for r, _k, _g in adaylar})}\n")
         for r, kapanis, gerekce in adaylar:
