@@ -1626,3 +1626,122 @@ Body: `{"user_id":"<uuid>","action":"mute|unmute|ban|unban"}` → **200**.
 alanını da içerir: `{"plan_reminders":true,"daily_summary":true,"community_replies":true}`.
 Kapatmak: `PATCH {"community_replies": false}`.
 
+
+---
+
+# Eğitim videoları (v2.4)
+
+Uygulama içi eğitim kütüphanesi: 16 video, dört kategori, aşamaya göre "günün
+önerisi" ve izlenme takibi. Videolar **uygulama içinde native oynatıcıyla**
+oynatılır; dış bağlantı (YouTube vb.) yoktur.
+
+## Uçlar
+
+| Endpoint | Açıklama |
+|---|---|
+| `GET /api/v1/education/videos?baby_id=` | Tüm katalog + ilerleme + günün önerisi + aşama. Tek çağrı. `baby_id` opsiyonel: verilmezse kullanıcının en yeni bebeği kullanılır. |
+| `POST /api/v1/education/videos/{id}/progress` | `{"position_sec": int, "completed": bool?}` → upsert. Ucuzdur; duraklama/çıkışta çağrılır. |
+| `GET /media/videos/{slug}.mp4` | **PUBLIC**, **Range destekli** (206), `Cache-Control: public, max-age=31536000, immutable`. |
+| `GET /media/posters/{slug}.jpg` | **PUBLIC** kapak görseli, aynı cache. |
+
+**Neden video ucu auth istemiyor:** iOS/AVPlayer Range isteklerini
+`Authorization` başlığı **taşımadan** yapar; korumalı bir uca bağlanan oynatıcı
+ilk byte'ta 401 alır. Videolar kişisel veri içermez — kişisel olan "kim ne
+izledi" bilgisidir ve o korumalı `/education` ucundadır. Ses paketleri (kişiye
+özel) imzalı `/media/{yol}` ucundan sunulmaya **devam eder**.
+
+**Range zorunluluğu:** AVPlayer önce `Range: bytes=0-1` gönderir; **206** +
+`Content-Range` görmezse dosyayı akış kabul etmez (sarma çalışmaz, bazı
+sürümlerde hiç başlamaz). Uç `bytes=a-b`, `bytes=a-`, `bytes=-n` biçimlerini
+destekler, kapsam dışı aralıkta **416** + `Content-Range: bytes */<boyut>` döner.
+
+## Yanıt şeması
+
+```jsonc
+{
+  "categories": [
+    {"key": "baslarken", "title": "Başlarken", "videos": [
+      {"id": "…", "slug": "uyku-egitimine-giris",
+       "title": "Uyku eğitimine giriş ve genel bilgilendirme",
+       "description": "…", "duration_sec": 70,
+       "video_url": "/media/videos/uyku-egitimine-giris.mp4",
+       "poster_url": "/media/posters/uyku-egitimine-giris.jpg",
+       "stage_tags": ["egitim_oncesi", "genel"], "chapters": [],
+       "progress": {"position_sec": 0, "completed": false}}
+    ]}
+  ],
+  "todays_pick": "…",          // video id — aşamaya göre öneri (null olabilir)
+  "watched_count": 2, "total_count": 16, "total_minutes": 31,
+  "asama": {"kod": "besik_yani", "etiket": "Beşik yanı", "kaynak": "plan"}
+}
+```
+
+`video_url` / `poster_url` **GÖRELİDİR**. Mobil bunları API tabanıyla birleştirir;
+mutlak URL saklanmaz çünkü alan adı değişince kayıtlı adresler bayatlar.
+
+## Aşama eşlemesi
+
+`asama.kaynak` iki değer alır:
+
+- **`"plan"`** — `babies.mevcut_asama` NULL ise eğitim gününden türetilir:
+  gün 1-3 `besik_yani`, 4-6 `oda_ortasi`, 7-9 `kapi`, 10-12 `esik`, 13 `bitis`.
+  Eğitim başlamamışsa `egitim_oncesi`, tamamlanmışsa `egitim_sonrasi`.
+  13. gün geçilmiş ama `training_completed_at` set edilmemişse `bitis`te kalır.
+- **`"anne"`** — `PATCH /api/v1/babies/{id} {"mevcut_asama": "kapi"}` gelmişse
+  o kullanılır ve türetme devre dışı kalır. **Annenin beyanı hesabı ezer.**
+  `null`'a çekilince plana geri dönülür. Geçersiz kod → **422**.
+
+Geçerli kodlar: `genel`, `besik_yani`, `oda_ortasi`, `kapi`, `esik`, `bitis`,
+`egitim_oncesi`, `egitim_sonrasi`.
+
+**`todays_pick` sırası:** ① aşamayla eşleşen **izlenmemiş** ilk video →
+② eşleşen ilk video (hepsi izlenmişse) → ③ `genel` etiketli ilk video →
+④ katalogdaki ilk video.
+
+> **TÜM VİDEOLAR HER ZAMAN ERİŞİLEBİLİR.** Aşama yalnız sıralama/öneri içindir;
+> hiçbir video kilitlenmez — anne merak ettiğini istediği an izleyebilmeli.
+
+## Yeni video eklemek (build GEREKTİRMEZ)
+
+```
+1. Dosyayı  C:\Users\Mert KORAL\tavsan-videolar\  klasörüne at
+2. videolar.csv'ye bir satır ekle:
+   dosya, slug, baslik, kategori, asama_etiketleri, aciklama, sira
+3. python scripts/video_yukle.py
+```
+
+Betik: CSV'yi okur → kataloğa göre eksik/yeni olanı bulur → sıkıştırır ve poster
+üretir → Railway volume'una yükler → `education_videos`'a **slug bazlı upsert**
+eder. Var olan dosyayı **atlar**, istediğin kadar tekrar çalıştırılabilir.
+
+```bash
+python scripts/video_yukle.py --kuru-kosu   # ne yapacağını göster, dokunma
+python scripts/video_yukle.py --yerel       # prod yerine yerel depo + yerel DB
+python scripts/video_yukle.py --zorla       # volume'da dosya olsa da yeniden yükle
+python scripts/video_isle.py                # yalnız sıkıştır + poster (yükleme yok)
+```
+
+Gereksinim: `ffmpeg` (`winget install --id Gyan.FFmpeg --exact`). Betik winget
+kurulumunu PATH'te olmasa da bulur.
+
+**Sıkıştırma politikası** (`scripts/video_isle.py`):
+`libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart -c:a aac -b:a 128k`.
+Ölçekleme yalnız **küçültme** yönünde (kaynak 1080p'nin altındaysa dokunulmaz).
+Yeniden kodlama dosyayı **büyütüyorsa** yapılmaz: akışlar `-c copy` ile aynen
+taşınır, tek kazanç `+faststart` olur — bu kayıpsızdır ve akış için gereken
+tek şey zaten odur. Poster videonun 3. saniyesinden, **kaynak en/boy oranı
+korunarak** üretilir.
+
+## Veri modeli
+
+- `education_videos`: `slug` (doğal anahtar, tekil), `category`,
+  `order_in_category`, `duration_sec`, `video_url`, `poster_url`,
+  `stage_tags` (PG `text[]`), `chapters` (JSONB, şimdilik boş).
+- `video_progress`: `(user_id, video_id)` **tekil** — ilerleme upsert edilir,
+  satır yığılmaz. `completed_at` damgası **kalıcıdır**: geri sarıp yeniden
+  izlemek onu silmez.
+- `babies.mevcut_asama`: nullable; NULL = aşamayı plandan türet.
+
+Katalogda `completed` işareti mobilin `completed:true` göndermesini bekler; ek
+olarak sunucu, konum sürenin **%95'ini** geçtiyse videoyu kendiliğinden izlendi
+sayar (oynatıcılar son saniyelerde ilerleme göndermeyi kesebiliyor).

@@ -1,8 +1,16 @@
 """Baby (bebek profili) şemaları — mobil Supabase 'babies' alanlarıyla birebir."""
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from api.models.education_video import ASAMA_KODLARI
+
+# Eğitim aşaması — TEK sözlük (models/education_video.py). Literal ile
+# doğrulanır: geçersiz kod 422 döner, DB'ye çöp yazılmaz ve video eşlemesi
+# sessizce "hiçbir videoyla eşleşmeyen aşama"ya düşmez.
+AsamaKodu = Literal[ASAMA_KODLARI]
 
 
 class BabyCreate(BaseModel):
@@ -45,6 +53,9 @@ class BabyUpdate(BaseModel):
     dogum_haftasi: int | None = Field(default=None, ge=24, le=42)
     training_started_at: date | None = None
     training_completed_at: date | None = None
+    # Eğitim videolarının aşama rozeti. NULL'a çekilirse aşama yeniden PLANDAN
+    # türetilir; dolu ise annenin beyanı hesabı ezer.
+    mevcut_asama: AsamaKodu | None = None
 
 
 class BabyResp(BaseModel):
@@ -64,6 +75,7 @@ class BabyResp(BaseModel):
     dogum_haftasi: int | None
     training_started_at: date | None
     training_completed_at: date | None
+    mevcut_asama: str | None = None
     created_at: datetime
     updated_at: datetime
 

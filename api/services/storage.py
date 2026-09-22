@@ -29,7 +29,12 @@ logger = logging.getLogger("tavsan.storage")
 
 # Bucket karşılıkları (yol önekleri).
 KOVA_SES = "voice-audio"              # PRIVATE — imzalı bağlantı ile sunulur
-KOVA_VIDEO = "egitim-videolari"       # ileride eğitim videoları
+# Eğitim videoları PUBLIC'tir: kişisel veri içermez, herkese aynı dosya sunulur
+# ve iOS oynatıcısı Range isteklerini Authorization başlığı TAŞIMADAN yapar.
+# İmzalı bağlantı burada yanlış olurdu — imza süresi video ortasında dolar ve
+# oynatma "sebepsiz" durur. Yetki kontrolü KATALOGDA değil, dosyada anlamsız.
+KOVA_VIDEOLAR = "videos"              # PUBLIC — /media/videos/{slug}.mp4
+KOVA_POSTERLER = "posters"            # PUBLIC — /media/posters/{slug}.jpg
 
 # İmzalı bağlantı varsayılan ömrü (spec: 1 saat).
 IMZA_OMRU_SN = 3600
@@ -48,6 +53,26 @@ def yol_guvenli_mi(yol: str) -> bool:
 def ses_yolu(user_id, voice_profile_id, content_id: str) -> str:
     """Spec'teki yol: voice-audio/{user_id}/{voice_profile_id}/{content_id}.mp3"""
     return f"{KOVA_SES}/{user_id}/{voice_profile_id}/{content_id}.mp3"
+
+
+def video_yolu(slug: str) -> str:
+    """Eğitim videosunun depo yolu: videos/{slug}.mp4"""
+    return f"{KOVA_VIDEOLAR}/{slug}.mp4"
+
+
+def poster_yolu(slug: str) -> str:
+    """Eğitim videosunun kapak görselinin depo yolu: posters/{slug}.jpg"""
+    return f"{KOVA_POSTERLER}/{slug}.jpg"
+
+
+def video_url(slug: str) -> str:
+    """İstemciye verilen GÖRELİ yol. Mutlak URL SAKLANMAZ: alan adı değişince
+    kayıtlı mutlak adresler bayatlar, mobil tarafta düzeltilemez."""
+    return f"/media/{KOVA_VIDEOLAR}/{slug}.mp4"
+
+
+def poster_url(slug: str) -> str:
+    return f"/media/{KOVA_POSTERLER}/{slug}.jpg"
 
 
 def ses_klasoru(user_id, voice_profile_id=None) -> str:

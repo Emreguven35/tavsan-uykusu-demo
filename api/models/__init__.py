@@ -23,6 +23,7 @@ from api.models.community_report import Report
 from api.models.community_block import Block
 from api.models.community_moderation import ModerationLog
 from api.models.api_usage import ApiUsage
+from api.models.education_video import EducationVideo, VideoProgress
 
 __all__ = [
     "User", "Baby", "SleepLog", "SilinenSleepLog", "SleepPlan",
@@ -33,4 +34,6 @@ __all__ = [
     "CommunityProfile", "Thread", "Reply", "Like", "Report", "Block", "ModerationLog",
     # Maliyet takibi
     "ApiUsage",
+    # Eğitim videoları
+    "EducationVideo", "VideoProgress",
 ]

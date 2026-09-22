@@ -42,6 +42,8 @@ from api.routers import chat, voice   # noqa: E402 — Faz 4 (RAG chat + ses)
 from api.routers import notifications # noqa: E402 — Faz 6.2 (push token + tercihler)
 from api.routers import community      # noqa: E402 — Faz T (anne topluluğu)
 from api.routers import admin          # noqa: E402 — maliyet raporu (moderatör)
+from api.routers import education     # noqa: E402 — eğitim videoları katalog
+from api.routers import media         # noqa: E402 — video/poster sunumu (PUBLIC)
 from api.services import notifier     # noqa: E402 — Faz 6.2 (bildirim zamanlayıcısı)
 from api.services import storage       # noqa: E402 — medya deposu (ses paketleri)
 from api.services import voice_temizlik, voice_uretim  # noqa: E402 — Faz 4 (v2.3)
@@ -256,6 +258,11 @@ app.include_router(voice.router, prefix=API_V1_PREFIX)
 app.include_router(notifications.router, prefix=API_V1_PREFIX)
 app.include_router(community.router, prefix=API_V1_PREFIX)
 app.include_router(admin.router, prefix=API_V1_PREFIX)
+app.include_router(education.router, prefix=API_V1_PREFIX)
+# SIRA ÖNEMLİ — media router, dosyanın ilerisindeki imzalı
+# `/media/{yol:path}` yakalayıcısından ÖNCE kaydedilir. Ters sırada
+# /media/videos/x.mp4 de imza ister ve iOS oynatıcı 403 alırdı.
+app.include_router(media.router)          # PUBLIC — /api/v1 ÖNEKİ YOK
 
 
 class AskReq(BaseModel):

@@ -53,4 +53,11 @@ class Baby(Base, TimestampMixin):
     regresyon_cevap_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
 
+    # --- Eğitim aşaması (eğitim videoları) ----------------------------------
+    # NULL ise aşama PLANDAN türetilir (gün 1-3 beşik yanı … 13 bitiş). Anne
+    # "ben aslında hâlâ kapıdayım" diyip PATCH ederse burası dolar ve türetme
+    # DEVRE DIŞI kalır: annenin beyanı hesaptan üstündür.
+    # Kodlar: api/models/education_video.py ASAMA_KODLARI.
+    mevcut_asama: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
     user = relationship("User", back_populates="babies")

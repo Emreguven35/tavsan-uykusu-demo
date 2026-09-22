@@ -5,12 +5,13 @@ PostgreSQL production hedefidir (uuid + JSONB). Ancak modeller lokal SQLite'ta d
 çalışsın diye tipler 'variant' ile tanımlanır:
   - GUID  → PG'de native UUID, SQLite'ta CHAR(32) (sa.Uuid otomatik yapar)
   - JSONBType → PG'de JSONB, diğerlerinde generic JSON
+  - TextArrayType → PG'de text[], diğerlerinde JSON dizisi
 
 Böylece `alembic upgrade head` postgres'te JSONB/uuid üretir; lokal sqlite testinde
 aynı modeller sorunsuz create edilir.
 """
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -24,3 +25,8 @@ GUID = sa.Uuid(as_uuid=True)
 
 # JSONB: PG'de JSONB (indekslenebilir), diğerlerinde generic JSON.
 JSONBType = sa.JSON().with_variant(JSONB(astext_type=sa.Text()), "postgresql")
+
+# Metin listesi: PG'de text[] (GIN ile indekslenebilir, `@>` ile
+# sorgulanabilir), diğer dialektlerde generic JSON dizisi. Python tarafında
+# İKİSİ DE list[str] döndürür; çağıran kod dialekti bilmez.
+TextArrayType = sa.JSON().with_variant(ARRAY(sa.Text()), "postgresql")
