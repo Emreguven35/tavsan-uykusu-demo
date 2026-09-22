@@ -3,7 +3,7 @@ import uuid
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Date, ForeignKey
+from sqlalchemy import Date, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.db.base import GUID, JSONBType, Base
@@ -13,6 +13,13 @@ from sqlalchemy import DateTime, func
 
 class SleepPlan(Base):
     __tablename__ = "sleep_plans"
+    # TEKİLLİK (v2.4.4): bir bebeğin bir güne AİT TEK planı olur. Kısıt
+    # yokken `upsert_plan` "seç → yoksa ekle" yapıyordu ve eşzamanlı iki
+    # yazım (GET /plans/today + bildirim turu) aynı güne iki satır
+    # bırakabiliyordu — hata vermeden. Kısıt hem çoğalmayı engeller hem
+    # ON CONFLICT'in tutunacağı dalı verir.
+    __table_args__ = (UniqueConstraint("user_id", "baby_id", "plan_date",
+                                       name="uq_sleep_plans_user_baby_date"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
     user_id: Mapped[uuid.UUID] = mapped_column(

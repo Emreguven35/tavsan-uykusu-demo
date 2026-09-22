@@ -14,11 +14,13 @@ import logging
 import math
 import os
 import time
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
 
 from sqlalchemy.orm import Session
 
+from api.db import upsert
 from api.models import Baby, SleepLog, SleepPlan, User
 from api.services import plan_adapter
 from api.services import usage
@@ -356,17 +358,28 @@ def upsert_plan(db: Session, user: User, baby: Baby, plan_date: date,
     üretirdi. Karşılaştırma `adaptation.hesaplandi_at` hariç yapılır — o damga
     "bu çizelge ne zaman hesaplandı"yı değil "en son ne zaman DEĞİŞTİ"yi gösterir."""
     plan = plan_for_date(db, user, baby, plan_date)
-    if plan is None:
-        plan = SleepPlan(user_id=user.id, baby_id=baby.id,
-                         plan_date=plan_date, content=content)
-        db.add(plan)
-    elif _ayni_icerik(plan.content, content):
-        return plan                          # değişmedi → DB'ye dokunma
-    else:
+    if plan is not None:
+        if _ayni_icerik(plan.content, content):
+            return plan                      # değişmedi → DB'ye dokunma
         plan.content = dict(content)
+        db.commit()
+        db.refresh(plan)
+        return plan
+
+    # YENİ SATIR — ATOMİK (v2.4.4). Eskiden düz INSERT'ti: aynı bebeğin bugünkü
+    # planını iki yol aynı anda kurabiliyor (GET /plans/today + bildirim turu +
+    # POST /logs/batch sonrası tazeleme) ve AYNI GÜNE İKİ SATIR yazılıyordu.
+    # Tekillik kısıtı olmadığı için hata da vermiyordu: sessiz çoğalma, sonra
+    # `plan_for_date` iki satırdan birini seçiyordu. Kısıt eklendi
+    # (uq_sleep_plans_user_baby_date) ve yazım ON CONFLICT DO UPDATE'e çevrildi.
+    st = upsert.insert(SleepPlan).values(
+        id=uuid.uuid4(), user_id=user.id, baby_id=baby.id,
+        plan_date=plan_date, content=dict(content))
+    db.execute(st.on_conflict_do_update(
+        index_elements=["user_id", "baby_id", "plan_date"],
+        set_={"content": st.excluded.content}))
     db.commit()
-    db.refresh(plan)
-    return plan
+    return plan_for_date(db, user, baby, plan_date)
 
 
 def _ayni_icerik(a: dict | None, b: dict | None) -> bool:

@@ -24,6 +24,7 @@ from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
 
+from api.db import upsert
 from api.models import Baby, EducationVideo, User, VideoProgress
 from api.models.education_video import (ASAMA_ETIKETLERI, ASAMA_KODLARI,
                                         KATEGORILER)
@@ -180,30 +181,51 @@ TAMAMLANDI_ORANI = 0.95
 
 def ilerleme_kaydet(db: Session, user: User, video: EducationVideo,
                     position_sec: int, completed: bool | None = None) -> VideoProgress:
-    """(user, video) satırını UPSERT et. Ucuz: tek satır, tek commit."""
-    satir = (db.query(VideoProgress)
-             .filter(VideoProgress.user_id == user.id,
-                     VideoProgress.video_id == video.id).one_or_none())
-    if satir is None:
-        satir = VideoProgress(id=uuid.uuid4(), user_id=user.id, video_id=video.id)
-        db.add(satir)
+    """(user, video) satırını ATOMİK upsert et. Ucuz: tek ifade, tek commit.
 
+    "Önce SEÇ, yoksa EKLE" deseni yarış durumunda UniqueViolation veriyordu
+    (Sentry, 2026-09-22): oynatıcı videoyu kapatırken "duraklat" ve "çıkış"
+    isteklerini neredeyse aynı anda gönderiyor, ikisi de ilk satırı yazmaya
+    çalışıyordu. Artık tek `INSERT ... ON CONFLICT DO UPDATE` var; kısıt
+    ihlali hata değil, güncelleme.
+
+    İKİ KURAL ÇAKIŞMADA DA KORUNUR:
+      • İLERLEME GERİ GİTMEZ — `GREATEST(yeni, mevcut)`. Geç ulaşan eski bir
+        konum (ör. 12 sn) ileri konumu (95 sn) ezemez.
+      • "İZLEDİM" DAMGASI GERİ ALINMAZ — `COALESCE(mevcut, yeni)`. Geri sarıp
+        yeniden izlemek damgayı silmez; ilk damga kalır."""
     sure = int(video.duration_sec or 0)
     konum = max(0, int(position_sec or 0))
     if sure:
         konum = min(konum, sure)
-    satir.position_sec = konum
 
     bitti = bool(completed)
     if not bitti and sure and konum >= sure * TAMAMLANDI_ORANI:
         bitti = True
-    # "İzledim" damgası KALICIDIR: geri sarıp yeniden izlemek onu silmez.
-    if bitti and satir.completed_at is None:
-        satir.completed_at = datetime.now(timezone.utc)
+    simdi = datetime.now(timezone.utc)
 
+    st = upsert.insert(VideoProgress).values(
+        id=uuid.uuid4(), user_id=user.id, video_id=video.id,
+        position_sec=konum,
+        completed_at=simdi if bitti else None,
+        updated_at=simdi,
+    )
+    st = st.on_conflict_do_update(
+        index_elements=["user_id", "video_id"],
+        set_={
+            "position_sec": upsert.en_buyuk(st.excluded.position_sec,
+                                            VideoProgress.position_sec),
+            "completed_at": upsert.ilk_dolu(VideoProgress.completed_at,
+                                            st.excluded.completed_at),
+            "updated_at": simdi,
+        },
+    )
+    db.execute(st)
     db.commit()
-    db.refresh(satir)
-    return satir
+    # commit tüm ORM nesnelerini bayatlattı; satır DB'den taze okunur.
+    return (db.query(VideoProgress)
+            .filter(VideoProgress.user_id == user.id,
+                    VideoProgress.video_id == video.id).one())
 
 
 # ---------------------------------------------------------------------------

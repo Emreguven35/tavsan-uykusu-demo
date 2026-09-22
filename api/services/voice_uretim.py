@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from api import tts
-from api.db import SessionLocal
+from api.db import SessionLocal, upsert
 from api.models import VoiceAudio, VoiceProfile
 from api.services import storage
 from api.services import voice as voice_svc
@@ -163,12 +163,28 @@ def uret(voice_profile_id) -> dict:
 
         db = SessionLocal()
         try:
-            db.add(VoiceAudio(voice_profile_id=pid, content_id=cid,
-                              storage_path=yol, bytes=boyut,
-                              duration_sec=_sure_tahmini(boyut)))
+            # ATOMİK UPSERT (v2.4.4). Eskiden düz INSERT'ti ve UNIQUE
+            # (voice_profile_id, content_id) ihlali "yazılamadı" sayılıyordu:
+            # dosya depoya YAZILMIŞ olmasına rağmen içerik BAŞARISIZ'a düşüyor,
+            # %50 kuralı paketi `failed`e çevirip aylık hakkı iade edebiliyordu.
+            # Çakışma iki yoldan geliyor: aynı profil için ikinci bir üretim
+            # turu ve yeniden başlatmada yarışan iki iş. Artık çakışma hata
+            # değil, güncelleme — yeni dosya yolu/boyutu satıra yazılır.
+            st = upsert.insert(VoiceAudio).values(
+                voice_profile_id=pid, content_id=cid, storage_path=yol,
+                bytes=boyut, duration_sec=_sure_tahmini(boyut))
+            db.execute(st.on_conflict_do_update(
+                index_elements=["voice_profile_id", "content_id"],
+                set_={"storage_path": st.excluded.storage_path,
+                      "bytes": st.excluded.bytes,
+                      "duration_sec": st.excluded.duration_sec}))
+            # İLERLEME SAYILARAK yazılır, artırılarak DEĞİL: iki iş aynı anda
+            # `+1` yaparsa biri kaybolur (lost update) ve çubuk eksik kalır.
             p = db.get(VoiceProfile, pid)
             if p is not None:
-                p.progress_done = (p.progress_done or 0) + 1
+                p.progress_done = (db.query(VoiceAudio)
+                                   .filter(VoiceAudio.voice_profile_id == pid)
+                                   .count())
             db.commit()
             uretilen += 1
         except Exception:

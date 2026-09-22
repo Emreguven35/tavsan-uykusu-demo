@@ -258,9 +258,14 @@ check("3c) completed=true → izlendi damgası",
 
 r = client.post(f"/api/v1/education/videos/{VID_ILK_GUNLER}/progress",
                 headers=H, json={"position_sec": 5})
+# v2.4.4 — İLERLEME GERİ GİTMEZ. Konum artık `GREATEST(yeni, mevcut)` ile
+# yazılıyor: yarışan iki istekten geç uygulananı eskiyi ezmesin diye. Yan
+# etkisi bilinçli: anne geri sarıp bıraksa bile "kaldığın yer" en ileri nokta
+# kalır, damga da silinmez.
 check("3d) Geri sarmak 'izledim' damgasını SİLMEZ",
-      r.json()["completed"] is True and r.json()["position_sec"] == 5,
-      r.text[:200])
+      r.json()["completed"] is True, r.text[:200])
+check("3d2) Geri sarmak konumu GERİ ALMAZ (GREATEST kuralı)",
+      r.json()["position_sec"] == 70, r.text[:200])
 
 # Sona gelince mobil `completed` göndermese de izlendi sayılır.
 r = client.post(f"/api/v1/education/videos/{VID_GIRIS}/progress",

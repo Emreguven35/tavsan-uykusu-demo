@@ -30,7 +30,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import ValidationError
 from sqlalchemy import and_, or_
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from api.db import get_db
@@ -188,6 +188,7 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
 
         # Her kayıt KENDİ savepoint'inde yazılır: birinin kısıt ihlali
         # (ör. yarışan aynı client_id) diğerlerini geri almasın.
+        _yeni_satir = row is None
         try:
             with db.begin_nested():
                 if row is None:                  # yeni kayıt
@@ -199,13 +200,34 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
                     db.add(row)
                     created += 1
                 else:                            # mevcut → güncelle (idempotent)
-                    row.baby_id = item.baby_id
-                    row.type = item.type
-                    row.started_at = item.started_at
-                    row.ended_at = item.ended_at
-                    row.notes = item.notes
+                    _kaydi_guncelle(row, item)
                     updated += 1
                 db.flush()                       # aynı batch'te sonraki aramalar görsün
+        except IntegrityError:
+            # YARIŞ (v2.4.4): SELECT ile INSERT arasında aynı client_id'yi
+            # başka bir istek yazdı (mobil zayıf ağda aynı batch'i iki kez
+            # gönderiyor). Bu bir HATA DEĞİL, idempotency'nin tam da işlediği
+            # an. Eskiden "db_error" dönüyordu: mobil kaydı kuyrukta tutup
+            # yeniden gönderiyor, Sentry'ye de sahte hata düşüyordu.
+            # Savepoint kendiliğinden geri alındı (dış işlem SAĞLAM); satırı
+            # yeniden okuyup güncelleme yoluna geçiyoruz.
+            if row is not None and row in db.new:
+                db.expunge(row)                  # yazılamayan nesne oturumda kalmasın
+            if _yeni_satir:
+                created -= 1
+            row = _client_id_ile_bul(db, user, item)
+            if row is None:                      # çakışma BAŞKA bir kısıttan
+                logging.getLogger("tavsan.logs").exception(
+                    "Batch kaydı yazılamadı (user=%s client_id=%s)", user.id, cid)
+                skipped.append(SkippedEntry(
+                    client_id=cid, reason="db_error",
+                    detail="Kayıt veritabanına yazılamadı, tekrar denenecek"))
+                continue
+            with db.begin_nested():
+                _kaydi_guncelle(row, item)
+                db.flush()
+            updated += 1
+            kopya = True
         except SQLAlchemyError:
             logging.getLogger("tavsan.logs").exception(
                 "Batch kaydı yazılamadı (user=%s client_id=%s)", user.id, cid)
@@ -257,6 +279,30 @@ KOPYA_PENCERE = timedelta(minutes=3)
 # K19.2 — yanıtta kategori taşıyacak tipler. `nap_skipped` HARİÇ: o bir uyku
 # değil, "bu uykuyu hiç yapmadı" beyanıdır.
 UYKU_TIPLERI_TUM = ("sleep", "nap", "sekerleme")
+
+
+def _kaydi_guncelle(row: SleepLog, item) -> None:
+    """Mevcut satırı gelen kayda eşitle (idempotent senkron)."""
+    row.baby_id = item.baby_id
+    row.type = item.type
+    row.started_at = item.started_at
+    row.ended_at = item.ended_at
+    row.notes = item.notes
+
+
+def _client_id_ile_bul(db: Session, user: User, item) -> SleepLog | None:
+    """client_id ile mevcut satırı bul (önce bebek bazlı, sonra kullanıcı)."""
+    if getattr(item, "client_id", None) is None:
+        return None
+    row = (db.query(SleepLog)
+           .filter(SleepLog.user_id == user.id,
+                   SleepLog.baby_id == item.baby_id,
+                   SleepLog.client_id == item.client_id).one_or_none())
+    if row is not None:
+        return row
+    return (db.query(SleepLog)
+            .filter(SleepLog.user_id == user.id,
+                    SleepLog.client_id == item.client_id).one_or_none())
 
 
 def _kopya_bul(db: Session, user: User, item) -> SleepLog | None:
