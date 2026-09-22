@@ -22,12 +22,12 @@ _connect_args = {"check_same_thread": False} if settings.is_sqlite else {}
 # HAVUZ BOYUTU (v2.4.1) — uvicorn artık birden fazla worker ile koşuyor ve
 # havuz SÜREÇ BAŞINA açılıyor. SQLAlchemy varsayılanı (5 + 10 taşma) × worker
 # sayısı Postgres'in bağlantı tavanını zorlar. Toplam = WORKERS × (pool_size +
-# max_overflow); 4 worker × 10 = 40 bağlantı, Railway Postgres tavanının
-# (100) altında ve zamanlayıcı/işler için yer bırakıyor.
+# max_overflow); 8 worker × 6 = 48 bağlantı, Railway Postgres tavanının
+# (100) altında ve zamanlayıcı/işler/bakım betikleri için yer bırakıyor.
 # SQLite'ta havuz argümanları geçersizdir (tek dosya, tek süreç).
 _pool_args = {} if settings.is_sqlite else {
-    "pool_size": int(os.getenv("DB_POOL_SIZE") or 5),
-    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW") or 5),
+    "pool_size": int(os.getenv("DB_POOL_SIZE") or 3),
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW") or 3),
     "pool_recycle": 1800,        # Railway boştaki bağlantıyı düşürüyor
 }
 
