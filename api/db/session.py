@@ -6,6 +6,7 @@ threadpool'da çalıştığından yeterli/basittir. get_db, istek başına bir S
 ve her durumda kapatır.
 """
 import logging
+import os
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -18,11 +19,24 @@ settings = get_settings()
 # SQLite (lokal) için özel bağlantı argümanı; postgres'te gerekmez.
 _connect_args = {"check_same_thread": False} if settings.is_sqlite else {}
 
+# HAVUZ BOYUTU (v2.4.1) — uvicorn artık birden fazla worker ile koşuyor ve
+# havuz SÜREÇ BAŞINA açılıyor. SQLAlchemy varsayılanı (5 + 10 taşma) × worker
+# sayısı Postgres'in bağlantı tavanını zorlar. Toplam = WORKERS × (pool_size +
+# max_overflow); 4 worker × 10 = 40 bağlantı, Railway Postgres tavanının
+# (100) altında ve zamanlayıcı/işler için yer bırakıyor.
+# SQLite'ta havuz argümanları geçersizdir (tek dosya, tek süreç).
+_pool_args = {} if settings.is_sqlite else {
+    "pool_size": int(os.getenv("DB_POOL_SIZE") or 5),
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW") or 5),
+    "pool_recycle": 1800,        # Railway boştaki bağlantıyı düşürüyor
+}
+
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,          # bayat bağlantıları otomatik tazele (Railway idle)
     future=True,
     connect_args=_connect_args,
+    **_pool_args,
 )
 
 # SQLite'ta FK kısıtları VARSAYILAN OLARAK KAPALI — açmazsak ondelete=CASCADE/SET NULL

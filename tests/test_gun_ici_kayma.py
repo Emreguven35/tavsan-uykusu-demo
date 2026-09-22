@@ -53,6 +53,12 @@ _DB = Path(tempfile.gettempdir()) / "gun_ici_kayma_test.db"
 if _DB.exists():
     _DB.unlink()
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB.as_posix()}"
+# Bu suite TAM BİR GÜNÜ simüle ediyor: 07:00 uyanış, 13:00 uyku… Koşma
+# saati sabahsa bu damgalar "gelecek" düşer ve v2.4.1 zaman doğrulaması
+# onları eler (bkz. logs.GELECEK_TOLERANS_DK). Simülasyonda tolerans
+# gün boyuna açılır; ÜRETİM VARSAYILANI 5 dk ve test_yayin_duzeltmeleri
+# onu ayrıca doğruluyor.
+os.environ["LOG_GELECEK_TOLERANS_DK"] = "1440"
 os.environ["JWT_SECRET"] = "test-secret-en-az-otuz-iki-karakter-uzunlugunda"
 os.environ["ENVIRONMENT"] = "development"        # zamanlayıcı başlamasın
 os.environ["MAIL_PROVIDER"] = "disabled"
@@ -333,21 +339,32 @@ def test_e_uyku_atlandi():
     # v1.4 — gündüz açığı artık YALNIZ uyarı değil, ÇİZELGEYE BLOK olarak
     # kapatılıyor: akşam şekerlemesi eklendiği için K9 değerlendirmesi
     # "gerekli değil" diyebilir. Ölçülen şey artık açığın KAPANMIŞ olması.
+    # v2.4.1 — ŞEKERLEME UYANIKLIK PENCERESİNE TABİ (K15). Bu senaryoda
+    # zincir kayıp uykuyu öne çekiyor ve son uyku akşama yakın bitiyor;
+    # bandın minimum uyanıklık penceresi kadar sonrası şekerleme penceresini
+    # (17:00-19:00) aşıyor. Eskiden blok son uykudan HEMEN sonra ekleniyordu
+    # ("uyandır, hemen yatır"); artık eklenmiyor ve sebebi uyarıya yazılıyor.
     _sek = sekerleme_blogu(s)
-    check("E · gündüz açığı akşam şekerlemesiyle kapatıldı",
+    _min_ww = BANT["uyaniklik_penceresi_dk"][0]
+    _son_nap = max((b["end_minute"] for b in s.values()
+                    if b.get("type") == "nap" and b["key"] != pa.SEKERLEME_KEY),
+                   default=None)
+    check("E · şekerleme eklendiyse uyanıklık penceresine uyuyor",
+          _sek is None or (_sek["start_minute"] - _son_nap) >= _min_ww,
+          f'{_sek["time"]} (son uyku {hhmm(_son_nap)}, gereken {_min_ww} dk)'
+          if _sek else "şekerleme yok — pencereye sığmadı")
+    check("E · şekerleme yoksa SEBEBİ uyarıda yazıyor",
           _sek is not None
-          and SEK_PENCERE[0] <= _sek["start_minute"] < SEK_PENCERE[1],
-          f'{_sek["time"]}-{_sek["end"]}' if _sek else "şekerleme YOK")
-    check("E · şekerleme sonrası gündüz toplamı minimuma ulaştı",
-          gunduz_toplam(s) >= GUNDUZ_MIN,
-          f"{gunduz_toplam(s)} / {GUNDUZ_MIN}")
+          or any("şekerlemesine yer yok" in u
+                 for u in c["adaptation"]["uyarilar"]),
+          str(c["adaptation"]["uyarilar"]))
     tpl_deg = c["toplam_uyku_degerlendirme"]
-    # v1.4 — akşam şekerlemesi açığı kapattığı için 24 saatlik toplam artık
-    # "az" DEĞİL. Ölçülen şey: uyku atlansa bile gün hedefe ulaşıyor.
-    check("E · 24 saatlik toplam artık yeterli (şekerleme açığı kapattı)",
-          tpl_deg["durum"] != "az",
-          f'{tpl_deg["gerceklesen_dk"]} dk / hedef {TOPLAM_LO} dk '
-          f'durum={tpl_deg["durum"]}')
+    # Şekerleme eklenemediği için açık DURUYOR ve dürüstçe raporlanıyor:
+    # uydurma bir blokla kapatmaktansa anneye "eksik kaldı" demek doğru.
+    check("E · açık kapanmadıysa 24 saatlik toplam 'az' olarak raporlanıyor",
+          (gunduz_toplam(s) >= GUNDUZ_MIN) == (tpl_deg["durum"] != "az"),
+          f'gündüz {gunduz_toplam(s)}/{GUNDUZ_MIN}, '
+          f'24s durum={tpl_deg["durum"]}')
 
 
 # =============================================================================
@@ -569,11 +586,17 @@ def test_i_varsayim_bozulur():
     # v1.4 — nap_2 yalnız 30 dk sürdüğü için gün bandın gündüz minimumunun
     # altında kalıyor; akşam şekerlemesi ekleniyor ve yatış tavana dayanıyor.
     # İlayda: "gece uykusu gecikse dahi minimum gündüz uykusu önceliklidir."
+    # v2.4.1 — şekerleme uyanıklık penceresine tabi; son uyku akşama yakın
+    # bittiği için bu senaryoda yer kalmıyor (bkz. E).
     _sek_i = sekerleme_blogu(s)
-    check("I · gündüz açığı akşam şekerlemesiyle kapatıldı",
-          _sek_i is not None
-          and SEK_PENCERE[0] <= _sek_i["start_minute"] < SEK_PENCERE[1],
-          f'{_sek_i["time"]}-{_sek_i["end"]}' if _sek_i else "şekerleme YOK")
+    _min_ww_i = BANT["uyaniklik_penceresi_dk"][0]
+    _son_i = max((b["end_minute"] for b in s.values()
+                  if b.get("type") == "nap" and b["key"] != pa.SEKERLEME_KEY),
+                 default=None)
+    check("I · şekerleme eklendiyse uyanıklık penceresine uyuyor",
+          _sek_i is None or (_sek_i["start_minute"] - _son_i) >= _min_ww_i,
+          f'{_sek_i["time"]} (son uyku {hhmm(_son_i)})' if _sek_i
+          else "şekerleme yok — pencereye sığmadı")
     # Şekerleme zincir halkası DEĞİL (yalnız alt sınır koyar), bu yüzden yatış
     # doğal zincirden gelmeye devam ediyor.
     bekle("I", s, "bedtime",
@@ -655,20 +678,40 @@ def test_s2_acik_var_aksam_sekerlemesi():
 
 
 def test_s3_yatisa_uc_saat_varsa_altmis_dk():
-    """Gece yatışına ≥150 dk kalıyorsa şekerleme 60 dk olur."""
-    # Tek kısa uyku → hem açık büyük hem son uyku erken biter.
-    kur(lambda row: [gece(row, TODAY, TPL["bedtime"]["start_minute"], W),
-                     nap(row, TODAY, W + WW, 30)])
+    """Gece yatışına ≥150 dk kalıyorsa şekerleme 60 dk olur.
+
+    v2.4.1 — kurgu DEĞİŞTİ: eskiden tek kısa uyku vardı ve motor kalan
+    uykuları varsayıp günü akşama kadar dolduruyordu; son uyku 17:20'de
+    bitince şekerleme (uyanıklık penceresi nedeniyle) artık sığmıyor.
+    Süre kuralını ölçebilmek için şekerlemenin GERÇEKTEN sığdığı bir gün
+    kuruldu: bandın uyku sayısı kadar KISA ve ERKEN biten gerçek uyku."""
+    def loglar(row):
+        out = [gece(row, TODAY, TPL["bedtime"]["start_minute"], W)]
+        bas = W + WW
+        for _ in range(N_NAP):
+            out.append(nap(row, TODAY, bas, 35))     # kısa → gündüz açığı kalır
+            bas += 35 + WW
+        return out
+    kur(loglar)
     c, s = bugun(now_minute=20 * 60)
     sek = sekerleme_blogu(s)
     sure = (sek["end_minute"] - sek["start_minute"]) if sek else 0
     kalan = (s["bedtime"]["start_minute"] - sek["start_minute"]) if sek else 0
-    check("S3 · şekerleme eklendi", sek is not None, "")
+    check("S3 · şekerleme eklendi", sek is not None,
+          str([(b["key"], b.get("time"), b.get("end")) for b in s.values()]))
     check("S3 · yatışa ≥150 dk varsa süre 60 dk, değilse 30 dk",
           (sure == SEK_MAX) if kalan >= 150 else (sure == SEK_MIN),
           f"süre={sure} yatışa kalan={kalan} dk")
     check("S3 · süre tablodaki aralıkta", SEK_MIN <= sure <= SEK_MAX,
           f"{sure} ∉ [{SEK_MIN},{SEK_MAX}]")
+    # v2.4.1 — K15: şekerleme de uyanıklık penceresine uyar.
+    _son_s3 = max((b["end_minute"] for b in s.values()
+                   if b.get("type") == "nap" and b["key"] != pa.SEKERLEME_KEY),
+                  default=None)
+    check("S3 · son uykudan en az bandın minimum penceresi kadar sonra",
+          sek is not None
+          and (sek["start_minute"] - _son_s3) >= BANT["uyaniklik_penceresi_dk"][0],
+          f'son uyku {hhmm(_son_s3)}, şekerleme {sek["time"] if sek else "-"}')
 
 
 def test_s4_tek_uyku_kisa_aksam_sekerlemesi():

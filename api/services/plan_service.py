@@ -882,6 +882,75 @@ def _yenidogan_bugune_tasi(db: Session, user: User, baby: Baby,
     return upsert_plan(db, user, baby, today, content)
 
 
+# --- 5 AY GEÇİŞİ (v2.4.1) ---------------------------------------------------
+# Eğitim uygunluğu YAŞA bağlıdır ve her gün yeniden hesaplanır; ama
+# `content.type` plan ÜRETİM anında donuyordu. 4 aylıkken kaydolan bir anne
+# 5. ayı doldurunca `uygun_mu` true oluyor, `type` ise `egitim_bekleme`
+# kalıyordu — mobil ekran kararını type'tan verdiği için (bkz. generate_content)
+# önizleme ekranında kalıyor ve 13 günlük program HİÇ başlamıyordu.
+# Yayın öncesi testte KRİTİK olarak raporlandı.
+#
+# Çözüm: okuma yolunda tespit et, üretimi ARKA PLANA al (GET bloklanmaz),
+# mevcut planı iki bayrakla döndür. Üretim bitince sonraki GET yeni planı verir.
+EGITIM_YAS_ALT_SINIRI = 5.0          # parameter_engine ile aynı eşik
+
+
+def egitim_zamani_geldi_mi(baby: Baby, plan: SleepPlan | None,
+                           dogum_haftasi: int | None = None) -> bool:
+    """Bebek eğitim yaşına geldi ama planı hâlâ 'bekleme/önizleme' mi?"""
+    if plan is None or baby.birth_date is None:
+        return False
+    icerik = plan.content or {}
+    if icerik.get("type") != TYPE_BEKLEME:
+        return False
+    # Sağlık onayı gibi YAŞ DIŞI sebeplerle bekleyen planlar dokunulmaz:
+    # uygunluk kontrolünün tamamı yeniden koşturulur, yalnız yaş bakılmaz.
+    hafta = etkin_dogum_haftasi(baby, dogum_haftasi or icerik.get("dogum_haftasi"))
+    yas = hesapla_yas_ay(baby.birth_date.isoformat(), hafta)
+    if yas["duzeltilmis_ay"] < EGITIM_YAS_ALT_SINIRI:
+        return False
+    sonuc = egitim_uygunlugu_kontrol(
+        yas["duzeltilmis_ay"], hafta, getattr(baby, "saglik_problemi", None),
+        ilk_tam_sayi(baby.night_wakes), "beyan")
+    return bool(sonuc["uygun_mu"])
+
+
+def egitim_gecisini_baslat(db: Session, user: User, baby: Baby,
+                           plan: SleepPlan) -> SleepPlan:
+    """Gerçek eğitim planını ARKA PLANDA üret; bu isteği bloklamadan dön.
+
+    `training_started_at` BURADA set edilir: program sunucu tarafında başlar,
+    mobilin ayrıca PATCH atmasına gerek kalmaz (atarsa da üzerine yazmaz)."""
+    from api.services import plan_jobs
+
+    icerik = dict(plan.content or {})
+    if not icerik.get("yeniden_uretiliyor"):
+        job_id = plan_jobs.create_job(user.id, baby.id)
+        plan_jobs.submit(job_id, baby.id, None,
+                         etkin_dogum_haftasi(baby, icerik.get("dogum_haftasi")),
+                         ek_icerik={"egitim_gecisi": True})
+        logger.info("5 ay geçişi: eğitim planı üretimi başlatıldı "
+                    "baby=%s job=%s", baby.id, job_id)
+    if baby.training_started_at is None:
+        baby.training_started_at = datetime.now(timezone.utc).date()
+        db.commit()
+    # Mobil bu iki bayrakla "program hazırlanıyor" ekranını gösterir; içerik
+    # hâlâ eski önizleme planıdır, bir sonraki GET gerçek planı getirir.
+    icerik["egitim_zamani_geldi"] = True
+    icerik["yeniden_uretiliyor"] = True
+    # K11 GEÇİŞTE DE GEÇERLİ: uyarılar/yaş/uygunluk her GET'te GÜNCEL veriden
+    # türetilir. Bu satırlar olmadan anne, plan hazırlanırken hâlâ "4.5 aylık,
+    # eğitim uygun değil" uyarısını görüyordu (üretim anındaki donmuş metin).
+    if baby.birth_date is not None:
+        turetilmis = uyarilari_turet(baby, [], datetime.now(timezone.utc).date(),
+                                     icerik.get("dogum_haftasi"))
+        icerik["uyarilar"] = turetilmis["uyarilar"]
+        icerik["uygun_mu"] = turetilmis["uygun_mu"]
+        icerik["yas"] = turetilmis["yas"]
+    plan.content = icerik
+    return plan
+
+
 def ensure_today_plan(db: Session, user: User, baby: Baby,
                       today: date | None = None,
                       now_minute: int | None = None) -> SleepPlan | None:
@@ -908,6 +977,12 @@ def ensure_today_plan(db: Session, user: User, baby: Baby,
     # üretilmesi bu yaşa program dayatmak olur (bkz. _yenidogan_content).
     if is_yenidogan(base_plan):
         return _yenidogan_bugune_tasi(db, user, baby, base_plan, today)
+
+    # 5 AY GEÇİŞİ — eğitim yaşı geldiyse gerçek planı arka planda üret.
+    # Adaptasyondan ÖNCE: bekleme planının çizelgesi önizlemedir, onu bugüne
+    # hesaplamanın anlamı yok; bayraklı hâliyle döndürülür.
+    if egitim_zamani_geldi_mi(baby, base_plan):
+        return egitim_gecisini_baslat(db, user, baby, base_plan)
 
     # Şablon garantisi: v1 planlarında schedule_template yok; okuma yolunda bir
     # kez yükselt ki taban dünün hesaplanmış çizelgesi olmasın (K1).

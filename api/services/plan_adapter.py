@@ -1556,9 +1556,15 @@ def _sekerleme_yerlestir(bloklar: list[dict], bant: dict | None, cursor: int,
     12-18 ay tek uyku varyantında aynı ölçüt "öğle uykusu < 120 dk" demektir
     (bandın gündüz minimumu zaten 120), yalnız pencere 18:00-19:00'a daralır.
 
-    KONUM: son gündüz uykusundan sonra, tablodaki saat penceresinde
-    (17:00-19:00), gece yatışından en az `gece_uykusuna_gecis_dk` (60 dk) önce
-    bitecek şekilde.
+    KONUM: son gündüz uykusunun bitişinden İTİBAREN bandın MİNİMUM uyanıklık
+    penceresi kadar sonra, tablodaki saat penceresinde (17:00-19:00), gece
+    yatışından en az `gece_uykusuna_gecis_dk` (60 dk) önce bitecek şekilde.
+
+    UYANIKLIK PENCERESİ ŞEKERLEMEYE DE UYGULANIR (K15). Eskiden yalnız
+    `max(son_uyku_bitişi, 17:00)` alınıyordu; son uyku 16:50'de bittiğinde
+    şekerleme 17:00'de başlıyor, hatta 17:10'da biten bir uykudan SIFIR dakika
+    sonra başlayabiliyordu. Anneye "uyandır, hemen yatır" talimatı çıkıyordu —
+    beta ölçümünde 4 ve 6 aylık iki profilde 22 günde tekrarladı.
 
     SÜRE: taban 30 dk; şekerleme başlangıcı ile gece yatışı arasında
     `gece_yatisina_kalan_min_dk` (150 dk) ya da fazlası varsa 60 dk
@@ -1582,7 +1588,13 @@ def _sekerleme_yerlestir(bloklar: list[dict], bant: dict | None, cursor: int,
 
     naplar = [b for b in bloklar if b["type"] == "nap"]
     son_bitis = max((b["end_minute"] for b in naplar), default=cursor)
-    bas = max(son_bitis, pen_bas)
+    # K15 — bebek son uykusundan kalktıktan sonra en az bandın MİNİMUM
+    # uyanıklık penceresi kadar uyanık kalmalı. `ww` şablonun/bandın ÇALIŞMA
+    # penceresidir (orta değer olabilir); burada ölçüt bandın ALT sınırıdır:
+    # amaç "en erken ne zaman yatırılabilir" sorusuna cevap vermek.
+    min_ww = _min_uyaniklik(bant, ww)
+    en_erken = son_bitis + min_ww
+    bas = max(en_erken, pen_bas)
 
     # Yatış, şekerleme eklenmemiş hâliyle nereye düşüyordu?
     yatis_tahmini = max(yatma_lo, min(yatma_hi, cursor + ww))
@@ -1594,9 +1606,11 @@ def _sekerleme_yerlestir(bloklar: list[dict], bant: dict | None, cursor: int,
     sure = hi if (yatis_tahmini - bas) >= kalan_esik else lo
     if bas >= pen_bit:
         uyarilar.append(
-            f"Gündüz uykusu {kestirme['eksik_dk']} dk eksik kaldı ama şekerleme "
-            f"eklenemedi — son uyku {_fmt(son_bitis)}'da bitti, şekerleme "
-            f"penceresi ({pencere[0]}-{pencere[1]}) kapanmıştı")
+            f"Gündüz uykusu {kestirme['eksik_dk']} dk eksik kaldı ama akşam "
+            f"şekerlemesine yer yok; yatışı bandın tavanında tutun. "
+            f"(Son uyku {_fmt(son_bitis)}'da bitti, {min_ww} dk uyanıklık "
+            f"penceresiyle en erken {_fmt(bas)} — şekerleme penceresi "
+            f"{pencere[0]}-{pencere[1]} kapanmıştı.)")
         return bloklar, None, uyarilar
 
     # Gece yatışından en az `gecis` dk önce bitmeli. ÖLÇÜT BANDIN TAVANI,
@@ -1608,11 +1622,23 @@ def _sekerleme_yerlestir(bloklar: list[dict], bant: dict | None, cursor: int,
     en_gec_bitis = min(pen_bit, yatma_hi - gecis)
     if bas + lo > en_gec_bitis:
         uyarilar.append(
-            f"Gündüz uykusu {kestirme['eksik_dk']} dk eksik kaldı ama şekerleme "
-            f"eklenemedi — gece yatışına ({_fmt(yatis_tahmini)}) en az "
-            f"{gecis} dk kalması gerekiyor")
+            f"Gündüz uykusu {kestirme['eksik_dk']} dk eksik kaldı ama akşam "
+            f"şekerlemesine yer yok; yatışı bandın tavanında tutun. "
+            f"(En erken {_fmt(bas)}'da başlayabilirdi, gece yatışına en az "
+            f"{gecis} dk kalması gerekiyor.)")
         return bloklar, None, uyarilar
     sure = max(lo, min(sure, en_gec_bitis - bas))
+
+    # SON KONTROL — buraya sıfır/kısa uyanıklıkla gelinmemeli. Gelinirse blok
+    # ÜRETİLMEZ: yanlış bir talimat vermektense şekerlemesiz gün göstermek
+    # daha doğrudur.
+    if bas - son_bitis < min_ww:
+        uyarilar.append(
+            f"Gündüz uykusu {kestirme['eksik_dk']} dk eksik kaldı ama akşam "
+            f"şekerlemesine yer yok; yatışı bandın tavanında tutun. "
+            f"(Son uykudan yalnız {bas - son_bitis} dk sonrasına düşüyordu, "
+            f"bandın minimumu {min_ww} dk.)")
+        return bloklar, None, uyarilar
 
     blok = {"key": SEKERLEME_KEY, "type": "nap",
             "start_minute": bas, "end_minute": bas + sure,
@@ -1628,6 +1654,17 @@ def _sekerleme_yerlestir(bloklar: list[dict], bant: dict | None, cursor: int,
     return bloklar, {"start_minute": bas, "end_minute": bas + sure,
                      "sure_dk": sure, "eksik_dk": kestirme["eksik_dk"],
                      "tetik": "tek_uyku_kisa" if tek_uyku else "gunduz_acigi"}, uyarilar
+
+
+def _min_uyaniklik(bant: dict | None, varsayilan: int) -> int:
+    """Bandın MİNİMUM uyanıklık penceresi (dk). Tablo okunamazsa `varsayilan`.
+
+    `cizelge_parametreleri` orta/çalışma değerini verir; K15 için gereken ALT
+    sınırdır (bir bloğun en erken başlayabileceği an)."""
+    ww = (bant or {}).get("uyaniklik_penceresi_dk")
+    if isinstance(ww, (list, tuple)) and ww and ww[0]:
+        return int(ww[0])
+    return int(varsayilan)
 
 
 def _gunduz_toplam(bloklar: list[dict]) -> int:

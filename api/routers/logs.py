@@ -22,6 +22,7 @@ logs router — /api/v1/logs
 Hepsi user_id scoped; baby_id kullanıcıya ait değilse o kayıt atlanır (skipped).
 """
 import logging
+import os
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
@@ -39,9 +40,12 @@ from api.schemas.log import (
     BatchReq, BatchResult, DaySummary, SkippedEntry, SleepLogIn, SleepLogResp,
     SyncedEntry, WeeklySummaryResp,
 )
+from api.services import plan_adapter
 from api.services.plan_adapter import (
     TZ_OFFSET_MIN, UYKU_ETIKETLERI, uyku_sinifi_ham,
 )
+from engine import yas_bantlari
+from engine.parameter_engine import hesapla_yas_ay
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -49,6 +53,15 @@ router = APIRouter(prefix="/logs", tags=["logs"])
 def _owned_baby_ids(db: Session, user: User) -> set:
     return {b.id for b in db.query(Baby.id).filter(Baby.user_id == user.id)}
 
+
+# GELECEK TOLERANSI — telefon saati sunucudan birkac dakika ileri olabilir;
+# "simdi"yi kili kirk yararak reddetmek gercek kayitlari elerdi. 5 dakikanin
+# otesi artik kayit degil, hatali secilmis bir tarihtir (yayin oncesi testte
+# 3 gun sonrasina yazilmis bir uyku kaydi kabul edilmisti).
+# Test suiteleri TAM BİR GÜNÜ sabahtan simüle ediyor (07:00 uyanış, 13:00
+# uyku…) ve o kayıtlar koşma saatine göre "gelecek" düşebiliyor. Üretimde
+# 5 dk; simülasyon suiteleri env ile genişletir.
+GELECEK_TOLERANS_DK = int(os.getenv("LOG_GELECEK_TOLERANS_DK") or 5)
 
 # --- Kayıt bazlı ret sebepleri ----------------------------------------------
 # `reason` makine tarafı, `detail` anneye/geliştiriciye gösterilecek Türkçe.
@@ -125,6 +138,31 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
             skipped.append(SkippedEntry(
                 client_id=cid, reason="not_owned",
                 detail="Bu bebek hesabınıza ait değil"))
+            continue
+
+        # --- ZAMAN TUTARLILIĞI (v2.4.1) --------------------------------------
+        # Bu iki kayıt eskiden yazılıyordu: gelecekteki bir güne "uyku"
+        # düşüyor ve o gün geldiğinde plan hayalet kayıttan kuruluyordu;
+        # ters kayıt ise listede "negatif süreli uyku" olarak görünüyordu.
+        # Plan motoru ters kaydı zaten yok sayıyor (K12.1) — ama kaydı hiç
+        # almamak, alıp gizlemekten dürüsttür.
+        _simdi = datetime.now(timezone.utc)
+        _tavan = _simdi + timedelta(minutes=GELECEK_TOLERANS_DK)
+        if _as_utc(item.started_at) > _tavan:
+            skipped.append(SkippedEntry(
+                client_id=cid, reason="invalid_time",
+                detail="Kayıt gelecek bir zamana ait; tarihi kontrol edin"))
+            continue
+        if item.ended_at is not None and _as_utc(item.ended_at) > _tavan:
+            skipped.append(SkippedEntry(
+                client_id=cid, reason="invalid_time",
+                detail="Kaydın bitişi gelecek bir zamana ait; saati kontrol edin"))
+            continue
+        if (item.ended_at is not None
+                and _as_utc(item.ended_at) < _as_utc(item.started_at)):
+            skipped.append(SkippedEntry(
+                client_id=cid, reason="invalid_time",
+                detail="Kaydın bitişi başlangıcından önce; saatleri kontrol edin"))
             continue
 
         row = None
@@ -505,29 +543,54 @@ def weekly_summary(
     start_dt = datetime.combine(start, time.min, tzinfo=timezone.utc)
     end_dt = datetime.combine(end, time.max, tzinfo=timezone.utc)
 
+    # Bir GÜN ÖNCESİNDEN başla: gece uykusu dün akşam başlayıp bu sabah
+    # bittiği için o kayıt da gerekli (motor gece uykusunu BİTTİĞİ güne bağlar).
     rows = (db.query(SleepLog)
             .filter(SleepLog.user_id == user.id,
                     SleepLog.baby_id == baby_id,
-                    SleepLog.started_at >= start_dt,
+                    SleepLog.started_at >= start_dt - timedelta(days=1),
                     SleepLog.started_at <= end_dt)
             .all())
 
-    # Gün bazında (started_at'in UTC tarihi) topla.
+    # v2.4.1 — KAYIT SEMANTİĞİ KATMANI (K12/K13/K14/K18/K19/K20).
+    # Eskiden ham toplam alınıyordu: parça kayıtlar birleştirilmiyor, gece
+    # uykusunun içindeki kayıt elenmiyor, aynı gecenin iki kaydı ayrı
+    # sayılıyordu. Yayın öncesi testte bir gün 27,85 SAAT uyku raporlandı.
+    # Artık plan motorunun kullandığı AYNI temizleme yolu kullanılıyor:
+    # `gun_kayitlari` çakışmayı tekilleştirir, parçaları birleştirir, gece
+    # içindeki kaydı yok sayar. Toplam ayrıca 24 saate kırpılır.
+    bant = None
+    if baby.birth_date is not None:
+        try:
+            yas = hesapla_yas_ay(baby.birth_date.isoformat(),
+                                 int(baby.dogum_haftasi or 40))
+            bant = yas_bantlari.yas_bandi_getir(yas["duzeltilmis_ay"])
+        except Exception:                      # bant çözülemezse ham yola düş
+            bant = None
+
     buckets: dict[date, dict] = defaultdict(
         lambda: {"sleep_hours": 0.0, "naps": 0, "night_wakes": 0, "night_feeds": 0})
+    for i in range(7):
+        gun = start + timedelta(days=i)
+        kayit = plan_adapter.gun_kayitlari(
+            rows, gun, plan_adapter.DEFAULT_WAKE_MIN,
+            tz_offset_min=plan_adapter.TZ_OFFSET_MIN, bant=bant)
+        b = buckets[gun]
+        dakika = 0
+        for k in kayit["gece_uykulari"] + kayit["gunduz_uykulari"]:
+            dakika += max(0, int(k.get("sure_dk") or 0))
+        b["naps"] = len(kayit["gunduz_uykulari"])
+        b["night_wakes"] = len(kayit["gece_uyanmalari"])
+        # Bir gün 24 saati AŞAMAZ: üst üste binen kayıtlar temizlense de
+        # elde kalan toplam fiziksel sınırı geçmemeli.
+        b["sleep_hours"] = min(dakika / 60.0, 24.0)
+
+    # Beslenme kayıtları motorun çizelgesine girmiyor; ham sayılır.
     for r in rows:
-        d = _as_utc(r.started_at).date()
-        b = buckets[d]
-        if r.type in ("sleep", "nap") and r.ended_at is not None:
-            hours = (_as_utc(r.ended_at) - _as_utc(r.started_at)).total_seconds() / 3600.0
-            if hours > 0:
-                b["sleep_hours"] += hours
-            if r.type == "nap":
-                b["naps"] += 1
-        elif r.type == "night_wake":
-            b["night_wakes"] += 1
-        elif r.type == "feed":
-            b["night_feeds"] += 1
+        if r.type == "feed":
+            g = _as_utc(r.started_at).date()
+            if start <= g <= end:
+                buckets[g]["night_feeds"] += 1
 
     days: list[DaySummary] = []
     total_sleep = total_wakes = total_feeds = 0.0

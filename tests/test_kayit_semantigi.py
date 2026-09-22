@@ -72,6 +72,12 @@ _DB = Path(tempfile.gettempdir()) / "kayit_semantigi_test.db"
 if _DB.exists():
     _DB.unlink()
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB.as_posix()}"
+# Bu suite TAM BİR GÜNÜ simüle ediyor: 07:00 uyanış, 13:00 uyku… Koşma
+# saati sabahsa bu damgalar "gelecek" düşer ve v2.4.1 zaman doğrulaması
+# onları eler (bkz. logs.GELECEK_TOLERANS_DK). Simülasyonda tolerans
+# gün boyuna açılır; ÜRETİM VARSAYILANI 5 dk ve test_yayin_duzeltmeleri
+# onu ayrıca doğruluyor.
+os.environ["LOG_GELECEK_TOLERANS_DK"] = "1440"
 os.environ["JWT_SECRET"] = "test-secret-en-az-otuz-iki-karakter-uzunlugunda"
 os.environ["ENVIRONMENT"] = "development"        # zamanlayıcı başlamasın
 os.environ["MAIL_PROVIDER"] = "disabled"

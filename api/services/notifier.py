@@ -23,6 +23,7 @@ Hata politikası:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -47,6 +48,15 @@ EXPO_TIMEOUT = 15
 # 25-40dk, ebeveyne uyku rutinini başlatma payı bırakır (Faz 6.6; önceden 15-30dk).
 # Pencere genişliği (15dk) tarama aralığına EŞİT olmalı — böylece her blok pencereye
 # tam bir kez girer, ne kaçar ne mükerrer olur. Defter yine de garantiye alır.
+# GÖNDERİM YAYMA (v2.4.1) — sabit saatli bildirim binlerce anneyi aynı anda
+# uygulamaya sokuyor ve /plans/today kuyruğa giriyordu (yayın öncesi ölçüm:
+# 50 eşzamanlıda p95 15 sn). Her kullanıcı bildirim penceresini kendi
+# DETERMİNİSTİK kaymasıyla görür: aynı anne her gün aynı dakikada alır
+# (rastgele oynamaz), anneler arasında ise gönderim 0-10 dk'ya yayılır.
+# Zamanlayıcı turu 15 dk'da bir koştuğu için kayma, kullanıcıları turlar
+# arasında dağıtır; tur sıklığı artırılırsa dağılım incelir.
+BILDIRIM_YAYMA_DK = 10
+
 WINDOW_MIN_AHEAD = 25
 WINDOW_MAX_AHEAD = 40
 SCHEDULER_INTERVAL_MIN = 15
@@ -168,6 +178,15 @@ def _prefs(user: User) -> dict:
     return prefs
 
 
+def yayma_dakikasi(user_id: Any) -> int:
+    """Kullanıcıya özel, DEĞİŞMEYEN gönderim kayması (0..BILDIRIM_YAYMA_DK).
+
+    `hash()` KULLANILMAZ: PYTHONHASHSEED süreçten sürece değişir ve aynı anne
+    her gün başka dakikaya düşerdi. md5 süreçten bağımsızdır."""
+    h = hashlib.md5(str(user_id).encode("utf-8")).digest()
+    return h[0] % (BILDIRIM_YAYMA_DK + 1)
+
+
 def upcoming_blocks(schedule: list[dict], now_local_minute: int,
                     min_ahead: int = WINDOW_MIN_AHEAD,
                     max_ahead: int = WINDOW_MAX_AHEAD) -> list[dict]:
@@ -262,7 +281,27 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
             stats["adapted"] += 1
 
         content = plan.content or {}
-        blocks = upcoming_blocks(content.get("schedule") or [], now_minute)
+
+        # 5 AY GEÇİŞİ — plan arka planda üretilip HAZIR olduğunda bir kez haber
+        # ver. `egitim_gecisi` işaretini plan_jobs üretim sırasında içeriğe
+        # yazıyor; böylece baştan beri eğitim planı olan bebeklere bu bildirim
+        # GİTMEZ. Dedupe defteri blok bildirimiyle aynı (aynı plan için bir kez).
+        if content.get("egitim_gecisi") and content.get("type") == "egitim_plani":
+            if _mark_sent(db, user.id, plan.id, "egitim_hazir"):
+                _n = push_to_user(
+                    db, user.id, "🎉 Uyku eğitimi programınız hazır",
+                    f"{baby.name} 5 ayını doldurdu, uyku eğitimi programınız "
+                    f"hazır.",
+                    data={"type": "egitim_hazir", "plan_id": str(plan.id)})
+                stats["sent"] += _n
+                stats["egitim_hazir"] = stats.get("egitim_hazir", 0) + 1
+                logger.info("Eğitim programı hazır bildirimi: user=%s baby=%s "
+                            "cihaz=%d", user.id, baby.id, _n)
+
+        kayma = yayma_dakikasi(user.id)
+        blocks = upcoming_blocks(content.get("schedule") or [], now_minute,
+                                 min_ahead=WINDOW_MIN_AHEAD - kayma,
+                                 max_ahead=WINDOW_MAX_AHEAD - kayma)
         if not blocks:
             continue
         baby_name = baby.name
@@ -330,6 +369,16 @@ def start_scheduler() -> bool:
         logger.warning("APScheduler kurulu değil — bildirim zamanlayıcısı devre dışı")
         return False
 
+    # ÇOKLU WORKER (v2.4.1) — uvicorn birden fazla süreçle koşuyor ve her
+    # süreç kendi APScheduler'ını başlatırdı: aynı tur N kez koşar, her bebek
+    # için adaptasyon N kez hesaplanırdı. Bildirimin KENDİSİ zaten
+    # `SentNotification` tekil kısıtıyla korunuyor (çift push gitmez), ama
+    # boşa hesap gider. Postgres ADVISORY LOCK ile yalnız bir süreç lideri
+    # olur; lider ölürse bağlantı kapanır ve kilit kendiliğinden serbest kalır.
+    if not _zamanlayici_kilidi_al():
+        logger.info("Zamanlayıcı BAŞLATILMADI — başka bir worker lider")
+        return False
+
     _scheduler = BackgroundScheduler(timezone="UTC")
     _scheduler.add_job(_job, "interval", minutes=SCHEDULER_INTERVAL_MIN,
                        id="plan_reminders", max_instances=1, coalesce=True)
@@ -338,8 +387,48 @@ def start_scheduler() -> bool:
     return True
 
 
+# Kilit BAĞLANTI ÖMRÜ boyunca tutulur; bu yüzden bağlantı global tutulur
+# (garbage collect edilirse kilit düşer ve iki lider oluşur).
+_kilit_baglantisi = None
+ZAMANLAYICI_KILIT_ID = 776699001          # projeye özel sabit
+
+
+def _zamanlayici_kilidi_al() -> bool:
+    """Postgres advisory lock — yalnız bir worker True alır.
+
+    SQLite'ta (lokal/test) kilit KAVRAMI YOK: tek süreç koştuğu için doğrudan
+    True döner. Kilit alınamazsa zamanlayıcı başlatılmaz."""
+    global _kilit_baglantisi
+    from sqlalchemy import text
+    from api.db.session import engine
+    if engine.dialect.name != "postgresql":
+        return True
+    try:
+        conn = engine.connect()
+        alindi = conn.execute(
+            text("SELECT pg_try_advisory_lock(:k)"),
+            {"k": ZAMANLAYICI_KILIT_ID}).scalar()
+        if alindi:
+            _kilit_baglantisi = conn          # AÇIK kalmalı
+            return True
+        conn.close()
+        return False
+    except Exception:
+        # Kilit alınamıyorsa (ör. bağlantı sorunu) zamanlayıcıyı BAŞLATMA:
+        # iki lider, hiç lider olmamasından kötüdür (çift hesap + çift push
+        # riski). Bir sonraki deploy/restart yeniden dener.
+        logger.exception("Zamanlayıcı kilidi alınamadı")
+        return False
+
+
 def shutdown_scheduler() -> None:
-    global _scheduler
+    global _scheduler, _kilit_baglantisi
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
+    if _kilit_baglantisi is not None:
+        try:
+            _kilit_baglantisi.close()         # advisory lock serbest kalır
+        except Exception:
+            pass
+        _kilit_baglantisi = None
         _scheduler = None

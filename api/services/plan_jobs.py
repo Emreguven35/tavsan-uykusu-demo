@@ -77,10 +77,12 @@ def _kuyruk_sirasi(job_id: str) -> int:
     return onceki + 1
 
 
-def submit(job_id: str, baby_id, req_overrides, dogum_haftasi) -> None:
+def submit(job_id: str, baby_id, req_overrides, dogum_haftasi,
+           ek_icerik: dict | None = None) -> None:
     """İşi adanmış havuza ver. Havuz doluysa iş kuyrukta bekler (slot açılınca
     başlar) — çağıran thread BLOKE OLMAZ, istemci 202'yi hemen alır."""
-    _EXECUTOR.submit(run_generation, job_id, baby_id, req_overrides, dogum_haftasi)
+    _EXECUTOR.submit(run_generation, job_id, baby_id, req_overrides,
+                     dogum_haftasi, ek_icerik)
 
 
 def get_job(job_id: str, user_id) -> dict | None:
@@ -101,7 +103,8 @@ def _set(job_id: str, **fields) -> None:
             job.update(fields)
 
 
-def run_generation(job_id: str, baby_id, req_overrides, dogum_haftasi) -> None:
+def run_generation(job_id: str, baby_id, req_overrides, dogum_haftasi,
+                   ek_icerik: dict | None = None) -> None:
     """Arka plan işi: planı üret + upsert et. KENDİ DB oturumunu açar (istek
     oturumu yanıt gönderilince kapandı) ve HER durumda kapatır — notifier._job
     ile aynı desen. Sahiplik router'da 202'den ÖNCE doğrulandı; burada yalnız üretir.
@@ -119,6 +122,11 @@ def run_generation(job_id: str, baby_id, req_overrides, dogum_haftasi) -> None:
             return
         user = db.get(User, baby.user_id)
         content = plan_service.generate_content(baby, req_overrides, dogum_haftasi)
+        # `ek_icerik` üretimi TETİKLEYEN olayın izini içeriğe taşır (ör. 5 ay
+        # geçişi). Bildirim katmanı "bu plan neden üretildi" sorusunu ancak
+        # buradan cevaplayabilir; iş sözlüğü istek bitince kaybolur.
+        if ek_icerik:
+            content.update(ek_icerik)
         today = datetime.now(timezone.utc).date()
         plan = plan_service.upsert_plan(db, user, baby, today, content)
         _set(job_id, status=STATUS_DONE, plan_id=str(plan.id))

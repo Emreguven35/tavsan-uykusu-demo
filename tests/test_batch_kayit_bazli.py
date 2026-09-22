@@ -37,6 +37,10 @@ _DB = Path(tempfile.gettempdir()) / "batch_kayit_test.db"
 if _DB.exists():
     _DB.unlink()
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB.as_posix()}"
+# Bu suite günün sabit saatlerini (10:00, 11:40…) kullanıyor; koşma saati
+# sabahsa v2.4.1 zaman doğrulaması onları "gelecek" sayıp elerdi.
+# ÜRETİM VARSAYILANI 5 dk; test_yayin_duzeltmeleri onu ayrıca doğruluyor.
+os.environ["LOG_GELECEK_TOLERANS_DK"] = "1440"
 os.environ["JWT_SECRET"] = "test-secret-en-az-otuz-iki-karakter-uzunlugunda"
 os.environ["ENVIRONMENT"] = "development"
 os.environ["MAIL_PROVIDER"] = "disabled"
