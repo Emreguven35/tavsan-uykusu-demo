@@ -48,9 +48,21 @@ PARCA = 3 * 1024 * 1024          # base64 öncesi parça boyutu
 # ---------------------------------------------------------------------------
 # Uzak taraf (railway ssh)
 # ---------------------------------------------------------------------------
+def _railway_yolu() -> str:
+    """`railway` çalıştırılabiliri. Windows'ta bu bir .cmd kabuğudur ve
+    subprocess `["railway", ...]` ile onu BULAMAZ (WinError 2)."""
+    import shutil
+    for ad in ("railway", "railway.cmd", "railway.exe"):
+        bulunan = shutil.which(ad)
+        if bulunan:
+            return bulunan
+    raise RuntimeError("railway CLI bulunamadı — `npm i -g @railway/cli` "
+                       "ya da `railway login` yapılmış mı?")
+
+
 def _railway(komut: str, girdi: bytes | None = None,
              zaman_asimi: int = 600) -> subprocess.CompletedProcess:
-    return subprocess.run(["railway", "ssh", komut], input=girdi,
+    return subprocess.run([_railway_yolu(), "ssh", komut], input=girdi,
                           capture_output=True, timeout=zaman_asimi)
 
 
