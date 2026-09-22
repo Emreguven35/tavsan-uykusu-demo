@@ -12,6 +12,8 @@ Kapsam:
  11.   Expo ağ hatası → çökme yok
  12.   Zamanlayıcı production dışında BAŞLAMAZ
  13.   Endpoint'ler: register-token (upsert + sahiplik devri), delete, preferences
+ 15.   "Bebeğiniz uyandı mı?" (v2.4.3): gecikmiş AÇIK uyku kaydı için hatırlatma
+       — 20 dk kuralı, gece sessizliği, günlük 3 kota, uygulama açıksa susma
 
 Çalıştırma: python tests/test_notifier.py
 """
@@ -36,7 +38,7 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy")
 from api.db import SessionLocal, engine          # noqa: E402
 from api.db.base import Base                     # noqa: E402
 from api.models import (                         # noqa: E402
-    Baby, PushToken, SentNotification, SleepPlan, User,
+    Baby, PushToken, SentNotification, SleepLog, SleepPlan, User,
 )
 from api.services import notifier                # noqa: E402
 from api.services import plan_adapter            # noqa: E402
@@ -365,8 +367,14 @@ from api.services import plan_service                # noqa: E402
 u14 = new_user("n14@tavsansmoke.com")
 _yas14 = 8 * 30 / 30.44                       # gün → ay (motorun kullandığı çevrim)
 SCHEDULE_14 = plan_adapter.build_schedule({}, 7 * 60, yas_ay=_yas14)
+# YAŞ GERÇEK BUGÜNE GÖRE: hesapla_yas_ay() `today` parametresi almaz, yaşı
+# daima gerçek bugünden hesaplar. Doğum tarihi 2026-08-14'e sabitlenirse
+# takvim ilerledikçe bebek yaş bandından çıkar, adaptasyon "bant uyuşmuyor"
+# deyip planı YENİDEN ÜRETİR ve `adaptation` hiç yazılmaz — test sessizce
+# kalıcı hâle gelirdi (aynı tuzak test_baby_context 8b'de de yaşandı).
 b14 = Baby(user_id=u14.id, name="Zeynep14",
-           birth_date=(datetime(2026, 8, 14) - timedelta(days=8 * 30)).date())
+           birth_date=(datetime.now(timezone.utc).date()
+                       - timedelta(days=8 * 30)))
 db.add(b14); db.commit(); db.refresh(b14)
 p14 = SleepPlan(user_id=u14.id, baby_id=b14.id, plan_date=datetime(2026, 8, 14).date(),
                 content={"schedule": SCHEDULE_14, "bucket": "8_ay",
@@ -381,11 +389,17 @@ for d in range(3):
     db.add(SleepLog(user_id=u14.id, baby_id=b14.id, type="wake", started_at=st))
 db.commit()
 
-# nap_1 kaydırılınca 09:30 → 10:15 olur. 09:40'ta tarama yaparsak hatırlatma
-# penceresi [10:05, 10:20] olur: KAYDIRILMIŞ saat pencereye girer, kaydırılmamış
-# 09:30 ise ÇOKTAN GEÇMİŞTİR. Yani bildirim ancak adaptasyon koştuysa gider.
+# nap_1 kaydırılınca 09:30 → 10:15 olur. Hatırlatma penceresi v2.4.1'den beri
+# KULLANICIYA ÖZEL kayar (yayma_dakikasi; 0-10 dk ERKENE). Sabit bir tur saati
+# seçilirse test, kullanıcı id'sinin md5'ine bağlı olarak rastgele kalırdı.
+# Tur saatini kaymadan türetiyoruz: 10:15'e tam (30 − kayma) dakika kala →
+# pencere [25 − kayma, 40 − kayma] için HER kaymada geçerli. Kaydırılmamış
+# 09:30 ise o an çoktan geçmiştir; yani bildirim ancak adaptasyon koştuysa gider.
+_kayma14 = notifier.yayma_dakikasi(u14.id)
+_tur14 = 9 * 60 + 45 + _kayma14
 SENT.clear()
-stats14 = notifier.run_reminder_cycle(db, now=utc_at(9, 40, day=14))
+stats14 = notifier.run_reminder_cycle(
+    db, now=utc_at(_tur14 // 60, _tur14 % 60, day=14))
 _m14 = next((m for tur in SENT for m in tur
              if m.get("to") == "ExponentPushToken[SYNC]"), None)
 check("14) Uygulama açılmadan adaptasyon koştu ve bildirim gitti",
@@ -429,6 +443,141 @@ _cnt14 = (db.query(SleepPlan)
           .filter(SleepPlan.baby_id == b14.id,
                   SleepPlan.plan_date == datetime(2026, 8, 14).date()).count())
 check("14g) Aynı güne tek plan satırı (UPSERT)", _cnt14 == 1, f"adet={_cnt14}")
+
+# =============================================================================
+# 15) "BEBEĞİNİZ UYANDI MI?" — gecikmiş açık uyku kaydı (v2.4.3)
+# =============================================================================
+# NEDEN: açık kalan kayıt yalnız kendini bozmaz; çizelge zincir olduğu için
+# günün geri kalanı tahmine döner (adaptation.siradaki_blok.guven='tahmini').
+# Anne sayacı kapatmayı unutmuştur; tek ihtiyacı küçük bir dürtme.
+
+# --- 15a) Saf fonksiyon: 20 dakika eşiği --------------------------------------
+_ACIK = [{"key": "nap_1", "type": "nap", "start_minute": 600,
+          "end_minute": 690, "devam": True},
+         {"key": "nap_2", "type": "nap", "start_minute": 870,
+          "end_minute": 960}]
+check("15a) Planlanan bitişten 19 dk sonra SORULMAZ",
+      notifier.geciken_acik_bloklar(_ACIK, 690 + 19) == [], "")
+check("15b) Tam 20 dk sonra sorulur",
+      [b["key"] for b in notifier.geciken_acik_bloklar(_ACIK, 690 + 20)]
+      == ["nap_1"], "")
+check("15c) Kapanmış blok (devam yok) hiç sorulmaz",
+      notifier.geciken_acik_bloklar(
+          [dict(_ACIK[0], devam=False)], 690 + 60) == [], "")
+check("15d) Sayacı motorun kapattığı kayıt sorulmaz (otomatik_kapandi)",
+      notifier.geciken_acik_bloklar(
+          [{"key": "nap_1", "type": "nap", "start_minute": 600,
+            "end_minute": 690, "otomatik_kapandi": "bayat"}], 690 + 60) == [],
+      "")
+
+# --- 15e) Gece sessizliği: 23:00-06:00 ---------------------------------------
+check("15e) 22:59 sessiz DEĞİL, 23:00 sessiz",
+      not notifier.sessiz_saat(22 * 60 + 59) and notifier.sessiz_saat(23 * 60),
+      "")
+check("15f) 05:59 sessiz, 06:00 sessiz DEĞİL",
+      notifier.sessiz_saat(5 * 60 + 59) and not notifier.sessiz_saat(6 * 60),
+      "")
+
+# --- Uçtan uca kurulum -------------------------------------------------------
+def acik_uyku(user: User, baby: Baby, day: int, local_h: int, local_m: int = 0):
+    """Bitişi GİRİLMEMİŞ uyku kaydı (anne sayacı kapatmamış)."""
+    row = SleepLog(user_id=user.id, baby_id=baby.id, type="sleep",
+                   started_at=utc_at(local_h, local_m, day=day), ended_at=None)
+    db.add(row)
+    db.commit()
+    return row
+
+
+# nap_1 10:00-11:30; kayıt 10:00'da açılıyor, tur 12:00'de koşuyor:
+# planlanan bitişi 30 dk aşmış, K17 otomatik kapatma eşiğinin (3 saat) altında.
+u15 = new_user("n15@tavsansmoke.com")
+b15, p15 = new_plan(u15, "Zeynep", datetime(2026, 8, 20).date())
+acik_uyku(u15, b15, 20, 10, 0)
+_t15 = add_token(u15, "ExponentPushToken[UYANDI]")
+_t15.last_seen_at = utc_at(6, 0, day=20)          # uygulama saatlerdir kapalı
+db.commit()
+
+SENT.clear()
+_s15 = notifier.run_reminder_cycle(db, now=utc_at(12, 0, day=20))
+check("15g) Gecikmiş açık kayıt → hatırlatma gönderildi",
+      sent_to("ExponentPushToken[UYANDI]") == 1, f"stats={_s15}")
+_m15 = next((m for tur in SENT for m in tur
+             if m.get("to") == "ExponentPushToken[UYANDI]"), {})
+check("15h) Metin birebir sözleşmedeki gibi",
+      _m15.get("title") == "Bebeğiniz uyandı mı?"
+      and _m15.get("body") == ("Bir sonraki uykuyu hesaplayabilmemiz için "
+                               "uyanma saatini girin."),
+      f"title={_m15.get('title')!r} body={_m15.get('body')!r}")
+check("15i) data.type='uyandi_mi' (mobil kayıt ekranına yönlendirir)",
+      (_m15.get("data") or {}).get("type") == "uyandi_mi",
+      str(_m15.get("data")))
+
+# --- 15j) İdempotency: aynı blok ikinci turda sorulmaz -----------------------
+SENT.clear()
+notifier.run_reminder_cycle(db, now=utc_at(12, 15, day=20))
+check("15j) Aynı açık kayıt İKİNCİ turda sorulmaz",
+      sent_to("ExponentPushToken[UYANDI]") == 0, str(SENT))
+
+# --- 15k) Gece sessizliğinde gönderilmez -------------------------------------
+u15b = new_user("n15b@tavsansmoke.com")
+b15b, p15b = new_plan(u15b, "Mert", datetime(2026, 8, 21).date())
+acik_uyku(u15b, b15b, 21, 10, 0)
+_t15b = add_token(u15b, "ExponentPushToken[GECE]")
+_t15b.last_seen_at = utc_at(6, 0, day=21)
+db.commit()
+
+SENT.clear()
+notifier.run_reminder_cycle(db, now=utc_at(23, 30, day=21))
+check("15k) 23:30'da hatırlatma gönderilmez (gece sessizliği)",
+      sent_to("ExponentPushToken[GECE]") == 0, str(SENT))
+
+# --- 15l) Uygulama AÇIKSA backend susar (mobil yerel bildirimi gösterir) -----
+u15c = new_user("n15c@tavsansmoke.com")
+b15c, p15c = new_plan(u15c, "Ayaz", datetime(2026, 8, 22).date())
+acik_uyku(u15c, b15c, 22, 10, 0)
+_t15c = add_token(u15c, "ExponentPushToken[ACIK]")
+_t15c.last_seen_at = utc_at(11, 55, day=22)       # 5 dk önce görüldü
+db.commit()
+
+SENT.clear()
+_s15c = notifier.run_reminder_cycle(db, now=utc_at(12, 0, day=22))
+check("15l) Uygulama az önce görüldüyse backend sormaz",
+      sent_to("ExponentPushToken[ACIK]") == 0, f"stats={_s15c}")
+check("15m) Susma sebebi istatistikte görünür",
+      _s15c.get("uyandimi_uygulama_acik", 0) >= 1, str(_s15c))
+
+# --- 15n) Günlük kota: kullanıcı başına en çok 3 -----------------------------
+u15d = new_user("n15d@tavsansmoke.com")
+b15d, p15d = new_plan(u15d, "Poyraz", datetime(2026, 8, 23).date())
+acik_uyku(u15d, b15d, 23, 10, 0)
+_t15d = add_token(u15d, "ExponentPushToken[KOTA]")
+_t15d.last_seen_at = utc_at(6, 0, day=23)
+for _i in range(3):                       # bugün zaten 3 kez soruldu
+    db.add(SentNotification(user_id=u15d.id, plan_id=p15d.id,
+                            block_key=f"2026-08-23:uyandimi:onceki_{_i}"))
+db.commit()
+
+SENT.clear()
+_s15d = notifier.run_reminder_cycle(db, now=utc_at(12, 0, day=23))
+check("15n) Günde 3 soru dolduysa dördüncüsü gönderilmez",
+      sent_to("ExponentPushToken[KOTA]") == 0, f"stats={_s15d}")
+check("15o) Kota aşımı istatistikte görünür",
+      _s15d.get("uyandimi_kota", 0) >= 1, str(_s15d))
+
+# --- 15p) Kayıt KAPALIYSA hiç sorulmaz ---------------------------------------
+u15e = new_user("n15e@tavsansmoke.com")
+b15e, p15e = new_plan(u15e, "Defne", datetime(2026, 8, 24).date())
+db.add(SleepLog(user_id=u15e.id, baby_id=b15e.id, type="sleep",
+                started_at=utc_at(10, 0, day=24),
+                ended_at=utc_at(11, 20, day=24)))
+_t15e = add_token(u15e, "ExponentPushToken[KAPALI]")
+_t15e.last_seen_at = utc_at(6, 0, day=24)
+db.commit()
+
+SENT.clear()
+notifier.run_reminder_cycle(db, now=utc_at(12, 0, day=24))
+check("15p) Bitişi girilmiş kayıt için hatırlatma YOK",
+      sent_to("ExponentPushToken[KAPALI]") == 0, str(SENT))
 
 # --- Özet --------------------------------------------------------------------
 print("\n" + "=" * 74)

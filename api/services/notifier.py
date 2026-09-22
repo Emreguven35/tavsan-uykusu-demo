@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -60,6 +61,28 @@ BILDIRIM_YAYMA_DK = 10
 WINDOW_MIN_AHEAD = 25
 WINDOW_MAX_AHEAD = 40
 SCHEDULER_INTERVAL_MIN = 15
+
+# --- "BEBEĞİNİZ UYANDI MI?" (v2.4.3) ----------------------------------------
+# Açık kalan uyku kaydı yalnız o kaydı bozmaz: çizelge bir zincir olduğu için
+# GÜNÜN GERİ KALANI tahmine döner (bkz. adaptation.siradaki_blok.guven).
+# Anne genelde sayacı kapatmayı unutmuştur; tek ihtiyacı küçük bir dürtme.
+UYANDI_MI_GECIKME_DK = int(os.getenv("UYANDI_MI_GECIKME_DK") or 20)
+UYANDI_MI_GUNLUK_LIMIT = int(os.getenv("UYANDI_MI_GUNLUK_LIMIT") or 3)
+# Gece sessizliği: 23:00-06:00 arasında sorulmaz. Uyuyan anneyi uyandıran
+# bildirim, çözdüğü sorundan büyük bir sorundur.
+UYANDI_MI_SESSIZ_BAS = 23 * 60
+UYANDI_MI_SESSIZ_BIT = 6 * 60
+# UYGULAMA AÇIK MI? Backend bunu KESİN bilemez. Elimizdeki tek sinyal
+# PushToken.last_seen_at: mobil uygulamayı her açılışta token'ı tazeliyor
+# (POST /notifications/register-token). Bu kadar dakika içinde tazelenmişse
+# uygulama fiilen canlı sayılır ve YEREL bildirimi kendisi gösterebilir —
+# backend araya girmez, anne iki kez dürtülmez. Sinyal bir TAHMİNDİR:
+# 0 verilirse backend her zaman gönderir (mobil yerel bildirimi hiç
+# kurmuyorsa doğru ayar budur).
+UYANDI_MI_UYGULAMA_ACIK_DK = int(os.getenv("UYANDI_MI_UYGULAMA_ACIK_DK") or 30)
+UYANDI_MI_BASLIK = "Bebeğiniz uyandı mı?"
+UYANDI_MI_GOVDE = ("Bir sonraki uykuyu hesaplayabilmemiz için uyanma saatini "
+                   "girin.")
 
 
 # =============================================================================
@@ -209,6 +232,62 @@ def upcoming_blocks(schedule: list[dict], now_local_minute: int,
     return out
 
 
+def geciken_acik_bloklar(schedule: list[dict], now_local_minute: int,
+                         gecikme_dk: int = UYANDI_MI_GECIKME_DK) -> list[dict]:
+    """Açık (sayacı kapatılmamış) uyku bloklarından planlanan bitişini
+    `gecikme_dk` aşanlar.
+
+    `devam=True` işaretini plan_adapter koyar: kayıt GERÇEKTEN açıktır
+    (ended_at null) ve K17 eşiğini de aşmamıştır — eşiği aşanı motor zaten
+    kendisi kapatıp `otomatik_kapandi` yazar, onu sormanın anlamı yok.
+
+    Gece uykusu ertesi güne sarktığı için `end_minute` 1440'ı aşabilir; o blok
+    bugünün turunda gecikmiş sayılmaz (karşılaştırma yerel dakikada yapılır).
+    Zaten 23:00-06:00 arası hiç sorulmuyor."""
+    esik = now_local_minute - gecikme_dk
+    out = []
+    for b in plan_adapter.normalize_schedule(schedule):
+        if b.get("type") not in ("nap", "sleep") or not b.get("devam"):
+            continue
+        bitis = b.get("end_minute")
+        if bitis is None or bitis > esik:
+            continue
+        out.append(b)
+    return out
+
+
+def sessiz_saat(now_local_minute: int) -> bool:
+    """23:00-06:00 arası mı? (gece sessizliği)"""
+    return (now_local_minute >= UYANDI_MI_SESSIZ_BAS
+            or now_local_minute < UYANDI_MI_SESSIZ_BIT)
+
+
+def _uygulama_acik_mi(db: Session, user_id: Any, now: datetime) -> bool:
+    """Mobil uygulama YAKIN ZAMANDA görüldü mü? (UYANDI_MI_UYGULAMA_ACIK_DK)
+
+    Hiç token yoksa zaten push gönderemeyiz; False dönmek akışı bozmaz."""
+    if UYANDI_MI_UYGULAMA_ACIK_DK <= 0:
+        return False
+    son = (db.query(PushToken.last_seen_at)
+           .filter(PushToken.user_id == user_id)
+           .order_by(PushToken.last_seen_at.desc()).first())
+    if son is None or son[0] is None:
+        return False
+    gorulme = son[0]
+    if gorulme.tzinfo is None:                 # sqlite naive döndürebilir
+        gorulme = gorulme.replace(tzinfo=timezone.utc)
+    return (now - gorulme) <= timedelta(minutes=UYANDI_MI_UYGULAMA_ACIK_DK)
+
+
+def _uyandi_mi_gunluk_sayi(db: Session, user_id: Any, gun: date) -> int:
+    """Bugün bu kullanıcıya kaç kez "uyandı mı?" soruldu (tüm bebekleri dahil)."""
+    return (db.query(SentNotification)
+            .filter(SentNotification.user_id == user_id,
+                    SentNotification.block_key.like(
+                        f"{gun.isoformat()}:uyandimi:%"))
+            .count())
+
+
 def _block_key(plan_date: date, block: dict) -> str:
     """Deftere yazılacak anahtar: aynı blok ertesi gün yeniden bildirilebilsin."""
     return f"{plan_date.isoformat()}:{block.get('key')}"
@@ -298,6 +377,13 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
                 logger.info("Eğitim programı hazır bildirimi: user=%s baby=%s "
                             "cihaz=%d", user.id, baby.id, _n)
 
+        # "BEBEĞİNİZ UYANDI MI?" — açık kayıt planlanan bitişini aşmışsa ve
+        # mobil yerel bildirimi gösteremeyecekse (uygulama kapalı) sor.
+        # Blok hatırlatmasından ÖNCE gelir: gecikmiş açık kayıt sıradaki
+        # uykunun saatini de tahmine çevirdiği için daha aciltir.
+        _uyandi_mi_sor(db, user, baby, plan, content, now_minute,
+                       today_local, now, stats)
+
         kayma = yayma_dakikasi(user.id)
         blocks = upcoming_blocks(content.get("schedule") or [], now_minute,
                                  min_ahead=WINDOW_MIN_AHEAD - kayma,
@@ -328,6 +414,43 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
             logger.info("Hatırlatma: user=%s baby=%s blok=%s cihaz=%d",
                         user.id, plan.baby_id, block.get("key"), sent)
     return stats
+
+
+def _uyandi_mi_sor(db: Session, user: User, baby: Baby, plan: SleepPlan,
+                   content: dict, now_minute: int, today_local: date,
+                   now: datetime, stats: dict) -> None:
+    """Gecikmiş açık uyku kaydı için tek bir hatırlatma gönder.
+
+    Sıra ucuzdan pahalıya: sessiz saat → gecikmiş blok var mı → günlük kota →
+    uygulama açık mı (DB sorgusu) → defter → gönderim."""
+    if sessiz_saat(now_minute):
+        return
+    geciken = geciken_acik_bloklar(content.get("schedule") or [], now_minute)
+    if not geciken:
+        return
+    if _uyandi_mi_gunluk_sayi(db, user.id, today_local) >= UYANDI_MI_GUNLUK_LIMIT:
+        stats["uyandimi_kota"] = stats.get("uyandimi_kota", 0) + 1
+        return
+    if _uygulama_acik_mi(db, user.id, now):
+        stats["uyandimi_uygulama_acik"] = stats.get("uyandimi_uygulama_acik", 0) + 1
+        return
+
+    # En ESKİ gecikmiş blok sorulur: zinciri asıl o kilitliyor.
+    blok = min(geciken, key=lambda b: b.get("end_minute") or 0)
+    key = f"{today_local.isoformat()}:uyandimi:{blok.get('key')}"
+    if _already_sent(db, user.id, plan.id, key) or not _mark_sent(
+            db, user.id, plan.id, key):
+        stats["skipped_duplicate"] += 1
+        return
+
+    sent = push_to_user(db, user.id, UYANDI_MI_BASLIK, UYANDI_MI_GOVDE,
+                        data={"type": "uyandi_mi", "plan_id": str(plan.id),
+                              "baby_id": str(baby.id),
+                              "block_key": blok.get("key")})
+    stats["sent"] += sent
+    stats["uyandimi"] = stats.get("uyandimi", 0) + 1
+    logger.info("Uyandı mı? hatırlatması: user=%s baby=%s blok=%s cihaz=%d",
+                user.id, baby.id, blok.get("key"), sent)
 
 
 # =============================================================================

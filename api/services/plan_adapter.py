@@ -1580,6 +1580,11 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
                                     if sabah.get("gercek_minute") is not None
                                     else sabah["minute"]),
         "sabah_uyanis_kaynak": sabah["kaynak"],
+        # 'varsayilan' = bugün hiç uyanma kaydı yok; mobil sabah sorusunu
+        # ("bebeğiniz saat kaçta uyandı?") bu değere bakarak gösterir.
+        # 'kayit' ve 'erken_uyanma' kayıttan gelir, soru gösterilmez.
+        "siradaki_blok": siradaki_blok_bilgisi(schedule, now_minute,
+                                               sabah["kaynak"]),
         # K10.6 — erken uyanma izi; erken uyanma yoksa None.
         "erken_uyanma": sabah.get("erken_uyanma"),
         # v1.4 — şekerleme eklendiyse gerekçesi ve süresi (mobil kartı bunu
@@ -1735,6 +1740,74 @@ def _min_uyaniklik(bant: dict | None, varsayilan: int) -> int:
     if isinstance(ww, (list, tuple)) and ww and ww[0]:
         return int(ww[0])
     return int(varsayilan)
+
+
+# --- SIRADAKİ BLOK (v2.4.3) -------------------------------------------------
+# Mobilin "sıradaki uyku" kartı bu alanı okur ve iki soruya cevap verir:
+#   1) Bir sonraki uyku ne zaman başlıyor?
+#   2) Bu saate GÜVENİLİR Mİ, yoksa eksik bir kayıt yüzünden tahmin mi?
+# Çizelge bir ZİNCİRDİR: her uykunun saati bir öncekinin GERÇEK bitişinden
+# türer, zincirin çıpası da sabah uyanışıdır. Halkalardan biri gerçek kayıt
+# değilse (ya da kayıt hâlâ açıksa) saat tahmindir — o zaman anneye hangi
+# kaydın eksik olduğunu söyleriz ki kartta "uyanma saatini gir" eylemi
+# gösterilebilsin. Sessizce tahmin göstermek, anneye olmayan bir kesinlik
+# vaat ediyordu.
+# DİKKAT: bu BLOK tipleridir. Aynı modüldeki `UYKU_TIPLERI` KAYIT tipleridir
+# ("sekerleme" dahil) ve adı çakışırsa kayıt eşlemesi sessizce bozulur —
+# bir kez bozuldu, `sekerleme` kayıtları "tanınmayan tip" diye elendi.
+UYKU_BLOK_TIPLERI = ("nap", "sleep")
+
+
+def _gercekten_kapandi(blok: dict) -> bool:
+    """Blok GERÇEK bir kayıttan gelip KAPANMIŞ mı?
+
+    Üç durum "hayır"dır: kayıt yok (plan/varsayılan blok), kayıt hâlâ açık
+    (`devam`), kaydı sayaç unutulduğu için biz kapattık (`otomatik_kapandi`).
+    Üçünde de bitiş saati tahmindir, dolayısıyla sonraki uykunun saati de."""
+    return (blok.get("kaynak") == "kayit"
+            and not blok.get("devam")
+            and not blok.get("otomatik_kapandi"))
+
+
+def siradaki_blok_bilgisi(cizelge: list[dict], now_minute: int,
+                          sabah_kaynak: str | None) -> dict | None:
+    """`adaptation.siradaki_blok` gövdesi. Gün bittiyse None.
+
+    guven "kesin" YALNIZ iki koşul birden sağlanırsa:
+      - sabah uyanışı gerçek kayıttan geliyorsa (kaynak 'varsayilan' değil),
+      - zincirde hemen önceki uyku gerçek kayıtla kapanmışsa.
+    Aksi hâlde "tahmini" ve `eksik_kayit` neyin girilmesi gerektiğini söyler.
+    Sabah uyanışı zincirin ÇIPASI olduğu için o eksikse önceliklidir: son
+    uykunun bitişi girilse bile zincirin başı belirsizdir."""
+    uykular = sorted(
+        (b for b in cizelge or []
+         if b.get("type") in UYKU_BLOK_TIPLERI
+         and b.get("start_minute") is not None),
+        key=lambda b: b["start_minute"])
+    sonraki = next((b for b in uykular if b["start_minute"] > now_minute), None)
+    if sonraki is None:                    # gece yatışı da geçti — gün bitti
+        return None
+
+    # Zincirde hemen önceki uyku: başlangıcı geçmiş SON blok. `sonraki` zaten
+    # başlangıcı geçmemiş İLK blok olduğu için aradaki her blok geçmiştedir.
+    onceki = next((b for b in reversed(uykular)
+                   if b["start_minute"] <= now_minute), None)
+
+    eksik = None
+    if sabah_kaynak == "varsayilan":       # K6 — hiç uyanma kaydı yok
+        eksik = "sabah_uyanisi"
+    elif onceki is not None and not _gercekten_kapandi(onceki):
+        eksik = "son_uyku_bitisi"
+
+    return {
+        "key": sonraki.get("key"),
+        "time": sonraki.get("time") or _fmt(sonraki["start_minute"]),
+        "end": sonraki.get("end") or (_fmt(sonraki["end_minute"])
+                                      if sonraki.get("end_minute") is not None
+                                      else None),
+        "guven": "tahmini" if eksik else "kesin",
+        "eksik_kayit": eksik,
+    }
 
 
 def _gelecek_notlarini_temizle(cizelge: list[dict], now_minute: int) -> None:
