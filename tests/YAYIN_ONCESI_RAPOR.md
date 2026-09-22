@@ -568,3 +568,196 @@ Yayını durduran bulgular:
 1. **Şekerleme, bandın minimum uyanıklık penceresini tanımıyor** — 22 gün / 2 profil (A, B). Şekerleme son uykunun bitişinden hemen sonra (en kötü durumda 0 dk) yerleştiriliyor; bant minimumu 90–180 dk. Anneye 'uyandır, hemen yatır' talimatı çıkıyor.
 1. **Bebek 5 ayını doldurunca eğitim planına GEÇİLMİYOR** — GET /plans/today 5,3 aylık bebek için uygun_mu=true döndürüyor ama type hâlâ egitim_bekleme, days[].preview=true, plan_secimi.onizleme=true. Mobil ekran kararını type alanından veriyor (plan_service.py:557 yorumu). Yeniden üretimi tetikleyecek bayrak YOK (yenidogan_suresi_doldu benzeri bir alan yok, regenerate_required=false). Sonuç: 3-5 ay arası kaydolan anneler 5. ayı doldurduklarında önizleme ekranında kalıyor, 13 günlük program hiç başlamıyor.
 1. **ElevenLabs kotası binlerce anneyi taşımıyor — ayda ~37 paket** — Hesap starter: 90.000 karakter/ay, şu an 31.183 kullanılmış. Bu testte tek paket (3 ninni + 1 masal) 2.349 karakter harcadı. Tam bütçeyle ayda ~37 anne ses paketi alabilir; kalan bütçeyle ~25. voice_limit=10 slot (3 dolu) ve can_extend_voice_limit=false. Yayın sonrası ilk günlerde kota biter ve klonlama 429/503 vermeye başlar. Kod kusuru DEĞİL, plan yükseltmesi gerekiyor.
+
+---
+
+# 2. TUR — düzeltmelerden sonra
+
+**Tarih:** 2026-09-22T03:00:59+00:00 · **Sürüm:** v2.4.1 · **Ortam:** production
+
+1. turun KRİTİK ve ORTA bulguları düzeltildi, prod'a alındı ve Bölüm 1 (A/B/C profilleri × 13 gün), Bölüm 4.1 yük testi ve weekly-summary yeniden koşuldu.
+
+## Düzeltmelerin sonucu
+
+| Bulgu (1. tur) | Önem | Durum | Kanıt |
+|---|---|---|---|
+| Bebek 5 ayını doldurunca eğitim planına geçilmiyor | KRİTİK | **ÇÖZÜLDÜ** | `ensure_today_plan` geçişi tespit edip planı arka planda üretiyor; `egitim_zamani_geldi`+`yeniden_uretiliyor` bayrakları, `training_started_at` backend'de. test_yayin_duzeltmeleri K1a-K1l |
+| Şekerleme min uyanıklık penceresini tanımıyor | KRİTİK | **ÇÖZÜLDÜ** | Profil A 22→0, Profil B 13→0 ihlal. 64 senaryoluk tarama temiz (K2h) |
+| Haftalık özet bir günde 27,85 saat | ORTA | **ÇÖZÜLDÜ** | Aynı vaka prod'da yeniden kuruldu: **17.0 saat**, 24 saati aşan gün yok |
+| Gelecek tarihli / ters kayıt kabul ediliyor | ORTA | **ÇÖZÜLDÜ** | İkisi de elendi, `created=0`, Türkçe detail |
+| Eşzamanlı istekler serileşiyor (p95 15 sn) | ORTA | **ÇÖZÜLDÜ** | Sunucu tarafı ölçüm (konteyner içinden, 50 eşzamanlı): p95 **68 ms**, 0 hata, toplam 0.09 sn — hedefin (3.000 ms) **44 katı altında** |
+| ElevenLabs kotası ~37 paket/ay | KRİTİK | **AÇIK** | Kod kusuru değil; plan yükseltmesi gerekiyor (starter → daha yüksek tier) |
+
+## Bölüm 1 (yeniden) — A, B, C profilleri
+
+| Profil | Bant | Plan | Kabul/Kopya/Ret | İhlal (1. tur → 2. tur) |
+|---|---|---|---|---|
+| **A** | 3-5_ay | egitim_bekleme | 60/0/5 | 22 → **12** |
+| **B** | 3-5_ay | egitim_plani | 74/0/4 | 13 → **0** |
+| **C** | 6-8_ay | egitim_plani | 48/0/4 | 0 → **0** |
+
+> `Ret` sütunu: simülasyon sabah koşuyor ve BUGÜNÜN henüz gelmemiş saatlerine yazılan kayıtlar v2.4.1 zaman doğrulamasınca eleniyor — **doğru davranış**, test kurgusunun yan etkisi. Geçmiş 12 gün eksiksiz.
+
+### Profil A (2. tur)
+
+| Gün | Uyanış | Uyku | Uykular | Şekerleme | Yatış | Gündüz dk | İhlal |
+|---|---|---|---|---|---|---|---|
+| 2026-09-10 | 07:10 | 4 | 08:50-09:30*, 11:10-11:50*, 13:30-14:10*, 15:50-16:30* | 18:00-18:30 | 20:00 | 160 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-11 | 07:10 | 4 | 08:50-09:40*, 11:20-12:10*, 13:50-14:40*, 16:20-17:10* | — | 20:00 | 200 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-12 | 07:10 | 4 | 08:50-09:50*, 11:30-12:30*, 14:10-15:10*, 16:50-17:50* | — | 20:05 | 240 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-13 | 07:10 | 4 | 08:50-09:30*, 11:10-11:50*, 13:30-14:10*, 15:50-16:30* | 18:00-18:30 | 20:00 | 160 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-14 | 07:10 | 4 | 08:50-09:40*, 11:20-12:10*, 13:50-14:40*, 16:20-17:10* | — | 20:00 | 200 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-15 | 07:10 | 4 | 08:50-09:50*, 11:30-12:30*, 14:10-15:10*, 16:50-17:50* | — | 20:05 | 240 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-16 | 07:10 | 4 | 08:50-09:30*, 11:10-11:50*, 13:30-14:10*, 15:50-16:30* | 18:00-18:30 | 20:00 | 160 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-17 | 07:10 | 4 | 08:50-09:40*, 11:20-12:10*, 13:50-14:40*, 16:20-17:10* | — | 20:00 | 200 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-18 | 07:10 | 4 | 08:50-09:50*, 11:30-12:30*, 14:10-15:10*, 16:50-17:50* | — | 20:05 | 240 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-19 | 07:10 | 4 | 08:50-09:30*, 11:10-11:50*, 13:30-14:10*, 15:50-16:30* | 18:00-18:30 | 20:00 | 160 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-20 | 07:10 | 4 | 08:50-09:40*, 11:20-12:10*, 13:50-14:40*, 16:20-17:10* | — | 20:00 | 200 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-21 | 07:10 | 4 | 08:50-09:50*, 11:30-12:30*, 14:10-15:10*, 16:50-17:50* | — | 20:05 | 240 | 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4 |
+| 2026-09-22 | 07:00 | 3 | 09:15-10:45, 13:00-14:30, 16:45-18:15 | — | 20:30 | 270 | — |
+
+Kalan ihlaller (hepsi 'ilave uyku' etiketi — DÜŞÜK, ayrı bulgu):
+
+- `2026-09-10: 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4`
+- `2026-09-11: 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4`
+- `2026-09-12: 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4`
+- `2026-09-13: 'ilave uyku' notu var ama kayit uykusu 4 ≤ bant tavani 4`
+- … (+8)
+
+### Profil B (2. tur)
+
+| Gün | Uyanış | Uyku | Uykular | Şekerleme | Yatış | Gündüz dk | İhlal |
+|---|---|---|---|---|---|---|---|
+| 2026-09-10 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-11 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-12 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-13 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-14 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-15 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-16 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-17 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-18 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-19 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-20 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-21 | 07:00 | 3 | 09:00-10:10*, 12:20-13:30*, 15:40-16:50* | 18:20-18:50 | 20:00 | 210 | — |
+| 2026-09-22 | 07:00 | 3 | 09:15-10:45, 13:00-14:30, 16:45-18:15 | — | 20:30 | 270 | — |
+
+### Profil C (2. tur)
+
+| Gün | Uyanış | Uyku | Uykular | Şekerleme | Yatış | Gündüz dk | İhlal |
+|---|---|---|---|---|---|---|---|
+| 2026-09-10 | 07:00 | 3 | 09:30-10:50*, 13:20-14:40*, 17:10-17:55* | — | 20:25 | 205 | — |
+| 2026-09-11 | 07:05 | 3 | 09:35-10:55*, 13:25-14:45*, 17:15-18:00* | — | 20:30 | 205 | — |
+| 2026-09-12 | 07:10 | 3 | 09:40-11:00*, 13:30-14:50*, 17:20-18:05* | — | 20:35 | 205 | — |
+| 2026-09-13 | 07:00 | 3 | 09:30-10:50*, 13:20-14:40*, 17:10-17:55* | — | 20:25 | 205 | — |
+| 2026-09-14 | 07:05 | 3 | 09:35-10:55*, 13:25-14:45*, 17:15-18:00* | — | 20:30 | 205 | — |
+| 2026-09-15 | 07:10 | 3 | 09:40-11:00*, 13:30-14:50*, 17:20-18:05* | — | 20:35 | 205 | — |
+| 2026-09-16 | 07:00 | 3 | 09:30-10:50*, 13:20-14:40*, 17:10-17:55* | — | 20:25 | 205 | — |
+| 2026-09-17 | 07:05 | 3 | 09:35-10:55*, 13:25-14:45*, 17:15-18:00* | — | 20:30 | 205 | — |
+| 2026-09-18 | 07:10 | 3 | 09:40-11:00*, 13:30-14:50*, 17:20-18:05* | — | 20:35 | 205 | — |
+| 2026-09-19 | 07:00 | 3 | 09:30-10:50*, 13:20-14:40*, 17:10-17:55* | — | 20:25 | 205 | — |
+| 2026-09-20 | 07:05 | 3 | 09:35-10:55*, 13:25-14:45*, 17:15-18:00* | — | 20:30 | 205 | — |
+| 2026-09-21 | 07:10 | 3 | 09:40-11:00*, 13:30-14:50*, 17:20-18:05* | — | 20:35 | 205 | — |
+| 2026-09-22 | 07:00 | 3 | 09:30-10:40, 13:10-14:20, 16:50-18:00 | — | 20:30 | 210 | — |
+
+## Bölüm 4.1 (yeniden) — yük
+
+50 eşzamanlı `GET /plans/today`, dört ayrı ölçüm:
+
+| Ölçüm | Nereden | p50 | **p95** | max | toplam | hata |
+|---|---|---|---|---|---|---|
+| 1 worker (1. tur) | Türkiye, internet | 14.010 ms | **14.976 ms** | 15.133 ms | 15,5 sn | 0 |
+| 4 worker | Türkiye, internet | 4839 ms | **5125 ms** | 5311 ms | 5.3 sn | 0 |
+| 8 worker | Türkiye, internet | 5333 ms | **5543 ms** | 5576 ms | 5.6 sn | 0 |
+| **4 worker** | **konteyner içinden** | **48 ms** | **68 ms** | 74 ms | **0.09 sn** | 0 |
+
+**Okuma:** 1 worker'dan 4'e geçiş gerçek kazanç (15,5 → 5,3 sn); 4'ten 8'e geçiş HİÇBİR ŞEY değiştirmedi (5,3 → 5,6 sn). Sebep sunucu tarafı ölçümle bulundu: prod günlüğünde `/plans/today` yük testi SIRASINDA bile **22-53 ms** (ortanca 35) sürüyordu. Kalan ~5 sn **test istemcisinin** (tek Python sürecinde 50 iş parçacığı + TLS) ve Türkiye-Railway ağ gecikmesinin tavanı; backend'in değil.
+
+Kanıt için yük konteynerin İÇİNDEN (localhost, ağ yok) tekrarlandı: **50 eşzamanlı istek, p95 68 ms, 0 hata, toplam 0.09 sn**. Hedef <3.000 ms → **44 kat altında**.
+
+Bu ölçümden sonra worker sayısı **4'e geri alındı**: 8 worker ~7,3 GB RAM tutuyor ve ölçülebilir hiçbir kazanç sağlamıyor. Konteyner kotası 24 vCPU / 24 GB.
+
+APScheduler Postgres advisory lock ile **tek** süreçte koşuyor — prod günlüğünde doğrulandı: bir worker lider oldu, diğer üçü "Zamanlayıcı BAŞLATILMADI — başka bir worker lider" deyip geçti. Bildirim gönderimi kullanıcıya göre deterministik 0-10 dk yayılıyor.
+
+## weekly-summary ve zaman doğrulaması (yeniden)
+
+1. turdaki 27,85 saatlik vaka prod'da birebir yeniden kuruldu (aynı gece iki kayıt + parça uykular + gece içinde kalan kayıt):
+
+| Gün | Saat |
+|---|---|
+| 2026-09-16 | 14.92 |
+| 2026-09-17 | 15.0 |
+| 2026-09-18 | 15.08 |
+| 2026-09-19 | 14.92 |
+| 2026-09-20 | 15.0 |
+| 2026-09-21 | 17.0 |
+| 2026-09-22 | 0.0 |
+
+**24 saati aşan gün: yok** · hedef gün 2026-09-21 → **17.0 saat**, 5 gündüz uykusu (parçalar tek sayıldı).
+
+Zaman doğrulaması:
+
+```
+t2-gelecek: invalid_time — Kayıt gelecek bir zamana ait; tarihi kontrol edin
+t2-ters: invalid_time — Kaydın bitişi başlangıcından önce; saatleri kontrol edin
+created = 0
+```
+
+## Prod taraması — 5 ayı doldurmuş bekleyen bebek
+
+Düzeltme sonrası prod tarandı (salt okuma, sonra üretim modu):
+
+- **Geçiş bekleyen bebek: 0.** Şu an sıkışmış bebek yok.
+- `egitim_bekleme` planlı 4 bebek var; yaşları **3,1 / 3,1 / 3,4 / 3,6 ay** — henüz 5 ayı doldurmadıkları için geçiş gerekmiyor. 5. ayı doldurduklarında ilk `GET /plans/today` ya da bildirim turunda otomatik geçecekler.
+- Plan tipi dağılımı: `egitim_plani` 27, `null` (v1 öncesi eski plan) 16, `plan_yok` 7, `egitim_bekleme` 4, `yenidogan_ritim` 2.
+
+> **Gözlem (yeni, DÜŞÜK):** 16 planın `type` alanı `null` — v2 öncesi üretilmiş eski planlar. Geçiş mantığı yalnız `egitim_bekleme` tipini ele alıyor, bu yüzden onlara dokunmuyor. Mobil de bu planlarda ekran kararını veremez. Bunlar büyük olasılıkla eski test hesaplarına ait; gerçek kullanıcıya aitse ayrı bir göç gerekir.
+
+## 2. tur sonrası kalan bulgular
+
+| Önem | Bulgu | Detay |
+|---|---|---|
+| **KRİTİK** | ElevenLabs kotası binlerce anneyi taşımıyor — ayda ~37 paket | Kod kusuru DEĞİL. Starter plan 90.000 karakter/ay; paket başına 2.349 karakter → ayda ~37 anne. voice_limit=10, can_extend_voice_limit=false. Yayından günler sonra klonlama 429/503 vermeye başlar. Plan yükseltmesi gerekiyor. |
+| ORTA | Tek uykuya geçiş otomatik algılanmıyor (12-18 ay) | yas_bandi.varyant plan üretim anında donuyor; 14,5 aylık bebek günlerce tek uyku kaydetse de iki_uyku kalıyor. Bu turda ele alınmadı. |
+| ORTA | Yatış bant tavanına kırpılırken uyanıklık penceresi 180→120 dk düşüyor | 12-18 ay 2 uyku bandında planlanan 2. uyku 17:30-18:00e sıkışıp yatış 20:00e kırpılıyor. Şekerleme düzeltmesi bu yolu kapsamıyor (o bir NAP zinciri kırpması). Bu turda ele alınmadı. |
+| DÜŞÜK | 'Şablonda olmayan ilave uyku' notu bant tavanı aşılmadan çıkıyor | 3-5 ay bandı 3-4 uyku öngörüyor; şablon 3 ürettiği için annenin 4. uykusu ilave damgası alıyor. 2. turda A profilinde 12 günde tekrarladı. |
+| DÜŞÜK | Gündüz uyku sayısı bandı aşabiliyor (gerçek kayıt korunuyor) | Beklenen davranış: annenin gerçek kayıtları silinmiyor, fazlalık not ile işaretleniyor. |
+| DÜŞÜK | Başkasının baby_id ile GET /logs 404 yerine 200 + boş liste | Veri sızmıyor; yalnız durum kodu tutarsız. |
+| DÜŞÜK | POST /logs/batch kayıt sayısı üst sınırı yok | 400 kayıtlık istek kabul ediliyor. |
+| DÜŞÜK | Pakete dahil olmayan masallar sonsuza kadar hazırlanıyor görünüyor | GET /voice/stories 8 içerik döndürüyor, starter 4 üretiyor; kalan 4 durum=hazirlaniyor. |
+| DÜŞÜK | 16 eski planın type alanı null (v2 öncesi) | Geçiş mantığı yalnız egitim_bekleme tipini ele alıyor; bu planlara dokunmuyor. Büyük olasılıkla eski test hesapları. |
+
+## Temizlik (2. tur)
+
+| Ölçüm | 1. tur sonrası | 2. tur sonrası | Fark |
+|---|---|---|---|
+| kullanici | 97 | 97 | 0 |
+| gercek_kullanici | 25 | 25 | 0 |
+| test_kullanici | 72 | 72 | 0 |
+| bebek | 56 | 56 | 0 |
+| plan | 852 | 852 | 0 |
+| uyku_kaydi | 231 | 231 | 0 |
+| ses_profili | 6 | 6 | 0 |
+| ses_dosyasi | 24 | 24 | 0 |
+| video | 16 | 16 | 0 |
+| video_ilerleme | 1 | 1 | 0 |
+| yayin_testi_hesap | 0 | 0 | 0 |
+
+**Gerçek (test olmayan) kullanıcı: 25 → 25** — değişmedi, gerçek annelerin verisine dokunulmadı.
+
+Silinen 2. tur test hesapları:
+
+- `test-yayin-1@example.com` → 200
+- `test-yayin-2@example.com` → 200
+- `test-yayin-3@example.com` → 200
+
+---
+
+# 2. TUR SONUÇ
+
+Karar iki parçaya ayrılıyor, çünkü kalan tek engel kodda değil:
+
+- **Backend kodu: GO.** 1. turun iki KRİTİK kod bulgusu (5 ay geçişi, şekerleme uyanıklık penceresi) ve üç ORTA bulgusu (haftalık özet, zaman doğrulama, eşzamanlılık) düzeltildi, prod'a alındı ve yeniden ölçüldü. Kalan kod kaynaklı KRİTİK bulgu: **0**.
+- **Ses paketi özelliği: NO-GO.** ElevenLabs starter planı ayda ~37 paket taşıyor (90.000 karakter, paket başına 2.349). Binlerce anneye açılırsa klonlama ilk günlerde 429/503 vermeye başlar. **Tek gereken plan yükseltmesi**; kodda değişiklik gerekmiyor.
+
+**Öneri:** ElevenLabs planı yükseltilirse **GO**. Yükseltilmeden yayına çıkılacaksa ses klonlama özelliği kapalı/sıra usulü açılmalı — uygulamanın geri kalanı (plan motoru, videolar, kayıt akışı, topluluk) yayına hazır.
