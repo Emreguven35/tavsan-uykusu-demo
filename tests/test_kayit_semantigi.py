@@ -579,8 +579,8 @@ _x2b = [b for b in naplar(x2b) if b.get("kaynak") == "kayit"]
 check("X2d) 40 dakikadır açık nap HÂLÂ sürüyor (eşik altı)",
       bool(_x2b) and _x2b[0].get("devam") is True,
       str([(b["key"], b.get("devam")) for b in _x2b]))
-check("X2e) Eşik altındayken 'Sayaç kapatılmadı' uyarısı YOK",
-      not any("Sayaç kapatılmadı" in u for u in x2b["adaptation"]["uyarilar"]),
+check("X2e) Eşik altındayken açık sayaç uyarısı YOK",
+      not any("bitişi girilmemiş" in u for u in x2b["adaptation"]["uyarilar"]),
       str(x2b["adaptation"]["uyarilar"]))
 
 # Açık GECE uykusu için sınır 14 saat
@@ -953,8 +953,8 @@ check("Z4b) TAM 3 gündüz uykusu üretildi (önce 5-6 görünüyordu)",
       len(_z4) == 3,
       str([(b["key"], hhmm(b["start_minute"]), hhmm(b["end_minute"]))
            for b in _z4]))
-check("Z4c) 'Şablonda olmayan ilave uyku' notu YOK",
-      not any("ilave" in (b.get("note") or "") for b in _z4),
+check("Z4c) 'Programda olmayan ek uyku' notu YOK",
+      not any("ek uyku" in (b.get("note") or "") for b in _z4),
       str([b.get("note") for b in _z4]))
 check("Z4d) Üçü de gerçek kayıttan geldi",
       all(b.get("kaynak") == "kayit" for b in _z4),
