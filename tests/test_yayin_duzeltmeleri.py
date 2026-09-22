@@ -166,10 +166,11 @@ _uyarilar = (rk["adaptation"] or {}).get("uyarilar") or []
 check("K2e) Pencereye sığmıyorsa şekerleme EKLENMEZ", _sek is None,
       f'{_sek["time"]}-{_sek.get("end")}' if _sek else "eklenmedi")
 check("K2f) Sığmadığında istenen uyarı üretiliyor",
-      any("akşam şekerlemesine yer yok" in u for u in _uyarilar),
+      any("akşam şekerlemesi için yer kalmadı" in u for u in _uyarilar),
       str(_uyarilar))
-check("K2g) Uyarı 'yatışı bandın tavanında tutun' diyor",
-      any("bandın tavanında tutun" in u for u in _uyarilar), str(_uyarilar))
+check("K2g) Uyarı anne diliyle 'en geç saatte tutun' diyor",
+      any("yaşına uygun en geç saatte tutun" in u for u in _uyarilar),
+      str(_uyarilar))
 
 # Hiçbir senaryoda sıfır/kısa uyanıklıkla şekerleme üretilmemeli.
 _ihlal = []

@@ -355,7 +355,7 @@ def test_e_uyku_atlandi():
           if _sek else "şekerleme yok — pencereye sığmadı")
     check("E · şekerleme yoksa SEBEBİ uyarıda yazıyor",
           _sek is not None
-          or any("şekerlemesine yer yok" in u
+          or any("şekerlemesi için yer kalmadı" in u
                  for u in c["adaptation"]["uyarilar"]),
           str(c["adaptation"]["uyarilar"]))
     tpl_deg = c["toplam_uyku_degerlendirme"]
@@ -447,10 +447,10 @@ def test_g1_erken_uyanma_sekerleme():
     check("G1 · sabah_uyanis_gercek GERÇEK saat (06:00 değil)",
           ad["sabah_uyanis_gercek"] == hhmm(erken), ad["sabah_uyanis_gercek"])
     check("G1 · uyarı tek satır olarak yazıldı (K10.6)",
-          any("Erken uyanma: gün 06:00'dan başlatıldı" in u
+          any("gün 06:00'dan başlatıldı" in u
               for u in ad["uyarilar"]), ad["uyarilar"])
     check("G1 · uyarı artık şekerlemeden söz ETMİYOR",
-          not any("Erken uyanma" in u and "şekerleme" in u
+          not any("erken uyandı" in u and "şekerleme" in u
                   for u in ad["uyarilar"]), ad["uyarilar"])
     check("G1 · ŞABLON değişmedi (K1)",
           c["schedule_template"] == BASE["schedule_template"], "")
@@ -849,8 +849,8 @@ def test_m_yatis_tavani():
     check("M · ham yatış tavanı aşıyordu",
           gec_bit + WW > YATMA_HI, f"{hhmm(gec_bit + WW)} > {hhmm(YATMA_HI)}")
     bekle("M", s, "bedtime", YATMA_HI, "tavana kırpıldı")
-    check("M · 'bandın sınırına dayandı' uyarısı var",
-          any("sınırına dayandı" in u for u in c["adaptation"]["uyarilar"]),
+    check("M · 'en geç saate denk geldi' uyarısı var",
+          any("en geç saate denk geldi" in u for u in c["adaptation"]["uyarilar"]),
           c["adaptation"]["uyarilar"])
     check("M · gece uykusu bandın minimumunun altına düşmedi",
           s["bedtime"].get("gece_uykusu_dk", 0) >= GECE_LO,

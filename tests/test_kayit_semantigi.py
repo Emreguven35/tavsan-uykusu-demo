@@ -282,7 +282,7 @@ _sifir = [y for y in w3["adaptation"]["yok_sayilan_kayitlar"]
 check("W3a) Sıfır süreli kayıt yok_sayilan_kayitlar'a yazıldı",
       len(_sifir) == 1, str(w3["adaptation"]["yok_sayilan_kayitlar"]))
 check("W3b) Sebep metni insan tarafından okunabilir",
-      "sıfır" in (_sifir[0]["sebep"] if _sifir else ""),
+      "süresi olmayan" in (_sifir[0]["sebep"] if _sifir else ""),
       str(_sifir))
 check("W3c) Sıfır uzunluklu nap bloğu ÜRETİLMEDİ",
       not any(b["start_minute"] == b["end_minute"] for b in naplar(w3)),
@@ -478,8 +478,8 @@ check("W8a) Erken kaydedilen nap KABUL EDİLDİ (silinmedi/kaydırılmadı)",
       str([(b["key"], hhmm(b["start_minute"]), hhmm(b["end_minute"]),
             b.get("kaynak")) for b in _w8_naplar]))
 _uyari_metni = " ".join(w8["adaptation"]["uyarilar"])
-check("W8b) 'minimum uyanıklık penceresinden erken' uyarısı üretildi",
-      "minimum uyanıklık penceresinden erken" in _uyari_metni,
+check("W8b) 'önerilen en erken saat' uyarısı üretildi",
+      "önerilen en erken saat" in _uyari_metni,
       str(w8["adaptation"]["uyarilar"]))
 _sonraki = [b for b in _w8_naplar if b["start_minute"] > 9 * 60 + 40]
 check("W8c) Sonraki bloklar 09:40'tan (kayıt bitişinden) zincirleniyor",
@@ -567,8 +567,8 @@ check("X2b) Bitiş = başlangıç + planlanan süre",
       bool(_x2_kayit) and _x2_kayit[0]["end_minute"] == 6 * 60 + 30 + X_NAP,
       f"{hhmm(_x2_kayit[0]['end_minute']) if _x2_kayit else None} "
       f"beklenen {hhmm(6*60+30+X_NAP)}")
-check("X2c) 'Sayaç kapatılmadı: 06:30 uykusunun bitişini gir' uyarısı var",
-      any("Sayaç kapatılmadı" in u and "06:30" in u
+check("X2c) 06:30 uykusunun bitişinin girilmediği uyarısı var",
+      any("bitişi girilmemiş" in u and "06:30" in u
           for u in x2["adaptation"]["uyarilar"]),
       str(x2["adaptation"]["uyarilar"]))
 
@@ -585,8 +585,8 @@ check("X2e) Eşik altındayken 'Sayaç kapatılmadı' uyarısı YOK",
 
 # Açık GECE uykusu için sınır 14 saat
 x2c = S8.hesapla([L("sleep", DUN, 21 * 60 + 50)], now_minute=13 * 60)
-check("X2f) 15 saattir açık gece uykusu → 'Sayaç kapatılmadı' uyarısı",
-      any("Sayaç kapatılmadı" in u and "gece" in u
+check("X2f) 15 saattir açık gece uykusu → bitiş uyarısı",
+      any("bitişi girilmemiş" in u and "gece" in u
           for u in x2c["adaptation"]["uyarilar"]),
       str(x2c["adaptation"]["uyarilar"]))
 
@@ -689,7 +689,7 @@ check("X5b) Bitiş tam 07:15",
       bool(_x5) and _x5[0]["end_minute"] == 7 * 60 + 15,
       hhmm(_x5[0]["end_minute"]) if _x5 else None)
 check("X5c) Uyarı üretildi (anne bitişi girmemişti)",
-      any("uyanma kaydına göre" in u for u in x5["adaptation"]["uyarilar"]),
+      any("uyanma kaydınıza göre" in u for u in x5["adaptation"]["uyarilar"]),
       str(x5["adaptation"]["uyarilar"]))
 
 
