@@ -101,6 +101,17 @@ URUNLER: dict[str, dict] = {
     "tu_egitim_45": {"tur": "yenilenmeyen", "fiyat_tl": 2499, "gun": 45},
 }
 PREMIUM_ENTITLEMENT = "premium"
+
+# =============================================================================
+# B5 — KVKK metin sürümleri. Metinler data/kvkk/{tur}.md. Metin DEĞİŞİNCE
+# sürüm de değişmeli: eski sürüme onay vermiş kullanıcı yeniden onaylar
+# (GET /consents/me → guncelleme_gerekli).
+# =============================================================================
+KVKK_METIN_SURUMLERI: dict[str, str] = {
+    "aydinlatma": "taslak-2026-09-25",
+    "acik_riza_saglik": "taslak-2026-09-25",
+    "pazarlama": "taslak-2026-09-25",
+}
 KURUCU_PREMIUM_GUN = 30
 
 

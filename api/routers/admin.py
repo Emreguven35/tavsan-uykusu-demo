@@ -187,3 +187,14 @@ def premium_hak_ver(req: AdminPremiumReq, db: Session = Depends(get_db),
                             detail="Kullanıcı bulunamadı")
     hak = premium_svc.hak_ver(db, hedef, req.gun, admin, req.aciklama)
     return AdminPremiumResp(user_id=hedef.id, baslangic=hak.baslangic, bitis=hak.bitis)
+
+
+@router.get("/kurucular")
+def kurucular(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    """Kurucu üye listesi (maskeli). LANSMAN_TARIHI yoksa "bugün lansman olsa"
+    önizlemesi döner. Hariç: test alanları, admin/moderatör, KURUCU_HARIC."""
+    from api.services import premium as premium_svc
+    liste = premium_svc.kurucu_listesi(db)
+    return {"lansman_tarihi": (premium_svc.lansman_ani().isoformat()
+                               if premium_svc.lansman_ani() else None),
+            "sayi": len(liste), "kurucular": liste}

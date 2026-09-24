@@ -35,6 +35,9 @@ class User(Base, TimestampMixin):
     app_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
     app_version_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # B5 — son veri dışa aktarma (GET /account/export 24 saatte bir).
+    son_export_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
     # KVKK silme hakkı: kullanıcı silinince ilişkili tüm veriler cascade ile gider.
     babies = relationship("Baby", back_populates="user",

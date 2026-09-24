@@ -60,6 +60,10 @@ class StoryItem(BaseModel):
     # B4 — Anne Sesi premium; yalnız UCRETSIZ_NINNI ücretsiz. BETA_MODE'da False.
     locked: bool = False
     premium_required: bool = False
+    # B5 — herkese açık içerik (config.UCRETSIZ_NINNI).
+    is_free: bool = False
+    # Çalınacak sürümün sesi: "anne" (kendi klonu) | "genel" (anlatıcı) | None.
+    ses_kaynagi: str | None = None
 
 
 class StoriesResp(BaseModel):

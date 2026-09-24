@@ -6,10 +6,19 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 # --- İstekler ----------------------------------------------------------------
+class KayitOnayi(BaseModel):
+    tur: str = Field(pattern="^(aydinlatma|acik_riza_saglik|pazarlama)$")
+    onay: bool
+    metin_surumu: str | None = Field(default=None, max_length=40)
+
+
 class RegisterReq(BaseModel):
     email: EmailStr
     # bcrypt ilk 72 byte'ı kullanır; makul üst sınır + min güvenlik alt sınırı.
     password: str = Field(min_length=8, max_length=128)
+    # B5 — KVKK onayları. ŞİMDİLİK İSTEĞE BAĞLI: gelirse kaydedilir, gelmezse
+    # kayıt yine olur. Mobil açık rızayı zorunlu yapınca burada zorlanacak.
+    consents: list[KayitOnayi] | None = Field(default=None, max_length=10)
 
 
 class LoginReq(BaseModel):

@@ -48,6 +48,7 @@ from api.routers import media         # noqa: E402 — video/poster sunumu (PUBL
 from api.routers import sounds        # noqa: E402 — uyku sesleri katalog
 from api.routers import feedback      # noqa: E402 — plan geri bildirimi
 from api.routers import webhooks      # noqa: E402 — RevenueCat (B4)
+from api.routers import kvkk as kvkk_router  # noqa: E402 — KVKK (B5)
 from api.routers import denetim as denetim_router  # noqa: E402 — imzalı denetim sayfası
 from api.services import notifier     # noqa: E402 — Faz 6.2 (bildirim zamanlayıcısı)
 from api.services import storage       # noqa: E402 — medya deposu (ses paketleri)
@@ -286,6 +287,8 @@ app.include_router(education.router, prefix=API_V1_PREFIX)
 app.include_router(sounds.router, prefix=API_V1_PREFIX)
 app.include_router(feedback.router, prefix=API_V1_PREFIX)
 app.include_router(webhooks.router, prefix=API_V1_PREFIX)
+app.include_router(kvkk_router.consents_router, prefix=API_V1_PREFIX)
+app.include_router(kvkk_router.account_router, prefix=API_V1_PREFIX)
 # SIRA ÖNEMLİ — media router, dosyanın ilerisindeki imzalı
 # `/media/{yol:path}` yakalayıcısından ÖNCE kaydedilir. Ters sırada
 # /media/videos/x.mp4 de imza ister ve iOS oynatıcı 403 alırdı.

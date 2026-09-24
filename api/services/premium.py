@@ -21,6 +21,7 @@ REVENUECAT: webhook `app_user_id` = bizim users.id. Olay idempotent işlenir
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -84,10 +85,64 @@ def lansman_ani() -> datetime | None:
     return datetime(lt.year, lt.month, lt.day, tzinfo=TR).astimezone(timezone.utc)
 
 
-def kurucu_uye_mi(user: User) -> bool:
-    """Lansmandan ÖNCE kayıt olmuş mu? LANSMAN_TARIHI yoksa kimse değil."""
-    an = lansman_ani()
-    return an is not None and user.created_at is not None and _utc(user.created_at) < an
+# Kurucu üyeliğe HİÇ girmeyen hesaplar: test alanları, resmi hesap (.invalid),
+# admin/moderatörler ve env KURUCU_HARIC (virgülle e-posta) ile elle çıkarılanlar.
+KURUCU_TEST_ALANLARI = ("@example.com", "@tavsanduman.com", "@tavsansmoke.com",
+                        ".invalid")
+
+
+def kurucu_haric_epostalar() -> set[str]:
+    return {e.strip().lower() for e in (os.getenv("KURUCU_HARIC") or "").split(",")
+            if "@" in e}
+
+
+def kurucu_disinda_mi(db: Session | None, user: User) -> bool:
+    eposta = (user.email or "").lower()
+    if eposta.endswith(KURUCU_TEST_ALANLARI) or eposta in kurucu_haric_epostalar():
+        return True
+    if db is not None:
+        from api.models import CommunityProfile
+        prof = (db.query(CommunityProfile)
+                .filter(CommunityProfile.user_id == user.id).first())
+        if prof is not None and prof.is_moderator:
+            return True
+    return False
+
+
+def kurucu_uye_mi(user: User, db: Session | None = None,
+                  kesim: datetime | None = None) -> bool:
+    """Lansmandan ÖNCE kayıt olmuş, hariç tutulmamış hesap mı? LANSMAN_TARIHI
+    yoksa kimse değil (`kesim` verilirse o an esas alınır — liste önizlemesi)."""
+    an = kesim or lansman_ani()
+    if an is None or user.created_at is None or _utc(user.created_at) >= an:
+        return False
+    return not kurucu_disinda_mi(db, user)
+
+
+def kurucu_listesi(db: Session, kesim: datetime | None = None) -> list[dict]:
+    """Kurucu üyeler (ya da `kesim` ile "bugün lansman olsa" önizlemesi).
+    E-posta MASKELİ döner; sıralama kayıt tarihine göre."""
+    from sqlalchemy import func
+    from api.models import Baby, ChatMessage, SleepLog
+    an = kesim or lansman_ani() or _simdi()
+    out = []
+    for u in db.query(User).order_by(User.created_at).all():
+        if not kurucu_uye_mi(u, db, kesim=an):
+            continue
+        son = [t for t in (
+            db.query(func.max(SleepLog.created_at)).filter(SleepLog.user_id == u.id).scalar(),
+            db.query(func.max(ChatMessage.created_at)).filter(ChatMessage.user_id == u.id).scalar(),
+            u.app_version_seen_at, u.updated_at) if t is not None]
+        out.append({"user_id": str(u.id), "eposta": maskele(u.email),
+                    "kayit": _utc(u.created_at).isoformat(),
+                    "bebek": db.query(Baby).filter(Baby.user_id == u.id).count(),
+                    "son_etkinlik": max(_utc(t) for t in son).isoformat() if son else None})
+    return out
+
+
+def maskele(eposta: str) -> str:
+    ad, _, alan = (eposta or "").partition("@")
+    return f"{ad[:2]}***@{alan}" if alan else "***"
 
 
 def kurucu_penceresi() -> tuple[datetime, datetime] | None:
@@ -100,7 +155,7 @@ def durum(db: Session, user: User, simdi: datetime | None = None) -> dict:
     kurucu_uye}. source: beta | store | manual | kurucu | none."""
     simdi = simdi or _simdi()
     abonelik = aktif_abonelik(db, user, simdi)
-    kurucu = kurucu_uye_mi(user)
+    kurucu = kurucu_uye_mi(user, db)
     sonuc = {"premium": False, "source": "none", "expires_at": None,
              "product_id": None, "will_renew": None, "period_type": None,
              "kurucu_uye": kurucu}

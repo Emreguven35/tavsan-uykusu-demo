@@ -62,7 +62,7 @@ def _issue_token_pair(db: Session, user: User) -> TokenPair:
 
 
 @router.post("/register", response_model=TokenPair, status_code=status.HTTP_201_CREATED)
-def register(req: RegisterReq, db: Session = Depends(get_db)):
+def register(req: RegisterReq, request: Request, db: Session = Depends(get_db)):
     email = req.email.strip().lower()
     user = User(email=email, password_hash=security.hash_password(req.password))
     db.add(user)
@@ -73,6 +73,12 @@ def register(req: RegisterReq, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Bu e-posta zaten kayıtlı")
     logger.info("Yeni kullanıcı kaydı: user_id=%s", user.id)   # KVKK: e-posta loglanmaz
+    if req.consents:
+        from api.services import kvkk
+        ip = rate_limit.client_ip(request)
+        for c in req.consents:
+            kvkk.onay_kaydet(db, user, c.tur, c.onay, c.metin_surumu, ip,
+                             kaynak="kayit", commit=False)
     tokens = _issue_token_pair(db, user)
     # Hoş geldin e-postası YAN ETKİDİR — başarısız olsa da kayıt tamamlanır.
     try:

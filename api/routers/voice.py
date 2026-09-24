@@ -330,8 +330,15 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
         uretilemeyen = {p.strip() for p in
                         profile.error.split(":", 1)[1].split(",") if p.strip()}
 
+    from api.config import UCRETSIZ_NINNI
+    from api.services import genel_ses
+
     def _item(x: dict) -> StoryItem:
         yol = hazir_yollar.get(x["id"])
+        kaynak = "anne" if yol else None
+        # B5 — kendi sesiyle sürümü yoksa ücretsiz ninninin GENEL sürümü.
+        if not yol and genel_ses.genel_surum_var_mi(x["id"]):
+            yol, kaynak = genel_ses.genel_yol(x["id"]), "genel"
         if yol:
             durum = "hazir"
         elif x["id"] in uretilemeyen:
@@ -342,6 +349,7 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
             id=x["id"], type=x.get("type", ""), title=x.get("title", ""),
             duration_hint=x.get("duration_hint"),
             hazir=bool(yol), durum=durum, in_package=x["id"] in paket_kume,
+            is_free=x["id"] == UCRETSIZ_NINNI, ses_kaynagi=kaynak if yol else None,
             locked=erisim.hikaye_kilitli_mi(x["id"], premium),
             premium_required=erisim.hikaye_kilitli_mi(x["id"], premium),
             # Kilitliyse dosya bağlantısı VERİLMEZ (imzalı bağlantı = erişim).
