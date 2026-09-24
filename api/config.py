@@ -71,6 +71,39 @@ VOICE_CLONE_USD = 0.0
 GUNLUK_MALIYET_ESIGI_USD = 20.0
 
 
+# =============================================================================
+# B4 — ERİŞİM KURALLARI (ücretsiz / premium). TEK tablo; uçlar buradan okur.
+# =============================================================================
+# BETA_MODE açıkken herkes premium sayılır → bu tablodaki hiçbir kilit ETKİN
+# DEĞİLDİR. Beta kapanınca kural değiştirmek = burada bir değer değiştirmek.
+#   "ucretsiz" → herkese açık, "premium" → premium değilse kilitli.
+ERISIM_KURALLARI: dict[str, str] = {
+    "kayit_girme": "ucretsiz",            # POST /logs/batch, DELETE/PATCH /logs
+    "gunluk_plan": "ucretsiz",            # /plans/today çizelgesi (temel)
+    "egitim_programi": "premium",         # 13 günlük adaptif program (days + metin)
+    "video_baslarken": "ucretsiz",        # "Başlarken" kategorisi
+    "video_diger": "premium",             # diğer eğitim videoları
+    "ses_ucretsiz": "ucretsiz",           # is_free sesler (beyaz gürültü, yağmur)
+    "ses_diger": "premium",
+    "ninni_ucretsiz": "ucretsiz",         # UCRETSIZ_NINNI (anne sesiyle hazırsa)
+    "anne_sesi": "premium",               # ses klonlama + diğer masal/ninniler
+    "sor": "premium",                     # premium değilse günde SOR_GUNLUK_UCRETSIZ
+}
+UCRETSIZ_VIDEO_KATEGORILERI = ("baslarken",)
+UCRETSIZ_NINNI = "ninni_dandini"
+SOR_GUNLUK_UCRETSIZ = 3
+
+# Uygulama içi ürünler (RevenueCat / App Store Connect ürün kimlikleri).
+# Yenilenmeyen ürünün süresi mağazadan gelmez — burada tanımlıdır.
+URUNLER: dict[str, dict] = {
+    "tu_aylik": {"tur": "abonelik", "fiyat_tl": 999, "donem": "P1M", "deneme_gun": 7},
+    "tu_yillik": {"tur": "abonelik", "fiyat_tl": 3999, "donem": "P1Y", "deneme_gun": 7},
+    "tu_egitim_45": {"tur": "yenilenmeyen", "fiyat_tl": 2499, "gun": 45},
+}
+PREMIUM_ENTITLEMENT = "premium"
+KURUCU_PREMIUM_GUN = 30
+
+
 class ConfigError(RuntimeError):
     """Zorunlu bir ayar eksik/geçersiz — uygulama BAŞLAMAMALI (sessizce güvensiz
     varsayılana düşmek yerine gürültülü şekilde dur)."""
@@ -164,6 +197,24 @@ class Settings:
         self.beta_mode = _bayrak("BETA_MODE") or _bayrak("BETA_PREMIUM_ALL")
         # Geriye dönük ad — mevcut çağrı yerleri kırılmasın.
         self.beta_premium_all = self.beta_mode
+
+        # --- B4: RevenueCat + kurucu üye ------------------------------------
+        # Webhook paylaşılan sırrı: RevenueCat panelinde "Authorization header"
+        # alanına AYNI değer yazılır. Tanımsızsa webhook 503 (kapalı) döner.
+        self.revenuecat_webhook_secret = (os.getenv("REVENUECAT_WEBHOOK_SECRET")
+                                          or "").strip()
+        # REST API gizli anahtarı (sk_…) — /subscriptions/refresh için.
+        self.revenuecat_api_key = (os.getenv("REVENUECAT_API_KEY") or "").strip()
+        # Lansman günü (YYYY-MM-DD, Türkiye saati). Bundan ÖNCE kayıt olanlar
+        # kurucu üyedir; lansmandan itibaren KURUCU_PREMIUM_GUN gün premium.
+        self.lansman_tarihi = None
+        _lt = (os.getenv("LANSMAN_TARIHI") or "").strip()
+        if _lt:
+            from datetime import date as _date
+            try:
+                self.lansman_tarihi = _date.fromisoformat(_lt)
+            except ValueError:
+                raise ConfigError(f"LANSMAN_TARIHI YYYY-MM-DD olmalı: {_lt!r}")
 
         # CORS — virgülle ayrılmış origin listesi. "*" YALNIZ development'ta geçerli;
         # production'da yok sayılır (aşağıda).

@@ -61,6 +61,9 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_DB.as_posix()}"
 os.environ["LOG_GELECEK_TOLERANS_DK"] = "1440"
 os.environ["JWT_SECRET"] = "test-secret-en-az-otuz-iki-karakter-uzunlugunda"
 os.environ["ENVIRONMENT"] = "development"        # zamanlayıcı başlamasın
+# Prod'daki gibi BETA_MODE: bu suite 13 günlük programın (days) plan yanıtında
+# KORUNDUĞUNU ölçüyor; B4 kilidi premium olmayanda onu çıkarıyor.
+os.environ["BETA_MODE"] = "true"
 os.environ["MAIL_PROVIDER"] = "disabled"
 from fastapi.testclient import TestClient              # noqa: E402
 from api.db import Base, SessionLocal, engine          # noqa: E402

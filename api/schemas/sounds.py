@@ -17,6 +17,7 @@ class SesResp(BaseModel):
     # Bu kullanıcı için kilitli mi (is_free değil VE premium değil). BETA_MODE'da
     # herkes premium sayıldığı için hep false.
     locked: bool
+    premium_required: bool = False
 
 
 class SesKategoriResp(BaseModel):

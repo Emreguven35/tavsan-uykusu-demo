@@ -42,3 +42,5 @@ class ChatResp(BaseModel):
     #   k4 = kapsam dışı
     # Cache hit'te NULL (retrieval yapılmadı).
     retrieval_layer: str | None = None
+    # B4 — premium değilse bugün kalan ücretsiz soru hakkı; premium'da None.
+    ucretsiz_kalan: int | None = None

@@ -202,7 +202,7 @@ check("1c) audio_url döndü", bool(rg.json().get("audio_url")), rg.text[:120])
 
 st = client.get("/api/v1/subscriptions/status", headers=H(t_beta))
 check("4a) /subscriptions/status ile uçlar aynı kararı veriyor (beta)",
-      st.json() == {"premium": True, "source": "beta"}, str(st.json()))
+      (st.json()["premium"], st.json()["source"]) == (True, "beta"), str(st.json()))
 
 
 # =============================================================================
@@ -508,12 +508,13 @@ else:
     check("2d) /voice/generate 403 detail de Türkçe (gövde boş değil)",
           _r["gen_detail"] == PREMIUM_MESAJ, repr(_r["gen_detail"]))
     check("4b) /subscriptions/status uçlarla aynı kararı veriyor (none)",
-          _r["status_body"] == {"premium": False, "source": "none"},
+          (_r["status_body"]["premium"], _r["status_body"]["source"]) == (False, "none"),
           str(_r["status_body"]))
     check("3a) BETA_MODE=false + aktif abonelik → /voice/generate 200",
           _r["abone_gen_status"] == 200, str(_r["abone_gen_status"]))
-    check("3b) Abonelikli kullanıcıda source=subscription",
-          _r["abone_status_body"] == {"premium": True, "source": "subscription"},
+    check("3b) Abonelikli kullanıcıda source=store (B4 adı)",
+          (_r["abone_status_body"]["premium"], _r["abone_status_body"]["source"])
+          == (True, "store"),
           str(_r["abone_status_body"]))
 
 

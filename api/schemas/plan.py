@@ -20,6 +20,9 @@ class PlanResp(BaseModel):
     # {markdown, bucket, yas, plan_secimi, uygun_mu, schedule, adapted, ...}
     content: dict[str, Any]
     created_at: datetime
+    # B4 — kilit: premium değilse eğitim programı (days + metin) çıkarılır.
+    locked: list[str] = []
+    premium_required: bool = False
 
     model_config = {"from_attributes": True}
 

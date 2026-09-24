@@ -51,7 +51,9 @@ def egitim_videolari(baby_id: uuid.UUID | None = Query(default=None),
     """Eğitim sekmesi — kategoriler, ilerleme, günün önerisi, aşama rozeti.
 
     Tek çağrı bilinçli: liste ekranı açılırken ikinci bir istek atmasın."""
-    return education.katalog(db, user, _bebek(db, user, baby_id))
+    from api.deps import premium_karari
+    premium, _k = premium_karari(db, user)
+    return education.katalog(db, user, _bebek(db, user, baby_id), premium=premium)
 
 
 @router.post("/videos/{video_id}/progress", response_model=VideoProgressResp)

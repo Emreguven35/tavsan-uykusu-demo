@@ -7,7 +7,7 @@ from api.models.baby import Baby
 from api.models.sleep_log import SleepLog
 from api.models.silinen_sleep_log import SilinenSleepLog
 from api.models.sleep_plan import SleepPlan
-from api.models.subscription import Subscription
+from api.models.subscription import PremiumHak, RevenueCatOlayi, Subscription
 from api.models.chat_message import ChatMessage
 from api.models.voice_profile import VoiceProfile
 from api.models.voice_audio import VoiceAudio
@@ -43,4 +43,6 @@ __all__ = [
     "SleepSound",
     # Plan geri bildirimi + worker'lar arası iş durumu
     "PlanFeedback", "PlanUretimIsi",
+    # B4 — ödeme altyapısı
+    "RevenueCatOlayi", "PremiumHak",
 ]

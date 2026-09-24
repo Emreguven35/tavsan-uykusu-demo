@@ -11,12 +11,14 @@ yalnız uzunluk + cache durumu.
 """
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from api.config import SOR_GUNLUK_UCRETSIZ
 from api.db import get_db
-from api.deps import get_current_user, get_owned_baby
+from api.deps import PremiumGerekli, get_current_user, get_owned_baby
 from api.models import ChatMessage, User
 from api.schemas.chat import ChatReq, ChatResp, ChatSource
 from api.services import baby_context as baby_ctx
@@ -40,11 +42,39 @@ def trim_history(history: list, limit: int = MAX_HISTORY_MESSAGES) -> list:
     return history
 
 
+def _ucretsiz_kalan(db: Session, user: User) -> int | None:
+    """Premium'da None (sınırsız). Değilse bugün kalan ücretsiz soru sayısı."""
+    from api.deps import premium_karari
+    from api.services import erisim
+    premium, _k = premium_karari(db, user)
+    if not erisim.kilitli_mi("sor", premium):
+        return None
+    tr = timezone(timedelta(hours=3))
+    simdi_tr = datetime.now(tr)
+    gun_basi = simdi_tr.replace(hour=0, minute=0, second=0, microsecond=0)
+    sorulan = (db.query(ChatMessage)
+               .filter(ChatMessage.user_id == user.id, ChatMessage.role == "user",
+                       ChatMessage.created_at >= gun_basi.astimezone(timezone.utc))
+               .count())
+    return SOR_GUNLUK_UCRETSIZ - sorulan
+
+
 @router.post("", response_model=ChatResp)
 def chat(req: ChatReq, db: Session = Depends(get_db),
          user: User = Depends(get_current_user)):
     # Faz G6: geçmişi SON 6 mesaja kırp (karesel büyüme freni; sunucu tarafı garanti).
     req.history = trim_history(req.history)
+
+    # B4 — Sor: premium değilse günde SOR_GUNLUK_UCRETSIZ soru. Sayaç
+    # chat_messages'taki bugünkü (Türkiye günü) kullanıcı mesajlarıdır; LLM'e
+    # gitmeden ÖNCE kontrol edilir.
+    kalan = _ucretsiz_kalan(db, user)
+    if kalan is not None and kalan <= 0:
+        raise PremiumGerekli(
+            detail=(f"Bugünkü {SOR_GUNLUK_UCRETSIZ} ücretsiz sorunuzu kullandınız. "
+                    "Sınırsız soru için Premium'a geçebilir ya da yarın tekrar "
+                    "sorabilirsiniz."),
+            kural="sor_gunluk_limit")
 
     # Faz 6.5: baby_id verilmişse bebeğin profili + son 3 gün logu + bugünün planı
     # bağlama eklenir. Bebek çağırana ait değilse get_owned_baby 404 döner
@@ -97,4 +127,5 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     if r["kaynaklar"]:
         sources = [ChatSource(**s) for s in r["kaynaklar"]]
     return ChatResp(answer=r["cevap"], cached=r["cache_hit"], sources=sources,
-                    retrieval_layer=layer)
+                    retrieval_layer=layer,
+                    ucretsiz_kalan=None if kalan is None else max(0, kalan - 1))

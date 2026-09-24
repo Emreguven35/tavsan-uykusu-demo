@@ -36,6 +36,7 @@ from api.config import get_settings   # noqa: E402 — merkezi env config
 from api.db import db_healthy         # noqa: E402 — DB sağlık kontrolü
 from api.observability import sentry_baslat  # noqa: E402 — hata izleme (KVKK maskeli)
 from api.deps import require_demo_key # noqa: E402 — /ask + /avatar-session koruması
+from api.deps import PremiumGerekli    # noqa: E402 — B4 premium kapısı 403 gövdesi
 from api.routers import auth          # noqa: E402 — /api/v1/auth/* (Faz 2)
 from api.routers import babies, logs, plans, subscriptions  # noqa: E402 — Faz 3
 from api.routers import chat, voice   # noqa: E402 — Faz 4 (RAG chat + ses)
@@ -46,6 +47,7 @@ from api.routers import education     # noqa: E402 — eğitim videoları katalo
 from api.routers import media         # noqa: E402 — video/poster sunumu (PUBLIC)
 from api.routers import sounds        # noqa: E402 — uyku sesleri katalog
 from api.routers import feedback      # noqa: E402 — plan geri bildirimi
+from api.routers import webhooks      # noqa: E402 — RevenueCat (B4)
 from api.routers import denetim as denetim_router  # noqa: E402 — imzalı denetim sayfası
 from api.services import notifier     # noqa: E402 — Faz 6.2 (bildirim zamanlayıcısı)
 from api.services import storage       # noqa: E402 — medya deposu (ses paketleri)
@@ -242,6 +244,15 @@ async def log_requests(request: Request, call_next):
 GENEL_422_MESAJ = "Gönderilen bilgiler geçersiz, lütfen kontrol edip tekrar deneyin."
 
 
+@app.exception_handler(PremiumGerekli)
+async def premium_gerekli(request: Request, exc: PremiumGerekli):
+    """B4 — premium kapısı: Türkçe detail + makinenin okuyacağı işaret."""
+    govde = {"detail": exc.detail, "premium_required": True}
+    if exc.kural:
+        govde["kural"] = exc.kural
+    return JSONResponse(status_code=exc.status_code, content=govde)
+
+
 @app.exception_handler(RequestValidationError)
 async def dogrulama_hatasi(request: Request, exc: RequestValidationError):
     """Ses uçlarında mesaj ANNEYE göre: kaydın kendisi işlenememiş olabilir.
@@ -274,6 +285,7 @@ app.include_router(admin.router, prefix=API_V1_PREFIX)
 app.include_router(education.router, prefix=API_V1_PREFIX)
 app.include_router(sounds.router, prefix=API_V1_PREFIX)
 app.include_router(feedback.router, prefix=API_V1_PREFIX)
+app.include_router(webhooks.router, prefix=API_V1_PREFIX)
 # SIRA ÖNEMLİ — media router, dosyanın ilerisindeki imzalı
 # `/media/{yol:path}` yakalayıcısından ÖNCE kaydedilir. Ters sırada
 # /media/videos/x.mp4 de imza ister ve iOS oynatıcı 403 alırdı.

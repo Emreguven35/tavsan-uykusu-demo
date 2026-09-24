@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from api.models import SleepSound
 from api.models.sleep_sound import SES_KATEGORILERI
-from api.services import storage
+from api.services import erisim, storage
 
 logger = logging.getLogger("tavsan.sounds")
 
@@ -34,7 +34,8 @@ def _ses_sozlugu(s: SleepSound, premium: bool) -> dict:
         "bytes": int(s.bytes or 0),
         "loop": True,
         "is_free": bool(s.is_free),
-        "locked": not (s.is_free or premium),
+        "locked": erisim.ses_kilitli_mi(bool(s.is_free), premium),
+        "premium_required": erisim.ses_kilitli_mi(bool(s.is_free), premium),
     }
 
 

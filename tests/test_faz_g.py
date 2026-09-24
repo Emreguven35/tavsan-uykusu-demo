@@ -322,7 +322,9 @@ def test_g5():
     # /status: abonelik yokken premium=false/none
     st0 = client.get("/api/v1/subscriptions/status", headers=_auth(tok))
     check("G5.2 abonelik yok → premium=false, source=none",
-          st0.status_code == 200 and st0.json() == {"premium": False, "source": "none"},
+          st0.status_code == 200
+          and {k: st0.json().get(k) for k in ("premium", "source")}
+          == {"premium": False, "source": "none"},
           str(st0.json()))
 
     # Gerçek görünen makbuz → active
@@ -335,8 +337,9 @@ def test_g5():
 
     # /status: artık premium=true, source=subscription
     st1 = client.get("/api/v1/subscriptions/status", headers=_auth(tok))
-    check("G5.4 aktif abonelik → premium=true, source=subscription",
-          st1.json() == {"premium": True, "source": "subscription"}, str(st1.json()))
+    check("G5.4 aktif abonelik → premium=true, source=store (B4 adı)",
+          {k: st1.json().get(k) for k in ("premium", "source")}
+          == {"premium": True, "source": "store"}, str(st1.json()))
 
     # BETA_PREMIUM_ALL flag (config seviyesi + status mantığı — subprocess)
     code = (
@@ -356,7 +359,8 @@ def test_g5():
         "tok=reg.json()['access_token'];"
         "st=c.get('/api/v1/subscriptions/status',headers={'Authorization':'Bearer '+tok});"
         "import sys;"
-        "sys.exit(0 if st.json()=={'premium':True,'source':'beta'} else 1)"
+        "j=st.json();"
+        "sys.exit(0 if (j['premium'],j['source'])==(True,'beta') else 1)"
     )
     p = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT),
                        capture_output=True, text=True)

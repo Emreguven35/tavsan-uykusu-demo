@@ -57,6 +57,9 @@ class StoryItem(BaseModel):
     # Aktif ses paketinde (VOICE_PACKAGE) mi? False ise bu içerik anne sesiyle
     # HİÇ üretilmeyecek — `durum` "hazirlaniyor" görünse bile beklemek boşuna.
     in_package: bool = False
+    # B4 — Anne Sesi premium; yalnız UCRETSIZ_NINNI ücretsiz. BETA_MODE'da False.
+    locked: bool = False
+    premium_required: bool = False
 
 
 class StoriesResp(BaseModel):

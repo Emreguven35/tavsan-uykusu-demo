@@ -32,6 +32,23 @@ logger = logging.getLogger("tavsan.plans")
 router = APIRouter(prefix="/plans", tags=["plans"])
 
 
+def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None) -> PlanResp | None:
+    """PlanResp + B4 kilidi. Premium değilse eğitim programı çıkarılır
+    (services.erisim.plan_icerigi_kilitle); günlük çizelge kalır."""
+    if plan is None:
+        return None
+    from api.deps import premium_karari
+    from api.services import erisim
+    premium, _k = premium_karari(db, user)
+    resp = PlanResp.model_validate(plan)
+    icerik, kilitli = erisim.plan_icerigi_kilitle(resp.content or {}, premium)
+    if kilitli:
+        resp.content = icerik
+        resp.locked = kilitli
+        resp.premium_required = True
+    return resp
+
+
 def _eksik_profil_yaniti(eksik: list[str]):
     from fastapi.responses import JSONResponse
     etiketler = [plan_service.ALAN_ETIKETI.get(a, a) for a in eksik]
@@ -94,7 +111,7 @@ def generate_plan(req: PlanGenerateReq,
         from fastapi.responses import JSONResponse
         from fastapi.encoders import jsonable_encoder
         return JSONResponse(status_code=status.HTTP_201_CREATED,
-                            content=jsonable_encoder(PlanResp.model_validate(plan)))
+                            content=jsonable_encoder(_plan_yaniti(db, user, plan)))
 
     # Async: iş kaydet + ADANMIŞ havuzda üret (Faz O2 — uvicorn threadpool'u
     # değil; havuz doluysa iş kuyrukta bekler, istemci 202'yi yine hemen alır).
@@ -123,7 +140,7 @@ def generate_status(job_id: str, db: Session = Depends(get_db),
     if job["status"] == plan_jobs.STATUS_DONE and job.get("plan_id"):
         plan = db.get(SleepPlan, uuid.UUID(job["plan_id"]))
         if plan is not None:
-            resp.plan = PlanResp.model_validate(plan)
+            resp.plan = _plan_yaniti(db, user, plan)
     return resp
 
 
@@ -163,7 +180,7 @@ def adapt_plan(baby_id: uuid.UUID = Query(...), db: Session = Depends(get_db),
                 "regression=%s", plan.id, baby.id, adjusted,
                 result["regenerate_required"], result["regression_detected"])
     return PlanAdaptResp(
-        plan=plan,
+        plan=_plan_yaniti(db, user, plan),
         adjusted=adjusted,
         shift_minutes=0,                      # kullanımdan kaldırıldı (K1)
         regenerate_required=result["regenerate_required"],
@@ -229,7 +246,7 @@ def get_today_plan(baby_id: uuid.UUID = Query(...), db: Session = Depends(get_db
     if plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Bu bebek için henüz plan üretilmemiş")
-    return plan
+    return _plan_yaniti(db, user, plan)
 
 
 @router.get("", response_model=list[PlanResp])
@@ -238,7 +255,7 @@ def list_plans(db: Session = Depends(get_db), user: User = Depends(get_current_u
     q = db.query(SleepPlan).filter(SleepPlan.user_id == user.id)
     if baby_id is not None:
         q = q.filter(SleepPlan.baby_id == baby_id)
-    return [plan_service.ensure_current_schema(db, p)
+    return [_plan_yaniti(db, user, plan_service.ensure_current_schema(db, p))
             for p in q.order_by(SleepPlan.created_at.desc()).all()]
 
 
@@ -254,4 +271,4 @@ def get_plan_by_date(plan_date: date, db: Session = Depends(get_db),
     if plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Bu tarihte plan bulunamadı")
-    return plan_service.ensure_current_schema(db, plan)
+    return _plan_yaniti(db, user, plan_service.ensure_current_schema(db, plan))

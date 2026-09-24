@@ -12,11 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from api.db import get_db
-from api.deps import get_current_user, premium_karari
+from api.deps import get_current_user
 from api.models import Subscription, User
 from api.schemas.subscription import (
-    SubscriptionResp, SubscriptionStatusResp, SubscriptionVerifyReq,
+    SubscriptionRefreshResp, SubscriptionResp, SubscriptionStatusResp,
+    SubscriptionVerifyReq,
 )
+from api.services import premium as premium_svc
 
 logger = logging.getLogger("tavsan.subscriptions")
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
@@ -61,18 +63,28 @@ def verify(req: SubscriptionVerifyReq, db: Session = Depends(get_db),
 @router.get("/status", response_model=SubscriptionStatusResp)
 def premium_status(db: Session = Depends(get_db),
                    user: User = Depends(get_current_user)):
-    """SUNUCU-TARAFI premium kararı (Faz G5). Mobil paywall bunu tek doğruluk
-    kaynağı olarak kullanmalı — istemcinin kendi 'premium' bayrağına güvenilmez.
+    """SUNUCU-TARAFI premium kararı. Mobil paywall bunu tek doğruluk kaynağı
+    olarak kullanır — istemcinin kendi 'premium' bayrağına güvenilmez.
 
-    premium = aktif abonelik VAR **veya** BETA_MODE açık. Beta bittiğinde bayrak
-    kapatılır ve karar tümüyle gerçek aboneliğe döner (kod değişmeden).
+    Karar services.premium.durum'dan: beta → store → manual → kurucu. Premium
+    uçları koruyan require_premium ile AYNI fonksiyon."""
+    return SubscriptionStatusResp(**premium_svc.durum(db, user))
 
-    Karar deps.premium_karari'den geliyor — premium uçları koruyan
-    require_premium ile AYNI fonksiyon. Eskiden mantık yalnız buradaydı ve
-    hiçbir uç onu zorlamıyordu; bu uç "premium" derken /voice/* başka türlü
-    davranamaz."""
-    premium, kaynak = premium_karari(db, user)
-    return SubscriptionStatusResp(premium=premium, source=kaynak)
+
+@router.get("/refresh", response_model=SubscriptionRefreshResp)
+def refresh(db: Session = Depends(get_db),
+            user: User = Depends(get_current_user)):
+    """Webhook kaçarsa: RevenueCat REST API'den müşteri kaydını çek, tabloyu
+    güncelle, güncel kararı dön. Mobil satın alma sonrası ve "Satın alımları
+    geri yükle"de çağırır."""
+    try:
+        veri = premium_svc.musteri_cek(user.id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail=str(e))
+    urunler = premium_svc.musteriden_guncelle(db, user, veri)
+    return SubscriptionRefreshResp(**premium_svc.durum(db, user),
+                                   guncellenen_urunler=urunler)
 
 
 @router.get("", response_model=list[SubscriptionResp])

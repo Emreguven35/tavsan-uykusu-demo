@@ -126,22 +126,36 @@ def get_owned_baby(baby_id, db: Session, user: User):
 PREMIUM_GEREKLI_MESAJ = "Bu özellik Premium üyelik gerektiriyor."
 
 
+class PremiumGerekli(HTTPException):
+    """403 + gövdede `premium_required: true` (main.py'deki işleyici ekler).
+    `detail` Türkçe tam metin kalır — mobil onu olduğu gibi gösteriyor."""
+
+    def __init__(self, detail: str = PREMIUM_GEREKLI_MESAJ, kural: str | None = None):
+        super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+        self.kural = kural
+
+
 def premium_karari(db: Session, user: User) -> tuple[bool, str]:
-    """(premium_mi, kaynak) — premium kararının TEK kaynağı.
+    """(premium_mi, kaynak) — kısa biçim. Asıl karar services.premium.durum'da
+    (TEK kaynak): beta → store → manual → kurucu. kaynak: beta | store |
+    manual | kurucu | none."""
+    from api.services import premium as premium_svc
+    d = premium_svc.durum(db, user)
+    return d["premium"], d["source"]
 
-    kaynak: "beta" (BETA_MODE açık) | "subscription" (aktif abonelik) | "none".
 
-    BETA_MODE önce bakılır ve DB'ye hiç gidilmez: beta süresince her annenin
-    aboneliği yok, olmaması da gerekmiyor."""
-    if get_settings().beta_mode:
-        return True, "beta"
-    aktif = (db.query(Subscription)
-             .filter(Subscription.user_id == user.id,
-                     Subscription.status == "active")
-             .first())
-    if aktif is not None:
-        return True, "subscription"
-    return False, "none"
+def require_admin(db: Session = Depends(get_db),
+                  user: User = Depends(get_current_user)) -> User:
+    """Admin rolü = topluluk moderatörü (community_profiles.is_moderator) —
+    /admin/usage ile AYNI yetki; ikinci bir rol kavramı yok
+    (scripts/grant_moderator.py ile verilir)."""
+    from api.models import CommunityProfile
+    prof = (db.query(CommunityProfile)
+            .filter(CommunityProfile.user_id == user.id).first())
+    if prof is None or not prof.is_moderator:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Yönetici yetkisi gerekli")
+    return user
 
 
 def require_premium(db: Session = Depends(get_db),
@@ -156,6 +170,5 @@ def require_premium(db: Session = Depends(get_db),
     yüzden gövde boş ya da İngilizce bırakılamaz."""
     premium, _kaynak = premium_karari(db, user)
     if not premium:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail=PREMIUM_GEREKLI_MESAJ)
+        raise PremiumGerekli()
     return user

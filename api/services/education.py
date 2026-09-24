@@ -104,8 +104,13 @@ def _plandan_asama(baby: Baby | None, today: date | None) -> str:
 # ---------------------------------------------------------------------------
 # Katalog
 # ---------------------------------------------------------------------------
-def _video_sozlugu(v: EducationVideo, ilerleme: VideoProgress | None) -> dict:
+def _video_sozlugu(v: EducationVideo, ilerleme: VideoProgress | None,
+                   premium: bool = True) -> dict:
+    from api.services import erisim
+    kilit = erisim.video_kilitli_mi(v.category, premium)
     return {
+        "locked": kilit,
+        "premium_required": kilit,
         "id": str(v.id),
         "slug": v.slug,
         "title": v.title,
@@ -123,8 +128,8 @@ def _video_sozlugu(v: EducationVideo, ilerleme: VideoProgress | None) -> dict:
 
 
 def katalog(db: Session, user: User, baby: Baby | None,
-            today: date | None = None) -> dict:
-    """GET /education/videos gövdesi."""
+            today: date | None = None, premium: bool = True) -> dict:
+    """GET /education/videos gövdesi. `premium`: kilit alanları için (B4)."""
     videolar = (db.query(EducationVideo)
                 .order_by(EducationVideo.category,
                           EducationVideo.order_in_category,
@@ -134,7 +139,8 @@ def katalog(db: Session, user: User, baby: Baby | None,
                    .filter(VideoProgress.user_id == user.id).all()}
 
     asama = asama_belirle(baby, today)
-    sozlukler = {v.id: _video_sozlugu(v, ilerlemeler.get(v.id)) for v in videolar}
+    sozlukler = {v.id: _video_sozlugu(v, ilerlemeler.get(v.id), premium)
+                 for v in videolar}
 
     kategoriler = []
     for kod, baslik in KATEGORILER:

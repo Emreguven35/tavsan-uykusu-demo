@@ -2,6 +2,8 @@
 admin router — /api/v1/admin/*
 
 GET /usage: maliyet raporu. YALNIZ moderatör (community_profiles.is_moderator).
+POST /premium: manuel premium hakkı (B4 — İlayda'nın birebir danışanlarına
+hediye üyelik). Aynı yetki (deps.require_admin).
 Topluluk moderatör kapısıyla AYNI kontrol kullanılır — ikinci bir yetki kavramı
 uydurmak yerine mevcut olanı yeniden kullanmak, yetkinin tek yerden yönetilmesini
 sağlar (scripts/grant_moderator.py).
@@ -17,8 +19,9 @@ from sqlalchemy.orm import Session
 
 from api.config import GUNLUK_MALIYET_ESIGI_USD
 from api.db import get_db
-from api.deps import get_current_user
+from api.deps import get_current_user, require_admin
 from api.models import ApiUsage, ChatMessage, CommunityProfile, User
+from api.schemas.subscription import AdminPremiumReq, AdminPremiumResp
 from api.schemas.admin import (
     CacheOzet, CevapCacheOzet, GunItem, KirilimItem, PromptCacheOzet, UsageResp,
 )
@@ -162,3 +165,25 @@ def usage_raporu(db: Session = Depends(get_db),
                         cevap_cache=_cevap_cache(db, bas, bit)),
         gunluk_esik_usd=GUNLUK_MALIYET_ESIGI_USD, esigi_asan_gunler=asanlar,
     )
+
+
+@router.post("/premium", response_model=AdminPremiumResp)
+def premium_hak_ver(req: AdminPremiumReq, db: Session = Depends(get_db),
+                    admin: User = Depends(require_admin)):
+    """`gun` gün premium ver. Süren bir hak varsa onun bitişinden UZATILIR.
+    Kullanıcı user_id ya da e-posta ile seçilir (ikisi birden verilirse
+    user_id esas alınır)."""
+    from api.services import premium as premium_svc
+    if req.user_id is not None:
+        hedef = db.get(User, req.user_id)
+    elif req.email:
+        hedef = (db.query(User)
+                 .filter(func.lower(User.email) == req.email.strip().lower()).first())
+    else:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="user_id ya da email gerekli")
+    if hedef is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Kullanıcı bulunamadı")
+    hak = premium_svc.hak_ver(db, hedef, req.gun, admin, req.aciklama)
+    return AdminPremiumResp(user_id=hedef.id, baslangic=hak.baslangic, bitis=hak.bitis)

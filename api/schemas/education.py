@@ -37,6 +37,9 @@ class VideoResp(BaseModel):
     stage_tags: list[str]
     chapters: list[Any] = []
     progress: dict[str, Any]     # {"position_sec": int, "completed": bool}
+    # B4 — "Başlarken" dışı videolar premium. BETA_MODE'da hep False.
+    locked: bool = False
+    premium_required: bool = False
 
 
 class KategoriResp(BaseModel):
@@ -48,8 +51,8 @@ class KategoriResp(BaseModel):
 class EgitimVideolariResp(BaseModel):
     """Eğitim sekmesinin tamamı — tek çağrı.
 
-    TÜM VİDEOLAR HER ZAMAN ERİŞİLEBİLİR; `asama` ve `todays_pick` yalnız öneri
-    içindir, hiçbir video kilitlenmez."""
+    Aşama ve `todays_pick` yalnız öneridir. B4: premium olmayan kullanıcıda
+    "Başlarken" dışı videolar `locked` gelir (BETA_MODE'da hiçbiri)."""
     categories: list[KategoriResp]
     todays_pick: uuid.UUID | None = None
     watched_count: int
