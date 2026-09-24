@@ -28,6 +28,20 @@ class SleepLogIn(BaseModel):
     client_id: str | None = Field(default=None, max_length=64)
 
 
+class SleepLogPatch(BaseModel):
+    """PATCH /logs/{id} gövdesi — yalnız GÖNDERİLEN alanlar değişir.
+
+    `ended_at: null` AÇIKÇA gönderilirse kayıt açık hâle gelir (sürüyor);
+    alan hiç gönderilmezse bitiş olduğu gibi kalır. Ayrım `model_fields_set`
+    ile yapılır. Tip ve bebek değiştirilemez: o bir düzeltme değil, başka
+    bir kayıttır (sil + yeni kayıt)."""
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    notes: str | None = None
+
+    model_config = {"extra": "forbid"}
+
+
 class BatchReq(BaseModel):
     """Batch gövdesi — kalemler HAM alınır, TEK TEK doğrulanır.
 

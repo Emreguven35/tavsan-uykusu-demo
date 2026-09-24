@@ -18,16 +18,20 @@ logs router — /api/v1/logs
 - Uyku kayıtları yanıtta `kategori` + `kategori_etiket` taşır (K19.2): sınıfı
   saat belirler, istemcinin gönderdiği `type` DEĞİL.
 - GET /logs/weekly-summary: haftalık agregasyon (mobil grafikleri tüketir).
+- DELETE /logs/{id}: 204, idempotent; silinen satır silinen_sleep_logs'a
+  arşivlenir. PATCH /logs/{id}: started_at/ended_at/notes düzeltmesi. İkisi de
+  bugünün planını yeniden hesaplar.
 
 Hepsi user_id scoped; baby_id kullanıcıya ait değilse o kayıt atlanır (skipped).
 """
+import json
 import logging
 import os
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import ValidationError
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -35,10 +39,10 @@ from sqlalchemy.orm import Session
 
 from api.db import get_db
 from api.deps import get_current_user
-from api.models import Baby, SleepLog, User
+from api.models import Baby, SilinenSleepLog, SleepLog, User
 from api.schemas.log import (
-    BatchReq, BatchResult, DaySummary, SkippedEntry, SleepLogIn, SleepLogResp,
-    SyncedEntry, WeeklySummaryResp,
+    BatchReq, BatchResult, DaySummary, SkippedEntry, SleepLogIn, SleepLogPatch,
+    SleepLogResp, SyncedEntry, WeeklySummaryResp,
 )
 from api.services import plan_adapter
 from api.services.plan_adapter import (
@@ -655,3 +659,113 @@ def weekly_summary(
         total_sleep_hours=round(total_sleep, 2),
         total_night_wakes=int(total_wakes), total_night_feeds=int(total_feeds),
         days=days)
+
+
+# ---------------------------------------------------------------------------
+# Tek kayıt: sil / düzelt
+# ---------------------------------------------------------------------------
+SILME_SEBEBI = "kullanici_sildi"
+
+
+def _kayit_bul(db: Session, user: User, log_id: uuid.UUID) -> SleepLog:
+    """Kullanıcının kaydı; yoksa ya da başkasınınsa 404 (ikisi ayırt edilmez —
+    başkasının kaydının VARLIĞI da sızdırılmaz)."""
+    row = db.get(SleepLog, log_id)
+    if row is None or row.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Kayıt bulunamadı")
+    return row
+
+
+def _arsiv_json(r: SleepLog) -> str:
+    """Satırın tamamı — scripts/kopya_kayit_temizle.py ile AYNI biçim, geri
+    yükleme tek yoldan yapılabilsin."""
+    return json.dumps({
+        "id": str(r.id), "user_id": str(r.user_id), "baby_id": str(r.baby_id),
+        "type": r.type,
+        "started_at": _as_utc(r.started_at).isoformat(),
+        "ended_at": _as_utc(r.ended_at).isoformat() if r.ended_at else None,
+        "notes": r.notes, "client_id": r.client_id,
+        "created_at": _as_utc(r.created_at).isoformat() if r.created_at else None,
+    }, ensure_ascii=False)
+
+
+@router.delete("/{log_id}", status_code=status.HTTP_204_NO_CONTENT,
+               response_class=Response)
+def delete_log(log_id: uuid.UUID, db: Session = Depends(get_db),
+               user: User = Depends(get_current_user)):
+    """Kaydı sil. İDEMPOTENT: aynı kayıt ikinci kez silinirse de 204 — mobil
+    zayıf ağda isteği yeniden gönderiyor, ilk silme başarılıyken ikincisine
+    404 dönmek kuyruğu "başarısız" sanılan bir silmeyle tıkardı.
+
+    "Zaten silinmiş" bilgisi arşivden (silinen_sleep_logs) okunur; arşivde bu
+    kullanıcıya ait izi olmayan kimlik — başkasının kaydı ya da hiç var
+    olmamış bir kimlik — 404'tür."""
+    row = db.get(SleepLog, log_id)
+    if row is None:
+        arsivde = (db.query(SilinenSleepLog.id)
+                   .filter(SilinenSleepLog.sleep_log_id == log_id,
+                           SilinenSleepLog.user_id == user.id).first())
+        if arsivde is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail="Kayıt bulunamadı")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if row.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Kayıt bulunamadı")
+
+    baby_id = row.baby_id
+    # Geri alınabilir silme: satır önce arşive, sonra aynı işlemde silinir.
+    db.add(SilinenSleepLog(sleep_log_id=row.id, user_id=row.user_id,
+                           baby_id=row.baby_id, veri=_arsiv_json(row),
+                           sebep=SILME_SEBEBI))
+    db.delete(row)
+    db.commit()
+    logging.getLogger("tavsan.logs").info(
+        "Kayıt silindi: log=%s baby=%s", log_id, baby_id)
+    _plani_tazele(db, user, {baby_id})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _gecersiz(detay: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                         detail=detay)
+
+
+@router.patch("/{log_id}", response_model=SleepLogResp)
+def patch_log(log_id: uuid.UUID, req: SleepLogPatch,
+              db: Session = Depends(get_db),
+              user: User = Depends(get_current_user)):
+    """Kaydın saatlerini/notunu düzelt. Zaman kuralları POST /logs/batch ile
+    AYNI (gelecek toleransı, bitiş ≥ başlangıç) — düzeltme yolu, kayıt yolunun
+    reddettiği bir kaydı içeri sokmamalı. Kurallar SONUÇ kayda uygulanır:
+    yalnız bitişi değiştirmek de mevcut başlangıçla karşılaştırılır."""
+    row = _kayit_bul(db, user, log_id)
+    gelen = req.model_fields_set
+
+    if "started_at" in gelen and req.started_at is None:
+        raise _gecersiz("Başlangıç zamanı boş olamaz")
+    bas = req.started_at if "started_at" in gelen else row.started_at
+    bit = req.ended_at if "ended_at" in gelen else row.ended_at
+
+    tavan = datetime.now(timezone.utc) + timedelta(minutes=GELECEK_TOLERANS_DK)
+    if _as_utc(bas) > tavan:
+        raise _gecersiz("Kayıt gelecek bir zamana ait; tarihi kontrol edin")
+    if bit is not None and _as_utc(bit) > tavan:
+        raise _gecersiz("Kaydın bitişi gelecek bir zamana ait; saati kontrol edin")
+    if bit is not None and _as_utc(bit) < _as_utc(bas):
+        raise _gecersiz("Kaydın bitişi başlangıcından önce; saatleri kontrol edin")
+
+    row.started_at = bas
+    row.ended_at = bit
+    if "notes" in gelen:
+        row.notes = req.notes
+    db.flush()
+    # Kayıt yeniden AÇILDIYSA bebekte tek açık kayıt kuralı (K16.1) geçerli.
+    _tek_acik_kayit_birak(db, user, [row])
+    db.commit()
+    db.refresh(row)
+    _plani_tazele(db, user, {row.baby_id})
+    db.refresh(row)
+    bant = _bebek_bantlari(db, {row.baby_id}).get(row.baby_id)
+    return _kategorili(row, bant)
