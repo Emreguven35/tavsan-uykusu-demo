@@ -42,7 +42,7 @@ from api.services import plan_adapter as pa                 # noqa: E402
 from api.services import plan_jobs, plan_service            # noqa: E402
 from engine import yas_bantlari                             # noqa: E402
 
-from tests.llm_muhuru import muhur_saglam_mi, muhurle       # noqa: E402
+from tests.llm_muhuru import muhur_saglam_mi, TAM_PROFIL, muhurle       # noqa: E402
 muhurle()                                    # canlı Sonnet YOK
 
 Base.metadata.create_all(bind=engine)
@@ -73,7 +73,7 @@ def bebek_kur(H, ay: float, **ek) -> str:
     govde = {"name": "Test",
              "birth_date": (TODAY - timedelta(days=int(ay * 30.44))).isoformat()}
     govde.update(ek)
-    return client.post("/api/v1/babies", headers=H, json=govde).json()["id"]
+    return client.post("/api/v1/babies", headers=H, json={**TAM_PROFIL, **govde}).json()["id"]
 
 
 def yas_degistir(bid: str, ay: float) -> None:

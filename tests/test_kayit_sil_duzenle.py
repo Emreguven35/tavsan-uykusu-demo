@@ -50,7 +50,7 @@ from api.models import SilinenSleepLog, SleepLog            # noqa: E402
 from api.main import app                                    # noqa: E402
 from api.routers import logs as logs_router                 # noqa: E402
 
-from tests.llm_muhuru import muhurle                        # noqa: E402
+from tests.llm_muhuru import muhurle, TAM_PROFIL                        # noqa: E402
 muhurle()
 
 Base.metadata.create_all(bind=engine)
@@ -88,7 +88,7 @@ def hesap(email: str):
                       ).json()["access_token"]
     h = {"Authorization": f"Bearer {tok}"}
     bid = client.post("/api/v1/babies", headers=h,
-                      json={"name": "Test",
+                      json={**TAM_PROFIL, "name": "Test",
                             "birth_date": (SIMDI.date() - timedelta(days=243)).isoformat(),
                             "night_wakes": 2}).json()["id"]
     return h, bid

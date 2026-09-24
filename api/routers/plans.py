@@ -32,6 +32,18 @@ logger = logging.getLogger("tavsan.plans")
 router = APIRouter(prefix="/plans", tags=["plans"])
 
 
+def _eksik_profil_yaniti(eksik: list[str]):
+    from fastapi.responses import JSONResponse
+    etiketler = [plan_service.ALAN_ETIKETI.get(a, a) for a in eksik]
+    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={
+        "detail": ("Planı hazırlayabilmemiz için profilde eksik bilgi var: "
+                   + ", ".join(etiketler) + ". Lütfen bebeğinizin profilini "
+                   "tamamlayın."),
+        "eksik_alanlar": eksik,
+        "eksik_alan_etiketleri": etiketler,
+    })
+
+
 @router.post("/generate", status_code=status.HTTP_202_ACCEPTED,
              response_model=None,
              responses={202: {"model": PlanJobResp}, 201: {"model": PlanResp}})
@@ -49,11 +61,16 @@ def generate_plan(req: PlanGenerateReq,
     - Sync (?sync=true): eski davranış — 201 + PlanResp (blocking). Test suite ve
       hızlı script'ler için korunur; mobil async akışı kullanır.
 
-    Sahiplik + doğum tarihi 202/201'den ÖNCE senkron doğrulanır (erken 404/400)."""
+    Sahiplik + profil bütünlüğü 202/201'den ÖNCE senkron doğrulanır (erken
+    404 / 422 + eksik_alanlar)."""
     baby = get_owned_baby(req.baby_id, db, user)
-    if baby.birth_date is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Plan için bebeğin doğum tarihi gereklidir")
+    # D-3 — eksik profille üretim 202 dönüp arka planda boşa gidiyordu; mobil
+    # sonsuza dek "hazırlanıyor" gösteriyordu. Artık istek anında Türkçe 422 +
+    # eksik alan listesi (mobil profil ekranına yönlendirebilsin).
+    eksik = plan_service.eksik_profil_alanlari(baby, req.profile_overrides,
+                                                req.dogum_haftasi)
+    if eksik:
+        return _eksik_profil_yaniti(eksik)
 
     # v2.1 — İstekle gelen kalıcı profil alanları (saglik_problemi, dogum_haftasi,
     # gece uyanma sayısı) BEBEĞE yazılır. Eskiden yalnız bu isteğin gövdesinde

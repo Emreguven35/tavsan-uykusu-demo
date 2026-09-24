@@ -90,3 +90,16 @@ def muhur_saglam_mi() -> tuple[bool, str]:
     ok = (not anahtar) and (not bayrak) and sizinti == 0
     return ok, (f"anahtar={anahtar} HAS_ANTHROPIC={bayrak} "
                 f"canli_deneme={sizinti} fallback={_SAYAC['fallback']}")
+
+
+# D-3 — POST /plans/generate artık eksik profile 422 veriyor. Plan üreten
+# suiteler bebeği bu alanlarla kurar. Değerler motorun HİÇBİR dalını
+# tetiklemeyecek biçimde nötr (destek: meme/salla yok; oda: ortak yok) —
+# böylece eskiden boş profille ölçülen çıktılar değişmez.
+TAM_PROFIL = {
+    "feeding_type": "karma",
+    "sleep_method": "yatağında",
+    "sleep_environment": "kendi odası",
+    "crying_tolerance": "orta",
+    "parent_experience": "ilk bebek",
+}

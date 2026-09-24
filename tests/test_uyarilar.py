@@ -44,7 +44,7 @@ from api.services import plan_service                       # noqa: E402
 from engine.parameter_engine import (                       # noqa: E402
     egitim_uygunlugu_kontrol, ilk_tam_sayi)
 
-from tests.llm_muhuru import muhur_saglam_mi, muhurle       # noqa: E402
+from tests.llm_muhuru import muhur_saglam_mi, TAM_PROFIL, muhurle       # noqa: E402
 muhurle()                                    # canlı Sonnet YOK (Faz 4)
 
 Base.metadata.create_all(bind=engine)
@@ -85,7 +85,7 @@ def bebek_kur(H, ay: float, night_wakes=None, saglik=None) -> str:
         govde["night_wakes"] = night_wakes
     if saglik is not None:
         govde["saglik_problemi"] = saglik
-    return client.post("/api/v1/babies", headers=H, json=govde).json()["id"]
+    return client.post("/api/v1/babies", headers=H, json={**TAM_PROFIL, **govde}).json()["id"]
 
 
 def plan_uret(H, bid: str) -> dict:

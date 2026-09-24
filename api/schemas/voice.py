@@ -54,6 +54,9 @@ class StoryItem(BaseModel):
     audio_url: str | None = None
     # Mobilin basacağı durum metni.
     durum: str = "hazirlaniyor"      # hazir | hazirlaniyor | uretilemedi
+    # Aktif ses paketinde (VOICE_PACKAGE) mi? False ise bu içerik anne sesiyle
+    # HİÇ üretilmeyecek — `durum` "hazirlaniyor" görünse bile beklemek boşuna.
+    in_package: bool = False
 
 
 class StoriesResp(BaseModel):

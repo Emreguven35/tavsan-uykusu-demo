@@ -231,6 +231,10 @@ check("P1p) Pakette OLMAYAN masallar 'hazirlaniyor' değil listede duruyor",
 check("P1q) Yanıt paket adını ve içerik listesini taşıyor",
       _st["paket"] == "starter" and set(_st["paket_icerikleri"]) == set(PAKET),
       str(_st.get("paket_icerikleri")))
+check("P1q2) Her içerikte in_package: paketteki 4 True, kalan 4 False",
+      {x["id"] for x in _hepsi if x.get("in_package") is True} == set(PAKET)
+      and all(x.get("in_package") is False for x in _hepsi if x["id"] not in PAKET),
+      str([(x["id"], x.get("in_package")) for x in _hepsi]))
 
 _vs = client.get("/api/v1/voice/voice-status", headers=H(t1)).json()
 check("P1r) voice-status: released + N/N + hazir_icerik=N",

@@ -64,7 +64,7 @@ from api.services import plan_adapter as pa            # noqa: E402
 from engine import yas_bantlari                        # noqa: E402
 from engine.parameter_engine import hesapla_yas_ay     # noqa: E402
 
-from tests.llm_muhuru import canli_cagri_sayisi, muhurle   # noqa: E402
+from tests.llm_muhuru import canli_cagri_sayisi, TAM_PROFIL, muhurle   # noqa: E402
 muhurle()
 
 Base.metadata.create_all(bind=engine)
@@ -94,7 +94,7 @@ H = {"Authorization": f"Bearer {tok}"}
 
 DOGUM = TODAY - timedelta(days=243)                     # ≈ 8.0 ay
 BABY_ID = client.post("/api/v1/babies", headers=H,
-                      json={"name": "Elif", "birth_date": DOGUM.isoformat(),
+                      json={**TAM_PROFIL, "name": "Elif", "birth_date": DOGUM.isoformat(),
                             "night_wakes": 2}).json()["id"]
 _gen = client.post("/api/v1/plans/generate?sync=true", headers=H,
                    json={"baby_id": BABY_ID})

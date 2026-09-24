@@ -48,6 +48,18 @@ TYPE_YENIDOGAN = "yenidogan_ritim"  # 0-3 ay, ritim rehberi     — days BOŞ, s
 TYPE_BEKLEME = "egitim_bekleme"     # eğitim uygun değil (3-5 ay, doktor onayı vb.)
 
 
+def tip_turet(content: dict) -> str:
+    """`type` alanı olmayan (Faz 0-3 öncesi) planın türü.
+
+    O dönemde tek çıktı türü vardı; yenidoğan rehberi `type` alanıyla BİRLİKTE
+    geldi, dolayısıyla tipsiz plan ya eğitim planıdır ya da (uygun_mu=False)
+    beklemedir. Prod taraması (2026-09-24): 493 tipsiz planın hepsi
+    uygun_mu=True, 5+ ay, markdown dolu."""
+    if content.get("type"):
+        return content["type"]
+    return TYPE_BEKLEME if content.get("uygun_mu") is False else TYPE_EGITIM
+
+
 class PlanError(RuntimeError):
     """Plan üretilemedi/yeniden üretilemedi (dış servis, motor hatası vb.)."""
 
@@ -91,6 +103,40 @@ def profili_kalicilastir(db: Session, baby: Baby, overrides: dict | None,
     if degisti:
         db.commit()
         db.refresh(baby)
+
+
+# D-3 — plan üretimi için ZORUNLU profil alanları: (Baby sütunu, motorun
+# profil anahtarı, anneye gösterilecek ad). Boş profille üretim 202 dönüp
+# arka planda boşa gidiyordu; artık istek anında 422 + eksik liste döner.
+# night_wakes BİLEREK yok: None meşru bir durum (beyan yok → kart üretilmez,
+# bkz. gece_uyanma_kaynagi). 0-3 ay muaf: rehber bu alanları kullanmıyor.
+ZORUNLU_PROFIL = (
+    ("feeding_type", "beslenme", "beslenme şekli"),
+    ("sleep_method", "destek", "uykuya dalma şekli"),
+    ("sleep_environment", "oda", "uyku ortamı"),
+    ("crying_tolerance", "dayanma_siniri", "ağlamaya dayanma süresi"),
+    ("parent_experience", "deneyim", "ebeveyn deneyimi"),
+)
+ALAN_ETIKETI = {"birth_date": "doğum tarihi",
+                **{alan: etiket for alan, _k, etiket in ZORUNLU_PROFIL}}
+
+
+def eksik_profil_alanlari(baby: Baby, overrides: dict | None = None,
+                          dogum_haftasi: int | None = None) -> list[str]:
+    """Plan üretimini engelleyen eksik alanlar (Baby sütun adlarıyla).
+
+    İstekle gelen profile_overrides da sayılır: mobil onboarding cevaplarını
+    bazen yalnız orada gönderiyor."""
+    if baby.birth_date is None:
+        return ["birth_date"]
+    ay = hesapla_yas_ay(baby.birth_date.isoformat(),
+                        etkin_dogum_haftasi(baby, dogum_haftasi))["duzeltilmis_ay"]
+    if yenidogan.yenidogan_mi(ay):
+        return []
+    overrides = overrides or {}
+    return [alan for alan, anahtar, _e in ZORUNLU_PROFIL
+            if not str(getattr(baby, alan, None) or "").strip()
+            and not str(overrides.get(anahtar) or "").strip()]
 
 
 def profile_from_baby(baby: Baby, overrides: dict | None,
@@ -411,9 +457,13 @@ def ensure_current_schema(db: Session, plan: SleepPlan | None) -> SleepPlan | No
     if is_yenidogan(plan):
         return plan
     content = dict(plan.content or {})
+    # Tipsiz eski plan: mobil hangi ekranı açacağını bilemiyordu. Bir kez yazılır.
+    tip_eksik = not content.get("type")
+    if tip_eksik:
+        content["type"] = tip_turet(content)
     eski = content.get("schedule") or []
     yeni = plan_adapter.normalize_schedule(eski)
-    degisti = yeni != eski
+    degisti = yeni != eski or tip_eksik
 
     # K1/K2 — v1 planlarında DEĞİŞMEZ ŞABLON yok. İlk okumada mevcut çizelgeden
     # bir kez türetilip kalıcı yazılır; bundan sonra günlük hesap hep bunu taban
@@ -780,6 +830,9 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         })
     else:
         content = base_content
+        # Tipsiz taban planın kopyası da tipsiz doğuyordu — her gün yeni bir
+        # type=null plan (prod'da 2026-09-24 tarihli olanlar vardı).
+        content["type"] = tip_turet(content)
         days_backfill(content)        # eski taban planda days yoksa şimdi türet
         content.update({
             # K1 — şablon taşınır, ASLA günlük sonuçla üzerine yazılmaz.

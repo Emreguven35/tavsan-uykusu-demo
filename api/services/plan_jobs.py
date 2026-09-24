@@ -7,11 +7,15 @@ birkaç eşzamanlı üretim tüm thread'leri bloke edip /health dahil her şeyi
 kilitliyordu (denetim Bölüm 2.3/3.3). Artık üretim ARKA PLANDA koşar, istemci
 job_id ile durumu yoklar.
 
-TASARIM: tek-instance (uvicorn tek process) için IN-MEMORY registry yeterli ve
-operasyonel yükü sıfır. Süreç yeniden başlarsa devam eden işler kaybolur —
-istemci job'ı bulamazsa (404) yeniden tetikler; plan yine de üretilmişse
-GET /plans/today onu döndürür. ÇOK-INSTANCE'A geçilirse job durumu DB/Redis'e
-taşınmalı (bir instance'ın job'ını diğeri göremez) — bkz. denetim mimari sınırlar.
+TASARIM: işi KOŞTURAN süreçte in-memory registry (kuyruk sırası ve havuz o
+süreçte) + her durum değişikliğinde `plan_uretim_isleri` tablosuna YAZIM
+ORTAKLIĞI. D-3 (2026-09-24): uvicorn 4 worker ile koşuyor; yalnız bellek
+varken yoklamaların ~3/4'ü başka worker'a düşüp 404 alıyordu ve mobil planın
+"hazırlanamadığını" sanıyordu. Artık bellekte bulunmayan iş DB'den okunur.
+
+DB yazımı EN İYİ ÇABADIR: yazılamazsa (tablo yok, bağlantı koptu) loglanır,
+bellek kaydı yine çalışır — üretimin kendisi durum defteri yüzünden düşmez.
+Süreç ölürse DB'de "processing" kalan iş BAYAT_IS_DK sonra failed okunur.
 """
 from __future__ import annotations
 
@@ -41,6 +45,66 @@ STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 
 
+# Süreç yeniden başlarsa DB'de "processing" kalan iş sonsuza dek beklemesin.
+# Üretim en kötü ~2 × 140 sn; 15 dk bol bol üstü.
+BAYAT_IS_DK = 15
+BAYAT_IS_MESAJ = ("Plan hazırlanırken sunucu yeniden başladı. "
+                  "Lütfen planı yeniden oluşturun.")
+
+
+def _db_yaz(job_id: str, **alanlar) -> None:
+    """Durumu paylaşılan tabloya yaz (en iyi çaba). `api.db.session`dan
+    okunur — birim testleri `api.db.SessionLocal`ı bozarak üretim hatası
+    simüle ediyor; defter o sahte hataya takılmamalı."""
+    try:
+        from api.db.session import SessionLocal
+        from api.models import PlanUretimIsi
+        db = SessionLocal()
+        try:
+            satir = db.get(PlanUretimIsi, job_id)
+            if satir is None:
+                satir = PlanUretimIsi(id=job_id, **alanlar)
+                db.add(satir)
+            else:
+                for k, v in alanlar.items():
+                    setattr(satir, k, v)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:                      # defter yazılamadı → bellek yeter
+        logger.warning("Plan işi durumu DB'ye yazılamadı (job=%s): %s", job_id, e)
+
+
+def _db_oku(job_id: str, user_id) -> dict | None:
+    """Başka worker'ın işi. Sahibi değilse None (router 404)."""
+    try:
+        from api.db.session import SessionLocal
+        from api.models import PlanUretimIsi
+        db = SessionLocal()
+        try:
+            s = db.get(PlanUretimIsi, job_id)
+            if s is None or s.user_id != str(user_id):
+                return None
+            job = {"status": s.status, "started": s.started,
+                   "user_id": s.user_id, "baby_id": s.baby_id,
+                   "plan_id": s.plan_id, "error": s.error,
+                   "created_at": s.created_at}
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("Plan işi durumu DB'den okunamadı (job=%s): %s", job_id, e)
+        return None
+    olusma = job["created_at"]
+    if olusma is not None and olusma.tzinfo is None:
+        olusma = olusma.replace(tzinfo=timezone.utc)
+    if (job["status"] == STATUS_PROCESSING and olusma is not None
+            and (datetime.now(timezone.utc) - olusma).total_seconds()
+            > BAYAT_IS_DK * 60):
+        job.update(status=STATUS_FAILED, error=BAYAT_IS_MESAJ)
+    # Kuyruk sırası yalnız işi koşturan süreçte kesin; burada kaba tahmin.
+    return dict(job, queue_position=0 if job["started"] else 1)
+
+
 def create_job(user_id, baby_id) -> str:
     """Yeni 'processing' işi kaydet, job_id döndür.
 
@@ -61,6 +125,10 @@ def create_job(user_id, baby_id) -> str:
             "error": None,
             "created_at": datetime.now(timezone.utc),
         }
+        kayit = dict(_JOBS[job_id])
+    _db_yaz(job_id, status=kayit["status"], started=False,
+            user_id=kayit["user_id"], baby_id=kayit["baby_id"],
+            created_at=kayit["created_at"])
     return job_id
 
 
@@ -91,9 +159,12 @@ def get_job(job_id: str, user_id) -> dict | None:
     queue_position: 0 = üretim sürüyor (ya da bitti); >0 = önünde kaç iş var."""
     with _LOCK:
         job = _JOBS.get(job_id)
-        if job is None or job["user_id"] != str(user_id):
-            return None
-        return dict(job, queue_position=_kuyruk_sirasi(job_id))  # kopya: dış mutasyon olmasın
+        if job is not None:
+            if job["user_id"] != str(user_id):
+                return None
+            return dict(job, queue_position=_kuyruk_sirasi(job_id))  # kopya
+    # Bu süreçte yok → başka worker'ın işi olabilir (D-3).
+    return _db_oku(job_id, user_id)
 
 
 def _set(job_id: str, **fields) -> None:
@@ -101,6 +172,7 @@ def _set(job_id: str, **fields) -> None:
         job = _JOBS.get(job_id)
         if job is not None:
             job.update(fields)
+    _db_yaz(job_id, **fields)
 
 
 def run_generation(job_id: str, baby_id, req_overrides, dogum_haftasi,

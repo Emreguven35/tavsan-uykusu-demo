@@ -76,7 +76,7 @@ from engine.parameter_engine import hesapla_yas_ay     # noqa: E402
 # .env'den geri yüklediği için mührün burada olması ŞART; dosya başındaki
 # os.environ.pop() tek başına işe YARAMIYORDU (ölçüldü).
 from tests.llm_muhuru import (                         # noqa: E402
-    canli_cagri_sayisi, fallback_cagri_sayisi, muhur_saglam_mi, muhurle)
+    TAM_PROFIL, canli_cagri_sayisi, fallback_cagri_sayisi, muhur_saglam_mi, muhurle)
 muhurle()
 
 Base.metadata.create_all(bind=engine)
@@ -113,7 +113,7 @@ tok = client.post("/api/v1/auth/register",
 H = {"Authorization": f"Bearer {tok}"}
 _dogum = TODAY - timedelta(days=YAS_GUN)
 BID = client.post("/api/v1/babies", headers=H,
-                  json={"name": "Elif", "birth_date": _dogum.isoformat(),
+                  json={**TAM_PROFIL, "name": "Elif", "birth_date": _dogum.isoformat(),
                         "night_wakes": 2}).json()["id"]
 client.patch(f"/api/v1/babies/{BID}", headers=H,
              json={"training_started_at": (TODAY - timedelta(days=4)).isoformat()})
@@ -722,7 +722,7 @@ def test_s4_tek_uyku_kisa_aksam_sekerlemesi():
     h2 = {"Authorization": f"Bearer {tok2}"}
     dogum15 = TODAY - timedelta(days=456)          # ≈ 15 ay
     bid2 = client.post("/api/v1/babies", headers=h2,
-                       json={"name": "Tek", "birth_date": dogum15.isoformat(),
+                       json={**TAM_PROFIL, "name": "Tek", "birth_date": dogum15.isoformat(),
                              "night_wakes": 1}).json()["id"]
     gen = client.post("/api/v1/plans/generate?sync=true", headers=h2,
                       json={"baby_id": bid2})

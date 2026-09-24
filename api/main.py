@@ -45,6 +45,8 @@ from api.routers import admin          # noqa: E402 — maliyet raporu (moderat�
 from api.routers import education     # noqa: E402 — eğitim videoları katalog
 from api.routers import media         # noqa: E402 — video/poster sunumu (PUBLIC)
 from api.routers import sounds        # noqa: E402 — uyku sesleri katalog
+from api.routers import feedback      # noqa: E402 — plan geri bildirimi
+from api.routers import denetim as denetim_router  # noqa: E402 — imzalı denetim sayfası
 from api.services import notifier     # noqa: E402 — Faz 6.2 (bildirim zamanlayıcısı)
 from api.services import storage       # noqa: E402 — medya deposu (ses paketleri)
 from api.services import voice_temizlik, voice_uretim  # noqa: E402 — Faz 4 (v2.3)
@@ -77,9 +79,15 @@ def _ses_temizligi_baslat() -> bool:
     _ses_scheduler.add_job(voice_temizlik.gunluk_temizlik, "cron",
                            hour=SES_TEMIZLIK_SAAT, id="ses_temizlik",
                            max_instances=1, coalesce=True)
+    # İlayda günlük denetim raporu — her sabah 08:00 Türkiye saati. Çok
+    # worker'da yalnız biri üretir (denetim.gunluk_is advisory lock alıyor).
+    from api.services import denetim
+    _ses_scheduler.add_job(denetim.gunluk_is, "cron", hour=8, minute=0,
+                           timezone="Europe/Istanbul", id="gunluk_denetim",
+                           max_instances=1, coalesce=True)
     _ses_scheduler.start()
-    logger.info("Günlük ses temizliği başladı (her gün %02d:00 UTC)",
-                SES_TEMIZLIK_SAAT)
+    logger.info("Günlük ses temizliği (%02d:00 UTC) + denetim raporu (08:00 TR) "
+                "başladı", SES_TEMIZLIK_SAAT)
     return True
 
 
@@ -261,10 +269,12 @@ app.include_router(community.router, prefix=API_V1_PREFIX)
 app.include_router(admin.router, prefix=API_V1_PREFIX)
 app.include_router(education.router, prefix=API_V1_PREFIX)
 app.include_router(sounds.router, prefix=API_V1_PREFIX)
+app.include_router(feedback.router, prefix=API_V1_PREFIX)
 # SIRA ÖNEMLİ — media router, dosyanın ilerisindeki imzalı
 # `/media/{yol:path}` yakalayıcısından ÖNCE kaydedilir. Ters sırada
 # /media/videos/x.mp4 de imza ister ve iOS oynatıcı 403 alırdı.
 app.include_router(media.router)          # PUBLIC — /api/v1 ÖNEKİ YOK
+app.include_router(denetim_router.router)  # İMZALI — /denetim/{tarih}.html
 
 
 class AskReq(BaseModel):

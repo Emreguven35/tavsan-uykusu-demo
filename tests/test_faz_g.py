@@ -55,6 +55,7 @@ from api.routers import chat as chat_router          # noqa: E402
 from api.schemas.chat import ChatMessageItem         # noqa: E402
 from api.services import plan_service, rate_limit    # noqa: E402
 from engine import chatbot                           # noqa: E402
+from tests.llm_muhuru import TAM_PROFIL                # noqa: E402
 
 # Şemayı kur (alembic yerine test için create_all)
 Base.metadata.create_all(bind=engine)
@@ -97,7 +98,7 @@ def test_g1():
 
     tok = _register("g1_owner@example.com")
     bid = client.post("/api/v1/babies", headers=_auth(tok),
-                      json={"name": "G1", "birth_date": "2025-02-01",
+                      json={**TAM_PROFIL, "name": "G1", "birth_date": "2025-02-01",
                             "night_wakes": 1}).json()["id"]
 
     # Async (default): 202 + job_id + processing
@@ -143,7 +144,9 @@ def test_g1():
     bid2 = client.post("/api/v1/babies", headers=_auth(tok),
                        json={"name": "NoDob"}).json()["id"]
     rnd = client.post("/api/v1/plans/generate", headers=_auth(tok), json={"baby_id": bid2})
-    check("G1.8 doğum tarihi yok → 400", rnd.status_code == 400, f"status={rnd.status_code}")
+    check("G1.8 doğum tarihi yok → 422 + eksik_alanlar=[birth_date] (D-3)",
+          rnd.status_code == 422 and rnd.json().get("eksik_alanlar") == ["birth_date"],
+          f"status={rnd.status_code} {rnd.text[:120]}")
 
 
 # ===========================================================================

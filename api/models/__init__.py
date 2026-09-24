@@ -25,6 +25,8 @@ from api.models.community_moderation import ModerationLog
 from api.models.api_usage import ApiUsage
 from api.models.education_video import EducationVideo, VideoProgress
 from api.models.sleep_sound import SleepSound
+from api.models.plan_feedback import PlanFeedback
+from api.models.plan_uretim_isi import PlanUretimIsi
 
 __all__ = [
     "User", "Baby", "SleepLog", "SilinenSleepLog", "SleepPlan",
@@ -39,4 +41,6 @@ __all__ = [
     "EducationVideo", "VideoProgress",
     # Uyku sesleri
     "SleepSound",
+    # Plan geri bildirimi + worker'lar arası iş durumu
+    "PlanFeedback", "PlanUretimIsi",
 ]

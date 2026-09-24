@@ -321,6 +321,7 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
             for a in db.query(VoiceAudio).filter(
                 VoiceAudio.voice_profile_id == profile.id).all()}
     paket_idler = [x["id"] for x in voice_paket.paket_icerikleri()]
+    paket_kume = set(paket_idler)
     uretilemeyen = set()
     if profile is not None and (profile.error or "").startswith("Üretilemedi:"):
         uretilemeyen = {p.strip() for p in
@@ -337,7 +338,7 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
         return StoryItem(
             id=x["id"], type=x.get("type", ""), title=x.get("title", ""),
             duration_hint=x.get("duration_hint"),
-            hazir=bool(yol), durum=durum,
+            hazir=bool(yol), durum=durum, in_package=x["id"] in paket_kume,
             audio_url=storage.imzali_url(yol) if yol else None)
 
     return StoriesResp(
