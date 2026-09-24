@@ -362,6 +362,23 @@ check("4d) Başkasının bebeği → 404",
       client.get(f"/api/v1/education/videos?baby_id={BID}",
                  headers=H2).status_code == 404, "")
 
+# Aynı aşamada adım + gece videosu: önce izlenmemiş ADIM, sonra GECE; başka
+# kategorideki eşleşme (alfabetik sırada araya girse de) ikisinden sonra gelir.
+from types import SimpleNamespace as _NS
+_ad = _NS(id="ad", category="adim_adim", order_in_category=1, stage_tags=["kapi"])
+_ek = _NS(id="ek", category="egitim_sirasinda", order_in_category=4,
+          stage_tags=["kapi"])
+_ge = _NS(id="ge", category="gece_uyanirsa", order_in_category=3,
+          stage_tags=["kapi"])
+_liste = [_ad, _ek, _ge]                    # DB sırası: kategori alfabetik
+_izl = lambda *ids: {i: _NS(completed_at=TODAY) for i in ids}
+check("4e) Adım+gece varsa önce izlenmemiş ADIM videosu",
+      education.todays_pick(_liste, {}, "kapi") is _ad, "")
+check("4f) Adım izlendiyse GECE videosu (diğer kategoriden önce)",
+      education.todays_pick(_liste, _izl("ad"), "kapi") is _ge, "")
+check("4g) İkisi de izlendiyse sıradaki eşleşen",
+      education.todays_pick(_liste, _izl("ad", "ge"), "kapi") is _ek, "")
+
 
 # =============================================================================
 # 5) MEDYA SUNUMU — Range 206 (iOS oynatıcı için ŞART)

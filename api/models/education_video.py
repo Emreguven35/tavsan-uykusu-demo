@@ -38,8 +38,11 @@ ASAMA_ETIKETLERI = {
 # Kategori kodu → mobilde görünen başlık. SIRA ÖNEMLİ: yanıt bu sırayla döner.
 KATEGORILER = (
     ("baslarken", "Başlarken"),
+    ("adim_adim", "Adım adım eğitim"),
+    ("gece_uyanirsa", "Gece uyanırsa"),
     ("egitim_sirasinda", "Eğitim sırasında"),
     ("ozel_durumlar", "Özel durumlar"),
+    ("diger_yontemler", "Diğer yöntemler"),
     ("egitim_sonrasi", "Eğitim sonrası"),
 )
 

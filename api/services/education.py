@@ -45,6 +45,12 @@ GUN_ASAMA = (
 VARSAYILAN_ASAMA = "egitim_oncesi"
 GENEL = "genel"
 
+# Aşamanın "ne yapacağım" videosu (adım) ile "gece uyanırsa" videosu. Bir
+# aşamada adım videosu varsa öneri önce ONU, izlendiyse gece videosunu verir;
+# diğer kategorilerdeki eşleşmeler ancak ondan sonra gelir.
+ADIM_KATEGORI = "adim_adim"
+GECE_KATEGORI = "gece_uyanirsa"
+
 
 # ---------------------------------------------------------------------------
 # Aşama
@@ -146,7 +152,9 @@ def todays_pick(videolar: list[EducationVideo],
 
     Sıra: ① aşamayla eşleşen İZLENMEMİŞ ilk video → ② eşleşen ilk video
     (hepsi izlenmişse) → ③ "genel" etiketli ilk video (hiç eşleşme yoksa)
-    → ④ katalogdaki ilk video. Sıralama katalog sırasıdır (kategori, sıra).
+    → ④ katalogdaki ilk video. Sıralama katalog sırasıdır (kategori, sıra);
+    TEK İSTİSNA: aşamada bir adım videosu varsa eşleşenler arasında önce adım,
+    sonra gece videosu gelir (adımı izlemeyen anneye gece videosu önerilmez).
     """
     if not videolar:
         return None
@@ -155,6 +163,10 @@ def todays_pick(videolar: list[EducationVideo],
         return bool(getattr(ilerlemeler.get(v.id), "completed_at", None))
 
     eslesen = [v for v in videolar if asama_kodu in (v.stage_tags or [])]
+    if any(v.category == ADIM_KATEGORI for v in eslesen):
+        oncelik = {ADIM_KATEGORI: 0, GECE_KATEGORI: 1}
+        # sorted kararlı: aynı öncelikte katalog sırası korunur.
+        eslesen = sorted(eslesen, key=lambda v: oncelik.get(v.category, 2))
     for v in eslesen:
         if not izlendi(v):
             return v
