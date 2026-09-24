@@ -35,6 +35,9 @@ KOVA_SES = "voice-audio"              # PRIVATE — imzalı bağlantı ile sunul
 # oynatma "sebepsiz" durur. Yetki kontrolü KATALOGDA değil, dosyada anlamsız.
 KOVA_VIDEOLAR = "videos"              # PUBLIC — /media/videos/{slug}.mp4
 KOVA_POSTERLER = "posters"            # PUBLIC — /media/posters/{slug}.jpg
+# Uyku sesleri de PUBLIC: kişisel değil, herkese aynı dosya; oynatıcı Range
+# isteklerini Authorization taşımadan yapar (videolarla aynı gerekçe).
+KOVA_UYKU_SESLERI = "sounds"          # PUBLIC — /media/sounds/{slug}.m4a
 
 # İmzalı bağlantı varsayılan ömrü (spec: 1 saat).
 IMZA_OMRU_SN = 3600
@@ -73,6 +76,16 @@ def video_url(slug: str) -> str:
 
 def poster_url(slug: str) -> str:
     return f"/media/{KOVA_POSTERLER}/{slug}.jpg"
+
+
+def uyku_sesi_yolu(slug: str) -> str:
+    """Uyku sesinin depo yolu: sounds/{slug}.m4a"""
+    return f"{KOVA_UYKU_SESLERI}/{slug}.m4a"
+
+
+def uyku_sesi_url(slug: str) -> str:
+    """GÖRELİ yol — bkz. video_url."""
+    return f"/media/{KOVA_UYKU_SESLERI}/{slug}.m4a"
 
 
 def ses_klasoru(user_id, voice_profile_id=None) -> str:

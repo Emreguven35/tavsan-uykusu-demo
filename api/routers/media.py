@@ -3,6 +3,7 @@ media router — eğitim videolarının ve kapak görsellerinin PUBLIC sunumu.
 
     GET /media/videos/{slug}.mp4     → video (Range destekli)
     GET /media/posters/{slug}.jpg    → kapak görseli
+    GET /media/sounds/{slug}.m4a     → uyku sesi (Range destekli, döngü)
 
 NEDEN AUTH YOK: bunlar kişisel veri içermez ve herkese aynı dosya sunulur.
 Daha önemlisi iOS/AVPlayer Range isteklerini **Authorization başlığı taşımadan**
@@ -55,7 +56,7 @@ def _dosya(yol: str) -> Path:
 def _slug_dogrula(slug: str) -> str:
     if not _SLUG.match(slug or ""):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Geçersiz video kimliği")
+                            detail="Geçersiz dosya kimliği")
     return slug
 
 
@@ -127,3 +128,11 @@ def poster(slug: str, request: Request):
     """Video kapak görseli. Liste ekranı bunu yükler, video indirilmez."""
     return _range_yaniti(request, _dosya(storage.poster_yolu(_slug_dogrula(slug))),
                          "image/jpeg")
+
+
+@router.get("/sounds/{slug}.m4a")
+def uyku_sesi(slug: str, request: Request):
+    """Uyku sesi (10 dk, seamless loop). Range destekli, 1 yıl cache, auth yok."""
+    return _range_yaniti(request,
+                         _dosya(storage.uyku_sesi_yolu(_slug_dogrula(slug))),
+                         "audio/mp4")

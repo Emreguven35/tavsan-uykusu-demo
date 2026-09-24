@@ -24,6 +24,7 @@ from api.models.community_block import Block
 from api.models.community_moderation import ModerationLog
 from api.models.api_usage import ApiUsage
 from api.models.education_video import EducationVideo, VideoProgress
+from api.models.sleep_sound import SleepSound
 
 __all__ = [
     "User", "Baby", "SleepLog", "SilinenSleepLog", "SleepPlan",
@@ -36,4 +37,6 @@ __all__ = [
     "ApiUsage",
     # Eğitim videoları
     "EducationVideo", "VideoProgress",
+    # Uyku sesleri
+    "SleepSound",
 ]
