@@ -225,6 +225,9 @@ def delete_account(db: Session = Depends(get_db),
     # türetilmiş dosyalar hesap silindikten sonra diskte kalamaz.
     from api.services import voice_temizlik
     voice_temizlik.kullanici_seslerini_sil(db, user)
+    # Süren plan üretimi iptal: sonucu silinmiş bebeğe yazmaya çalışmasın.
+    from api.services import plan_jobs
+    plan_jobs.kullanici_islerini_iptal(user_id)
 
     db.delete(user)                      # relationship cascade + FK ON DELETE CASCADE
     db.commit()

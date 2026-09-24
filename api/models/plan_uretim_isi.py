@@ -14,10 +14,12 @@ tablo sorgulanan bir ilişki değil, durum defteri.
 """
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text, func
+from typing import Any
+
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from api.db.base import Base
+from api.db.base import Base, JSONBType
 
 
 class PlanUretimIsi(Base):
@@ -30,6 +32,12 @@ class PlanUretimIsi(Base):
     started: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     plan_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Yeniden başlatmaya dayanıklılık: işi koşturan süreç ("konteyner:pid");
+    # NULL = yetim (süreç kapandı) → bakim() devralır. `parametreler` yeniden
+    # koşmak için üretim girdileri; `deneme` kaç kez devralındığı.
+    sahip: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    parametreler: Mapped[Any] = mapped_column(JSONBType, nullable=True)
+    deneme: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                  nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

@@ -174,9 +174,17 @@ async def lifespan(app: FastAPI):
 
     # Günlük ses temizliği (Faz 4.1) — ElevenLabs'te artık ses bırakmayalım.
     _ses_temizligi_baslat()
+    # Plan işi bakımı (2026-09-25): yetim işleri devral, bayatları failed yaz.
+    from api.services import plan_jobs as _plan_jobs
+    if settings.is_production:
+        _plan_jobs.bakim_baslat()
     try:
         yield
     finally:
+        # Deploy SIGTERM'inde yarım kalan plan işleri YETİM bırakılır; yeni
+        # konteyner dakikalar içinde devralır (eskiden sonsuza dek "processing").
+        _plan_jobs.bakim_durdur()
+        _plan_jobs.sahipsizlestir()
         notifier.shutdown_scheduler()
         voice_uretim.kapat()
         _ses_temizligi_durdur()

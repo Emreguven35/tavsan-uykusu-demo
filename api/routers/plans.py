@@ -244,8 +244,20 @@ def get_today_plan(baby_id: uuid.UUID = Query(...), db: Session = Depends(get_db
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
                             detail=f"Plan yeniden üretilemedi: {e}")
     if plan is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Bu bebek için henüz plan üretilmemiş")
+        # Plan yoksa SEBEBİNİ söyle: mobil bu ucu yokluyor, iş durumunu değil.
+        # Hazırlanıyor / hazırlanamadı (tekrar dene) / hiç istenmedi.
+        from fastapi.responses import JSONResponse
+        is_ = plan_jobs.bebek_son_isi(baby.id)
+        if is_ and is_["status"] == plan_jobs.STATUS_PROCESSING:
+            detay = "Planınız hazırlanıyor; bu birkaç dakika sürebilir."
+        elif is_ and is_["status"] == plan_jobs.STATUS_FAILED:
+            detay = is_["error"] or plan_jobs.HATA_MESAJ
+        else:
+            detay = "Bu bebek için henüz plan üretilmemiş"
+        return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={
+            "detail": detay,
+            "plan_isi": ({"job_id": is_["job_id"], "status": is_["status"]}
+                         if is_ else None)})
     return _plan_yaniti(db, user, plan)
 
 

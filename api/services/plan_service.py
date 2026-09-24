@@ -784,6 +784,9 @@ def _adaptation_meta(result: dict, summary: dict, required: bool) -> dict:
         "regression_detected": result["regression_detected"],
         "regresyon_karti": result.get("regresyon_karti"),
         "egitim_baslangic_gunu": result.get("egitim_baslangic_gunu"),
+        # Mobilin gün kartı `egitim_gunu` adını okuyor — AYNI değer (eğitimin
+        # kaçıncı günü, 1'den). Bekleme/yenidoğanda ikisi de None.
+        "egitim_gunu": result.get("egitim_baslangic_gunu"),
         "kirkbes_gun_doldu": bool(result.get("kirkbes_gun_doldu")),
         "reasons": result["reasons"],
         "log_summary": summary,
@@ -845,7 +848,7 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         log_summary=summary,
         # Denetim B3: bekleme/yenidoğan planında eğitim günü YOK — mobil
         # training_started_at'i Eğitim sekmesi açılınca her bebek için yazıyordu.
-        training_started_at=(baby.training_started_at
+        training_started_at=(egitim_baslangicini_tamamla(db, baby)
                              if tip_turet(base_content) == TYPE_EGITIM else None),
         regresyon_kendi_donuyor=regresyon_cevabi(baby, today))
 
@@ -1009,6 +1012,28 @@ def egitim_zamani_geldi_mi(baby: Baby, plan: SleepPlan | None,
         yas["duzeltilmis_ay"], hafta, getattr(baby, "saglik_problemi", None),
         ilk_tam_sayi(baby.night_wakes), "beyan")
     return bool(sonuc["uygun_mu"])
+
+
+def egitim_baslangicini_tamamla(db: Session, baby: Baby) -> date:
+    """Eğitim planındaki bebeğin training_started_at'i BOŞSA doldur ve döndür.
+
+    2026-09-25: eğitim planı üretilen bebekte alan boş kalıyordu (sunucu yalnız
+    5 ay geçişinde yazıyordu, mobil ise Eğitim sekmesi açılınca) → gün kartı
+    ve aşama boştu. Kural mobilinkiyle aynı: başlangıç = bebeğin İLK eğitim
+    planının tarihi (yoksa bugün)."""
+    if baby.training_started_at is not None:
+        return baby.training_started_at
+    ilk = None
+    for p in (db.query(SleepPlan).filter(SleepPlan.baby_id == baby.id)
+              .order_by(SleepPlan.plan_date).all()):
+        if tip_turet(p.content or {}) == TYPE_EGITIM:
+            ilk = p.plan_date
+            break
+    baby.training_started_at = ilk or datetime.now(timezone.utc).date()
+    db.commit()
+    logger.info("training_started_at tamamlandı: baby=%s → %s",
+                baby.id, baby.training_started_at)
+    return baby.training_started_at
 
 
 def egitim_aktif_mi(db: Session, baby: Baby) -> bool:
