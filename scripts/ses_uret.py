@@ -122,12 +122,33 @@ def ebur128(girdi: Path | np.ndarray) -> dict:
             "tp": bul(r"True peak:\s+Peak:\s+(-?[\d.inf]+) dBFS")}
 
 
+# AAC KENARLARI: kodlayıcı dosyanın başından önce ve sonundan sonra sessizlik
+# görür; son çerçevenin nicemleme gürültüsü o "sessizliğe" yayılır. Gürültüde
+# duyulmaz ama fan gibi pürüzsüz bir uğultuda döngü noktasında tık bırakır
+# (ölçüldü: kenar hatası 0.023, iç kısım 0.0003). Çözüm dairesel bağlam:
+# başa döngünün SONUNU, sona döngünün BAŞINI ekleyip kodla, sonra fazlalığı
+# yeniden kodlamadan (-c copy) at:
+#   • sondaki fazla paketler -frames:a ile kesilir,
+#   • baştaki fazla örnekler -itsoffset ile negatif zamana itilir; mp4
+#     muxer bunları edit list'e yazar, oynatıcı atlar.
+# Çıkış yine tam N örnek decode edilir (dogrula() bunu ölçer).
+ON_BAGLAM = 2048
+SON_BAGLAM = 4096
+
+
 def kodla(x: np.ndarray, hedef: Path) -> None:
     hedef.parent.mkdir(parents=True, exist_ok=True)
+    uzun = hedef.with_suffix(".uzun.m4a")
     gecici = hedef.with_suffix(".tmp.m4a")
+    dairesel = np.concatenate([x[-ON_BAGLAM:], x, x[:SON_BAGLAM]])
     _ffmpeg(["-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", "-",
-             "-c:a", "aac", "-b:a", BITRATE, "-movflags", "+faststart",
-             str(gecici)], girdi=x.astype(np.float32).tobytes())
+             "-c:a", "aac", "-b:a", BITRATE, str(uzun)],
+            girdi=dairesel.astype(np.float32).tobytes())
+    paket = len(x) // 1024 + 1 + ON_BAGLAM // 1024      # +1: kodlayıcı gecikmesi
+    _ffmpeg(["-itsoffset", f"-{ON_BAGLAM / SR:.10f}", "-i", str(uzun),
+             "-c", "copy", "-frames:a", str(paket), "-movflags", "+faststart",
+             str(gecici)])
+    uzun.unlink(missing_ok=True)
     gecici.replace(hedef)
 
 
@@ -183,6 +204,19 @@ def dongu_yap(x: np.ndarray) -> np.ndarray:
     gir, cik = _egriler(xf)
     out[:xf] = x[:xf] * gir + x[N:N + xf] * cik
     return out
+
+
+def yumusak_sinirla(x: np.ndarray, esik_db: float = -9.0,
+                    tavan_db: float = -5.0) -> np.ndarray:
+    """Eşiğin üstünü tanh ile tavana büker. DURUMSUZ (örnek başına): sıkıştırıcı
+    ya da limiter gibi zarf tutmaz, dolayısıyla döngünün başı ile sonu aynı
+    davranır — dikiş bozulmaz."""
+    t, c = 10 ** (esik_db / 20), 10 ** (tavan_db / 20)
+    a = np.abs(x)
+    ust = a > t
+    y = x.copy()
+    y[ust] = np.sign(x[ust]) * (t + (c - t) * np.tanh((a[ust] - t) / (c - t)))
+    return y.astype(np.float32)
 
 
 def normalize(x: np.ndarray) -> tuple[np.ndarray, dict]:
@@ -295,7 +329,11 @@ def uret(satir: dict, zorla: bool) -> np.ndarray:
     else:
         raise ValueError(f"{slug}: bilinmeyen kaynak türü: {kaynak}")
 
-    y, _bilgi = normalize(x)
+    y, bilgi = normalize(x)
+    if bilgi["tp_tahmini"] > TP_TAVAN - 1.0:
+        # Kalp atışı gibi darbeli seslerde -30 LUFS'ta tepe -3 dBTP'yi aşıyor.
+        # Kırpma yerine yumuşak sınırlama; sonra ortalama yeniden -30'a çekilir.
+        y, _bilgi = normalize(yumusak_sinirla(y))
     _ara_yolu(slug).parent.mkdir(parents=True, exist_ok=True)
     y.astype(np.float32).tofile(_ara_yolu(slug))
     return y
