@@ -1,8 +1,9 @@
 """users — kimlik. Supabase auth yerine kendi JWT auth'umuz (Faz 2)."""
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import String
+from sqlalchemy import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.db.base import Base, JSONBType
@@ -27,6 +28,13 @@ class User(Base, TimestampMixin):
     # migration mevcut satırları BOZMAZ (geriye uyumlu).
     notification_prefs: Mapped[dict[str, Any] | None] = mapped_column(
         JSONBType, nullable=True, default=lambda: dict(DEFAULT_NOTIFICATION_PREFS))
+
+    # Denetim B3 — annenin SON görülen uygulama sürümü (X-App-Version, ör.
+    # "1.0.0+21"). Denetim raporu eski sürümdeki (build < 20) anneleri sayar:
+    # bir hatanın "düzeltildi" sayılması annenin o sürümü kullanmasına bağlı.
+    app_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    app_version_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
     # KVKK silme hakkı: kullanıcı silinince ilişkili tüm veriler cascade ile gider.
     babies = relationship("Baby", back_populates="user",

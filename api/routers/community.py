@@ -64,6 +64,15 @@ def _author(prof: CommunityProfile | None, user_id) -> tuple[str, bool]:
     return prof.nickname, bool(prof.is_expert)
 
 
+def _rozet(prof: CommunityProfile | None, user_id) -> dict:
+    """Rozet alanları. Silinmiş yazarda rozet yok."""
+    if user_id is None or prof is None:
+        return {"is_official": False, "badge": None}
+    resmi = bool(getattr(prof, "is_official", False))
+    return {"is_official": resmi,
+            "badge": "resmi" if resmi else ("uzman" if prof.is_expert else None)}
+
+
 def _resp_status(internal: str) -> str:
     """İç durum → mobil sözleşme durumu. published → visible; diğerleri aynen."""
     return "visible" if internal == "published" else internal
@@ -202,6 +211,7 @@ def list_threads(db: Session = Depends(get_db), user: User = Depends(get_current
         nick, is_expert = _author(prof, t.user_id)
         items.append(ThreadListItem(
             id=t.id, author_id=t.user_id, nickname=nick, is_expert=is_expert,
+            **_rozet(prof, t.user_id),
             category=t.category, title=t.title, body_preview=t.body[:140],
             reply_count=t.reply_count, like_count=t.like_count,
             expert_replied=t.expert_replied, liked_by_me=t.id in liked,
@@ -250,13 +260,15 @@ def get_thread(thread_id: uuid.UUID, db: Session = Depends(get_db),
     for r, rp in rrows:
         rnick, rexp = _author(rp, r.user_id)
         replies.append(ReplyItem(id=r.id, author_id=r.user_id, nickname=rnick,
-                                 is_expert=rexp, body=r.body, like_count=r.like_count,
+                                 is_expert=rexp, **_rozet(rp, r.user_id),
+                                 body=r.body, like_count=r.like_count,
                                  liked_by_me=r.id in rliked, status=_resp_status(r.status),
                                  created_at=r.created_at))
     rnext = _encode_cursor(rrows[-1][0].created_at, rrows[-1][0].id) if (has_more and rrows) else None
 
     return ThreadDetailResp(
         id=t.id, author_id=t.user_id, nickname=nick, is_expert=is_expert,
+        **_rozet(tprof, t.user_id),
         category=t.category, title=t.title, body=t.body, reply_count=t.reply_count,
         like_count=t.like_count, expert_replied=t.expert_replied,
         liked_by_me=bool(_liked_set(db, user, "thread", [t.id])),
@@ -310,6 +322,7 @@ def create_thread(req: ThreadCreateReq, background: BackgroundTasks,
     nick, is_expert = prof.nickname, bool(prof.is_expert)
     return ThreadDetailResp(
         id=t.id, author_id=user.id, nickname=nick, is_expert=is_expert,
+        **_rozet(prof, user.id),
         category=t.category, title=t.title, body=t.body, reply_count=0, like_count=0,
         expert_replied=False, liked_by_me=False, status="visible",
         last_activity_at=t.last_activity_at, created_at=t.created_at,
@@ -354,7 +367,8 @@ def create_reply(thread_id: uuid.UUID, req: ReplyCreateReq, background: Backgrou
             logger.exception("Topluluk cevap bildirimi gönderilemedi")
 
     return ReplyItem(id=r.id, author_id=user.id, nickname=prof.nickname,
-                     is_expert=bool(prof.is_expert), body=r.body, like_count=0,
+                     is_expert=bool(prof.is_expert), **_rozet(prof, user.id),
+                     body=r.body, like_count=0,
                      liked_by_me=False, status="visible", created_at=r.created_at)
 
 

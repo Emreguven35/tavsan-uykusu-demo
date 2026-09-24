@@ -56,7 +56,14 @@ GECE_KATEGORI = "gece_uyanirsa"
 # Aşama
 # ---------------------------------------------------------------------------
 def asama_belirle(baby: Baby | None, today: date | None = None) -> dict:
-    """{"kod", "etiket", "kaynak"} — kaynak "anne" | "plan"."""
+    """{"kod", "etiket", "kaynak"} — kaynak "anne" | "plan".
+
+    Denetim B3: eğitim programı yürümeyen bebekte (bekleme / yenidoğan planı)
+    aşama HER ZAMAN "eğitim öncesi"dir — annenin beyanı da bunu ezemez; 3
+    aylık bebek "Kapı" aşamasında olamaz."""
+    if baby is not None and not _egitim_aktif(baby):
+        return {"kod": VARSAYILAN_ASAMA,
+                "etiket": ASAMA_ETIKETLERI[VARSAYILAN_ASAMA], "kaynak": "plan"}
     beyan = (getattr(baby, "mevcut_asama", None) or "").strip() if baby else ""
     if beyan in ASAMA_KODLARI:
         return {"kod": beyan, "etiket": ASAMA_ETIKETLERI[beyan],
@@ -64,6 +71,17 @@ def asama_belirle(baby: Baby | None, today: date | None = None) -> dict:
 
     kod = _plandan_asama(baby, today)
     return {"kod": kod, "etiket": ASAMA_ETIKETLERI[kod], "kaynak": "plan"}
+
+
+def _egitim_aktif(baby: Baby) -> bool:
+    """plan_service.egitim_aktif_mi — bebeğin bağlı olduğu oturumla. Oturumsuz
+    (birim testlerindeki sahte bebek) nesnede karar verilemez → engellenmez."""
+    from sqlalchemy.orm import object_session
+    oturum = object_session(baby) if hasattr(baby, "_sa_instance_state") else None
+    if oturum is None:
+        return True
+    from api.services import plan_service
+    return plan_service.egitim_aktif_mi(oturum, baby)
 
 
 def _plandan_asama(baby: Baby | None, today: date | None) -> str:

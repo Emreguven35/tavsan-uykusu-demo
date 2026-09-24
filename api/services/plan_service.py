@@ -218,6 +218,27 @@ def gece_uyanma_kaynagi(baby: Baby, logs: Iterable[SleepLog],
             "gece_sayisi": len(gece_sayaci)}
 
 
+# Uygulamanın kapsadığı yaş aralığının üst ucu (ay). Doğum tarihi doğrulaması
+# (babies router) ve eski kayıtlar için plan uyarısı AYNI sınırı kullanır.
+DOGUM_TARIHI_UST_AY = 36
+DOGUM_TARIHI_KONTROL_UYARISI = "Bebeğinin doğum tarihini kontrol eder misin?"
+
+
+def dogum_tarihi_hatasi(dogum: date | None, bugun: date | None = None) -> str | None:
+    """Türkçe hata metni ya da None. Gelecek tarih ve 36 aydan eski tarih
+    reddedilir (prod'da 77 aylık görünen bir bebek vardı — yanlış giriş)."""
+    if dogum is None:
+        return None
+    bugun = bugun or datetime.now(timezone.utc).date()
+    if dogum > bugun:
+        return ("Doğum tarihi ileri bir tarih olamaz. Lütfen bebeğinizin doğum "
+                "tarihini kontrol edin.")
+    if (bugun - dogum).days / 30.44 > DOGUM_TARIHI_UST_AY:
+        return ("Tavşan Uykusu 0-36 aylık bebekler için hazırlandı; girilen "
+                "doğum tarihi 36 aydan eski. Lütfen tarihi kontrol edin.")
+    return None
+
+
 def uyarilari_turet(baby: Baby, logs: Iterable[SleepLog], today: date,
                     dogum_haftasi: int | None = None) -> dict:
     """Faz 3 — `content.uyarilar` + `content.uygun_mu`'yu GÜNCEL veriden türet.
@@ -238,7 +259,13 @@ def uyarilari_turet(baby: Baby, logs: Iterable[SleepLog], today: date,
         yas["duzeltilmis_ay"], hafta, getattr(baby, "saglik_problemi", None),
         ilk_tam_sayi(gu["deger"]), gu["kaynak"],
         uzun_uyanma_gece_sayisi=uzun)
-    return {"uygun_mu": sonuc["uygun_mu"], "uyarilar": sonuc["uyarilar"],
+    uyarilar = list(sonuc["uyarilar"])
+    # Denetim B3 — 36 aydan büyük görünen bebek (prod'da 77 aylık bir kayıt):
+    # büyük olasılıkla doğum tarihi yanlış girilmiş. Artık yeni girişte 422
+    # veriliyor; ESKİ kayıtlar için anneye uygulama içinde sorulur.
+    if yas["gercek_ay"] > DOGUM_TARIHI_UST_AY:
+        uyarilar.insert(0, DOGUM_TARIHI_KONTROL_UYARISI)
+    return {"uygun_mu": sonuc["uygun_mu"], "uyarilar": uyarilar,
             "gece_uyanma": gu, "yas": yas,
             "uzun_uyanma_gece_sayisi": uzun}
 
@@ -816,7 +843,10 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         training_completed_at=baby.training_completed_at, today=today,
         now_minute=now_minute, yas_ay=yas_ay, tek_uyku=tek_uyku,
         log_summary=summary,
-        training_started_at=baby.training_started_at,
+        # Denetim B3: bekleme/yenidoğan planında eğitim günü YOK — mobil
+        # training_started_at'i Eğitim sekmesi açılınca her bebek için yazıyordu.
+        training_started_at=(baby.training_started_at
+                             if tip_turet(base_content) == TYPE_EGITIM else None),
         regresyon_kendi_donuyor=regresyon_cevabi(baby, today))
 
     if result["regenerate_required"]:
@@ -979,6 +1009,25 @@ def egitim_zamani_geldi_mi(baby: Baby, plan: SleepPlan | None,
         yas["duzeltilmis_ay"], hafta, getattr(baby, "saglik_problemi", None),
         ilk_tam_sayi(baby.night_wakes), "beyan")
     return bool(sonuc["uygun_mu"])
+
+
+def egitim_aktif_mi(db: Session, baby: Baby) -> bool:
+    """Bu bebekte EĞİTİM PROGRAMI yürüyebilir mi? (eğitim günü/aşama anlamlı mı)
+
+    Denetim B3 — kural: egitim_bekleme ve yenidogan_ritim planlarında eğitim
+    günü ve aşama YOKTUR. Karar bebeğin en güncel planının türüdür (sağlık
+    sebebiyle bekleyen 7 aylık bebek de bekleme planındadır). Plan henüz yoksa
+    yaşa bakılır; doğum tarihi yoksa karar verilemez → engellenmez."""
+    plan = (db.query(SleepPlan).filter(SleepPlan.baby_id == baby.id)
+            .order_by(SleepPlan.plan_date.desc(), SleepPlan.created_at.desc())
+            .first())
+    if plan is not None:
+        return tip_turet(plan.content or {}) == TYPE_EGITIM
+    if baby.birth_date is None:
+        return True
+    ay = hesapla_yas_ay(baby.birth_date.isoformat(),
+                        etkin_dogum_haftasi(baby))["duzeltilmis_ay"]
+    return ay >= EGITIM_YAS_ALT_SINIRI
 
 
 def egitim_gecisini_baslat(db: Session, user: User, baby: Baby,

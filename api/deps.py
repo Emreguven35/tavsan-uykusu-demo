@@ -9,8 +9,10 @@ require_premium: premium uçların TEK kapısı (Faz V). Abonelik YA DA BETA_MOD
 ile geçer; geçmezse 403 + Türkçe detail. Kapıyı her router'ın kendince
 kurmaması bilinçli: kapı çoğalınca bir ucu açık kalıyordu.
 """
+import re
 import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -32,9 +34,37 @@ _UNAUTHORIZED = HTTPException(
 )
 
 
+# X-App-Version (ör. "1.0.0+21"). Biçim dışı değer yazılmaz (DB'ye çöp gitmez).
+_SURUM = re.compile(r"^[0-9A-Za-z.+_-]{1,40}$")
+# Aynı sürüm tekrar geldiğinde "son görülme" en fazla bu sıklıkla yazılır —
+# her istekte UPDATE atmamak için.
+SURUM_YAZMA_ARALIGI = timedelta(hours=1)
+
+
+def surum_kaydet(db: Session, user: User, surum: str | None) -> None:
+    """Denetim B3 — annenin son görülen uygulama sürümü. EN İYİ ÇABA: yazılamazsa
+    istek düşmez."""
+    if not surum or not _SURUM.match(surum.strip()):
+        return
+    surum = surum.strip()
+    simdi = datetime.now(timezone.utc)
+    son = user.app_version_seen_at
+    if son is not None and son.tzinfo is None:
+        son = son.replace(tzinfo=timezone.utc)
+    if user.app_version == surum and son is not None and simdi - son < SURUM_YAZMA_ARALIGI:
+        return
+    try:
+        user.app_version = surum
+        user.app_version_seen_at = simdi
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
+    x_app_version: str | None = Header(default=None, alias="X-App-Version"),
 ) -> User:
     if creds is None or not creds.credentials:
         raise _UNAUTHORIZED
@@ -54,6 +84,7 @@ def get_current_user(
     # Hata izlemede "kim etkilendi" görünsün ama KİMLİĞİ görünmesin: yalnız
     # tuzlanmış hash gider (e-posta ASLA). Sentry kapalıysa no-op.
     kullaniciyi_isaretle(user.id)
+    surum_kaydet(db, user, x_app_version)
     return user
 
 

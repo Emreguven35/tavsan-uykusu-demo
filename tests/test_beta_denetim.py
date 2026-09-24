@@ -275,7 +275,7 @@ check("R1) Dosya DENETIM_ROOT/{tarih}.html", _yol == _DENETIM / f"{DUN.isoformat
 check("R2) Yalnız gerçek bebek (test hesabı dahil değil)", _n == 1, _n)
 import re as _re                                          # noqa: E402
 check("R3) 'Bebek N, X aylık' başlığı (ad yok, numara)",
-      bool(_re.search(r"<h2>Bebek \d+, \d+ aylık</h2>", _html)),
+      bool(_re.search(r"<h2>Bebek \d+, \d+ aylık<span", _html)),
       _html[_html.find("<h2>"):_html.find("<h2>") + 60])
 check("R4) Kişisel veri yok: bebek adı / e-posta / test bebeği geçmiyor",
       "zeynep" not in _html.lower() and "@gercek.com" not in _html

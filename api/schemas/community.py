@@ -27,6 +27,10 @@ class ProfileResp(BaseModel):
     status: str
     post_count: int
     is_expert: bool
+    # "Resmi" rozeti (Tavşan Uykusu Ekibi). `badge`: gösterilecek TEK rozet —
+    # "resmi" | "uzman" | None; mobil iki bayrağı ayrı yorumlamak zorunda kalmaz.
+    is_official: bool = False
+    badge: str | None = None
     is_moderator: bool
     rules_accepted_at: datetime | None = None
     created_at: datetime
@@ -60,6 +64,10 @@ class ThreadListItem(BaseModel):
     author_id: uuid.UUID | None      # engelleme için; hesap silinmişse null
     nickname: str
     is_expert: bool
+    # "Resmi" rozeti (Tavşan Uykusu Ekibi). `badge`: gösterilecek TEK rozet —
+    # "resmi" | "uzman" | None; mobil iki bayrağı ayrı yorumlamak zorunda kalmaz.
+    is_official: bool = False
+    badge: str | None = None
     category: str
     title: str
     body_preview: str            # body ilk 140 karakter
@@ -82,6 +90,10 @@ class ReplyItem(BaseModel):
     author_id: uuid.UUID | None      # engelleme için; hesap silinmişse null
     nickname: str
     is_expert: bool
+    # "Resmi" rozeti (Tavşan Uykusu Ekibi). `badge`: gösterilecek TEK rozet —
+    # "resmi" | "uzman" | None; mobil iki bayrağı ayrı yorumlamak zorunda kalmaz.
+    is_official: bool = False
+    badge: str | None = None
     body: str
     like_count: int
     liked_by_me: bool
@@ -94,6 +106,10 @@ class ThreadDetailResp(BaseModel):
     author_id: uuid.UUID | None
     nickname: str
     is_expert: bool
+    # "Resmi" rozeti (Tavşan Uykusu Ekibi). `badge`: gösterilecek TEK rozet —
+    # "resmi" | "uzman" | None; mobil iki bayrağı ayrı yorumlamak zorunda kalmaz.
+    is_official: bool = False
+    badge: str | None = None
     category: str
     title: str
     body: str

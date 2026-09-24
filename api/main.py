@@ -85,6 +85,10 @@ def _ses_temizligi_baslat() -> bool:
     _ses_scheduler.add_job(denetim.gunluk_is, "cron", hour=8, minute=0,
                            timezone="Europe/Istanbul", id="gunluk_denetim",
                            max_instances=1, coalesce=True)
+    # 08:05 — raporun bağlantısı DENETIM_ALICILARI'na e-postayla.
+    _ses_scheduler.add_job(denetim.eposta_isi, "cron", hour=8, minute=5,
+                           timezone="Europe/Istanbul", id="denetim_eposta",
+                           max_instances=1, coalesce=True)
     _ses_scheduler.start()
     logger.info("Günlük ses temizliği (%02d:00 UTC) + denetim raporu (08:00 TR) "
                 "başladı", SES_TEMIZLIK_SAAT)

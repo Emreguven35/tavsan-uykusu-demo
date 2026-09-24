@@ -81,8 +81,10 @@ def anlik_goruntu(db: Session, user: User, baby: Baby, an: datetime) -> dict:
         "yerel_gun": yerel_gun.isoformat(),
         "yas": yas,
         "bant": bant,
-        "egitim_gunu": plan_adapter.egitim_gunu(baby.training_started_at,
-                                                yerel_gun),
+        "egitim_gunu": (plan_adapter.egitim_gunu(baby.training_started_at,
+                                                 yerel_gun)
+                        if plan_service.tip_turet(icerik) == plan_service.TYPE_EGITIM
+                        else None),
         "asama": asama["kod"],
     }
 

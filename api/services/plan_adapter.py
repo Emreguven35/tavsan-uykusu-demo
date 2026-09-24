@@ -209,10 +209,17 @@ K17_NAP_ESIK_MIN_DK = 3 * 60
 # daha geniş: 14 saati aşmışsa artık uyku değil, unutulmuş sayaçtır.
 K17_GECE_ESIK_DK = 14 * 60
 
-# K13.1 — İki uyku kaydının "aynı uyku" sayılması için gereken örtüşme oranı.
+# K13.1 — İki GECE uykusu kaydının "aynı uyku" sayılması için gereken örtüşme
+# oranı (gündüzde herhangi bir örtüşme yeter — bkz. _gunduz_cakismalarini_birlestir).
 # Payda KISA olan kaydın süresidir: 10 dakikalık bir kayıt 2 saatlik bir kaydın
 # içine düşüyorsa örtüşme %100'dür, %8 değil.
 CAKISMA_ESIGI = 0.5
+
+# Denetim B3 — anneye gösterilen iki uyarı (mobil metni olduğu gibi basar).
+CAKISAN_KAYIT_UYARISI = ("Aynı saatlere düşen birden fazla kayıt var; lütfen "
+                         "kayıtlarınızı kontrol edin.")
+ACIK_UYKU_UYARISI = ("Uykunun bitiş saatini girdiğinizde günün geri kalanını "
+                     "hesaplayabiliriz.")
 
 
 # =============================================================================
@@ -740,6 +747,48 @@ def _cakismalari_coz(kayitlar: list[dict], out: dict) -> list[dict]:
     return sorted(tutulan, key=lambda x: x["bas_dk"])
 
 
+def _gunduz_cakismalarini_birlestir(kayitlar: list[dict], out: dict) -> list[dict]:
+    """K13 (v2.5, denetim B3) — GÜNDÜZ uykularında HERHANGİ bir süre çakışan
+    iki kayıt TEK uykudur ve BİRLEŞİMİ alınır (en erken başlangıç → en geç bitiş).
+
+    Eskiden %50 örtüşme şartı vardı ve kazanan kayıt tutulup diğeri atılıyordu.
+    Denetimde (Bebek 16, 09-23) 14:44–16:04 ile 15:45–16:45 %32 örtüştüğü için
+    iki ayrı uyku sayıldı ve gün 4 gündüz uykusuna çıktı. Gündüz uykusu
+    saatlerce sürmez; aynı saatlere düşen iki kayıt aynı uykunun iki kaydıdır.
+    Birleşim, kayıtlardan hiçbirinin uyuduğu süreyi kaybetmez.
+
+    Açık kayıt (bitiş yok) NOKTA sayılır: kapalı bir kaydın içine düşüyorsa o
+    kayıt tutulur, açık olan yok sayılır (K13.2). Gece uykuları bu kuralın
+    DIŞINDA (bkz. _cakismalari_coz)."""
+    tutulan: list[dict] = []
+    for k in sorted(kayitlar, key=lambda x: x["bas_dk"]):
+        carpisan = next((t for t in tutulan if _ortusme_orani(t, k) > 0), None)
+        if carpisan is None:
+            tutulan.append(k)
+            continue
+        a_bit, b_bit = carpisan.get("bit_dk_lin"), k.get("bit_dk_lin")
+        if a_bit is None or b_bit is None:
+            kazanan, kaybeden = _cakisma_kazanani(carpisan, k)
+            if kazanan is not carpisan:
+                tutulan[tutulan.index(carpisan)] = kazanan
+            _yok_say(out, kaybeden, "cakisma",
+                     f"{_fmt(kazanan['bas_dk'])} kaydıyla aynı uykuya ait "
+                     f"görünüyor; bitişi girilmemiş olan sayılmadı")
+            continue
+        birlesik = dict(carpisan)
+        birlesik["bas_dk"] = min(carpisan["bas_dk"], k["bas_dk"])
+        birlesik["bit_dk_lin"] = max(a_bit, b_bit)
+        birlesik["bit_dk"] = birlesik["bit_dk_lin"] % 1440
+        birlesik["sure_dk"] = birlesik["bit_dk_lin"] - birlesik["bas_dk"]
+        birlesik["_birlesti"] = True
+        tutulan[tutulan.index(carpisan)] = birlesik
+        _yok_say(out, k, "cakisma",
+                 f"{_fmt(carpisan['bas_dk'])} kaydıyla aynı saatlere düşüyor; "
+                 f"ikisi tek uyku sayıldı ({_fmt(birlesik['bas_dk'])}–"
+                 f"{_fmt(birlesik['bit_dk'])})")
+    return sorted(tutulan, key=lambda x: x["bas_dk"])
+
+
 def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
                   tz_offset_min: int = TZ_OFFSET_MIN, *,
                   nap_sure_dk: int | None = None,
@@ -838,7 +887,8 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
     _wake_kayitlarini_coz(out, wake_adaylari)
 
     # --- K13 — çakışanları tekilleştir (yuvalara girmeden ÖNCE) -------------
-    out["gunduz_uykulari"] = _cakismalari_coz(out["gunduz_uykulari"], out)
+    out["gunduz_uykulari"] = _gunduz_cakismalarini_birlestir(
+        out["gunduz_uykulari"], out)
     out["gece_uykulari"] = _cakismalari_coz(out["gece_uykulari"], out)
 
     # K19.1 — gece uykusunun İÇİNDE kalan "gündüz" parçalarını ayıkla
@@ -1089,8 +1139,16 @@ def _parcalari_birlestir(kayitlar: list[dict], out: dict,
             birlesik["bit_dk"] = birlesik["bit_dk_lin"] % 1440
             birlesik["sure_dk"] = birlesik["bit_dk_lin"] - birlesik["bas_dk"]
             birlesik["_devam"] = False
-        # Otomatik kapanış işareti birleşmede anlamını yitirir.
+        # Otomatik kapanış işareti birleşmede anlamını yitirir — BİR İSTİSNA:
+        # bitişi SONRAKİ parçadan gelen birleşimde o bitiş K17 TAHMİNİYSE
+        # (bayat), birleşik uykunun bitişi de tahmindir. İşaret düşerse
+        # şekerleme/sıradaki blok uydurma bir bitişe dayanır (denetim B3).
+        bitis_tahmini = (k.get("_otomatik_kapandi") == "bayat"
+                         and k.get("bit_dk_lin") is not None
+                         and k["bit_dk_lin"] >= onceki_bit)
         birlesik.pop("_otomatik_kapandi", None)
+        if bitis_tahmini:
+            birlesik["_otomatik_kapandi"] = "bayat"
         out_list[-1] = birlesik
 
     for k in out_list:
@@ -1524,10 +1582,24 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
         bloklar.append(blok)
         cursor = bit
 
-    # Şablondan fazla kayıt girildiyse (anne 4. uykuyu da kaydetti) zincire ekle.
-    for j, fazla in enumerate(olaylar[sirada:], start=len(yuvalar) + 1):
-        if fazla["_atlandi"]:
-            continue
+    # Şablondan fazla kayıt girildiyse (anne 4. uykuyu da kaydetti) zincire ekle
+    # — ama BANDIN ÜST SINIRINA kadar (denetim B3). Tavanı aşan kayıtlar blok
+    # olmaz: 14 aylık bebeğe 4 gündüz uykusu çizmek "aynı uykuyu birkaç kez
+    # kaydettim" hatasını plana taşımaktır. Tavan aşılırsa önce tahmini/açık
+    # kayıtlar düşer, sonra en geç olanlar.
+    fazlalar = [f for f in olaylar[sirada:] if not f["_atlandi"]]
+    _ust = None
+    if bant is not None and not bant.get("gunduz_uyku_sayisi_ust_acik"):
+        _ust = int((bant.get("gunduz_uyku_sayisi") or [0, 0])[-1] or 0) or None
+    if _ust is not None:
+        _yer = max(0, _ust - len(yuvalar))
+        if len(fazlalar) > _yer:
+            _tercih = sorted(fazlalar, key=lambda f: (
+                bool(f.get("_devam") or f.get("_otomatik_kapandi")), f["bas_dk"]))
+            _kalan = {id(f) for f in _tercih[:_yer]}
+            fazlalar = [f for f in fazlalar if id(f) in _kalan]
+            uyarilar.append(CAKISAN_KAYIT_UYARISI)
+    for j, fazla in enumerate(fazlalar, start=len(yuvalar) + 1):
         bit = (fazla["bit_dk_lin"] if fazla.get("bit_dk_lin") is not None
                else fazla["bas_dk"] + 30)
         _fazla_blok = {"key": f"nap_{j}", "type": "nap",
@@ -1541,9 +1613,19 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
 
     # --- v1.4: ŞEKERLEME (K9 + K10.3 tek mekanizma) --------------------------
     # Gündüz toplamı bandın minimumunu tutmuyorsa günün SONUNA ilave uyku.
-    bloklar, sekerleme_bilgi, sek_uyari = _sekerleme_yerlestir(
-        bloklar, bant, cursor, ww, yatma_lo, yatma_hi, now_minute)
-    uyarilar.extend(sek_uyari)
+    # DENETİM B3: bitişi BİLİNMEYEN bir uyku varsa (açık ya da K17 ile tahminen
+    # kapatılmış) gündüz açığı HESAPLANAMAZ — açık, uydurulmuş bir bitişe
+    # dayanırdı. Şekerleme eklenmez; anneden bitiş saati istenir.
+    acik_uyku = any(not o["_atlandi"] and (
+        (o.get("_devam") and o.get("bit_dk") is None)
+        or o.get("_otomatik_kapandi") == "bayat") for o in olaylar)
+    if acik_uyku:
+        sekerleme_bilgi = None
+        uyarilar.append(ACIK_UYKU_UYARISI)
+    else:
+        bloklar, sekerleme_bilgi, sek_uyari = _sekerleme_yerlestir(
+            bloklar, bant, cursor, ww, yatma_lo, yatma_hi, now_minute)
+        uyarilar.extend(sek_uyari)
     # ŞEKERLEME ZİNCİR HALKASI DEĞİLDİR: `cursor` ilerletilmez. İlayda:
     # "30 dakika uyutup kalktıktan sonra ÜÇ SAAT SONRA BİLE gece uykusuna
     # geçirebiliyoruz." Şekerlemeden sonra tam uyanıklık penceresi dayatmak
@@ -1584,7 +1666,8 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
         # ("bebeğiniz saat kaçta uyandı?") bu değere bakarak gösterir.
         # 'kayit' ve 'erken_uyanma' kayıttan gelir, soru gösterilmez.
         "siradaki_blok": siradaki_blok_bilgisi(schedule, now_minute,
-                                               sabah["kaynak"]),
+                                               sabah["kaynak"],
+                                               acik_uyku=acik_uyku),
         # K10.6 — erken uyanma izi; erken uyanma yoksa None.
         "erken_uyanma": sabah.get("erken_uyanma"),
         # v1.4 — şekerleme eklendiyse gerekçesi ve süresi (mobil kartı bunu
@@ -1770,7 +1853,8 @@ def _gercekten_kapandi(blok: dict) -> bool:
 
 
 def siradaki_blok_bilgisi(cizelge: list[dict], now_minute: int,
-                          sabah_kaynak: str | None) -> dict | None:
+                          sabah_kaynak: str | None,
+                          acik_uyku: bool = False) -> dict | None:
     """`adaptation.siradaki_blok` gövdesi. Gün bittiyse None.
 
     guven "kesin" YALNIZ iki koşul birden sağlanırsa:
@@ -1797,6 +1881,10 @@ def siradaki_blok_bilgisi(cizelge: list[dict], now_minute: int,
     if sabah_kaynak == "varsayilan":       # K6 — hiç uyanma kaydı yok
         eksik = "sabah_uyanisi"
     elif onceki is not None and not _gercekten_kapandi(onceki):
+        eksik = "son_uyku_bitisi"
+    elif acik_uyku:
+        # Bitişi bilinmeyen uyku çizelgede blok olmamış olabilir (bant tavanını
+        # aşan tahmini kayıt) — yine de günün geri kalanı ona bağlı.
         eksik = "son_uyku_bitisi"
 
     return {

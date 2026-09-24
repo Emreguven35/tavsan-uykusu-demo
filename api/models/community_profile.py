@@ -32,5 +32,9 @@ class CommunityProfile(Base, TimestampMixin):
     rules_accepted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
 
-    is_expert: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)   # İlayda/uzman rozeti
+    # "Uzman" rozeti YALNIZ gerçek, doğrulanmış uzmanda (şimdilik İlayda).
+    is_expert: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # "Resmi" rozeti — Tavşan Uykusu Ekibi hesabı (denetim B3: kurgusal isimli
+    # tohum hesaplarının içeriği buraya taşındı; kurgu anne/uzman yok).
+    is_official: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_moderator: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
