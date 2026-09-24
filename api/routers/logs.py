@@ -48,6 +48,7 @@ from api.services import plan_adapter
 from api.services.plan_adapter import (
     TZ_OFFSET_MIN, UYKU_ETIKETLERI, uyku_sinifi_ham,
 )
+from api.zaman import bugun_tr, tr_gun_araligi, tr_gunu
 from engine import yas_bantlari
 from engine.parameter_engine import hesapla_yas_ay
 
@@ -462,8 +463,7 @@ def _plani_tazele(db: Session, user: User, baby_ids: set) -> bool:
         # Burada elemek, aynı bebek için batch ile GET /plans/today'in FARKLI
         # plan üretmesi demek olurdu — ikisi tek kod yolunu paylaşmalı.
         try:
-            onceki = plan_service.plan_for_date(
-                db, user, baby, datetime.now(timezone.utc).date())
+            onceki = plan_service.plan_for_date(db, user, baby, bugun_tr())
             onceki_sched = (onceki.content or {}).get("schedule") if onceki else None
             plan = plan_service.ensure_today_plan(db, user, baby)
         except Exception:                      # PlanError dahil → kayıt yine kabul
@@ -587,11 +587,12 @@ def weekly_summary(
     if baby is None or baby.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bebek bulunamadı")
 
-    today = datetime.now(timezone.utc).date()
+    today = bugun_tr()
     start = week_start if week_start is not None else today - timedelta(days=6)
     end = start + timedelta(days=6)
-    start_dt = datetime.combine(start, time.min, tzinfo=timezone.utc)
-    end_dt = datetime.combine(end, time.max, tzinfo=timezone.utc)
+    # B6: günler Türkiye günüdür (UTC gün sınırı 03:00 TR'de kesiyordu).
+    start_dt = tr_gun_araligi(start)[0]
+    end_dt = tr_gun_araligi(end)[1]
 
     # Bir GÜN ÖNCESİNDEN başla: gece uykusu dün akşam başlayıp bu sabah
     # bittiği için o kayıt da gerekli (motor gece uykusunu BİTTİĞİ güne bağlar).
@@ -638,7 +639,7 @@ def weekly_summary(
     # Beslenme kayıtları motorun çizelgesine girmiyor; ham sayılır.
     for r in rows:
         if r.type == "feed":
-            g = _as_utc(r.started_at).date()
+            g = tr_gunu(r.started_at)
             if start <= g <= end:
                 buckets[g]["night_feeds"] += 1
 

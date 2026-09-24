@@ -46,6 +46,12 @@ class YenidoganHatasi(RuntimeError):
 # =============================================================================
 # Tablo erişimi
 # =============================================================================
+
+def _bugun_tr():
+    """B6 — Türkiye günü (konteyner saati UTC)."""
+    from api.zaman import bugun_tr
+    return bugun_tr()
+
 def _bolum() -> dict:
     bolum = yas_bantlari.tablo().get("yenidogan_ritim")
     # Faz P: alt_bantlar artık bu bölümde DEĞİL, 0-3 ay bandının içinde.
@@ -109,7 +115,7 @@ def egitim_uygunluk_tarihi(dogum_tarihi: str | date, duzeltilmis_ay: float,
     Prematürede düzeltilmiş yaş takvim yaşından geri olduğu için tarih İLERİ
     kayar; hesap doğrudan düzeltilmiş yaş farkından yapılır, doğum tarihine
     5 ay eklemekle DEĞİL."""
-    bugun = bugun or date.today()
+    bugun = bugun or _bugun_tr()
     kalan_ay = max(0.0, EGITIM_ALT_SINIRI_AY - float(duzeltilmis_ay))
     kalan_gun = int(round(kalan_ay * GUN_PER_AY))
     return {
@@ -163,7 +169,7 @@ def atak_durumu(dogum_tarihi: str | date, dogum_haftasi: int = 40,
     profilde var ve prematüre kayması TDT ile doğrudan modellenir. Hesap
     deterministiktir, LLM'e sorulmaz. Kullanıcıya GÖSTERİLİP gösterilmeyeceği
     ayrı bir karardır — bkz. FAZ_0_3_RAPORU.md."""
-    bugun = bugun or date.today()
+    bugun = bugun or _bugun_tr()
     tdt = tahmini_dogum_tarihi(dogum_tarihi, dogum_haftasi)
     hafta = (bugun - tdt).days / 7.0
 

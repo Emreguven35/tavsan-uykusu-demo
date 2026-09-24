@@ -50,7 +50,8 @@ muhurle()                                    # canlı Sonnet YOK (Faz 4)
 Base.metadata.create_all(bind=engine)
 client = TestClient(app)
 TZ = pa.TZ_OFFSET_MIN
-TODAY = datetime.now(timezone.utc).date()
+from api.zaman import bugun_tr  # noqa: E402
+TODAY = bugun_tr()  # B6: sunucu günü Türkiye günü
 
 # v1.4 — kart metni TEK. Eskiden beyan/ölçüm için iki ayrı metin vardı;
 # İlayda (S6) "sayı değil" dediği için ortalama cümlesi kalktı.

@@ -49,12 +49,11 @@ def _ucretsiz_kalan(db: Session, user: User) -> int | None:
     premium, _k = premium_karari(db, user)
     if not erisim.kilitli_mi("sor", premium):
         return None
-    tr = timezone(timedelta(hours=3))
-    simdi_tr = datetime.now(tr)
-    gun_basi = simdi_tr.replace(hour=0, minute=0, second=0, microsecond=0)
+    from api.zaman import bugun_tr, tr_gun_araligi
+    gun_basi, _ = tr_gun_araligi(bugun_tr())
     sorulan = (db.query(ChatMessage)
                .filter(ChatMessage.user_id == user.id, ChatMessage.role == "user",
-                       ChatMessage.created_at >= gun_basi.astimezone(timezone.utc))
+                       ChatMessage.created_at >= gun_basi)
                .count())
     return SOR_GUNLUK_UCRETSIZ - sorulan
 

@@ -54,7 +54,7 @@ logger = logging.getLogger("tavsan.plan_adapter")
 # bağlamı, "yeterince uyuyor mu"). Gün planı buna BAKMAZ — v2'de plan yalnız
 # BUGÜNÜN kayıtlarından hesaplanır (K2).
 LOOKBACK_DAYS = 3
-TZ_OFFSET_MIN = 180             # UTC+3 (Europe/Istanbul)
+from api.zaman import TZ_OFFSET_MIN, bugun_tr  # noqa: E402 — UTC+3, TEK kaynak (B6)
 
 # K5 + K10 — Sabah uyanışı tespiti.
 # Sabah uyanışı = günün SON uyanışıdır (ilk gündüz uykusundan önceki). Saat
@@ -1367,7 +1367,7 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
     Dönen: {"schedule": [...], "adaptation": {...}}
     """
     sablon = normalize_schedule(schedule_template)
-    gun = gun or datetime.now(timezone.utc).date()
+    gun = gun or bugun_tr()
 
     # --- Uyanıklık penceresi -------------------------------------------------
     # ÖNCELİK ŞABLONDUR. Şablon, üretildiği andaki pencereyi zaten kodluyor
@@ -2059,7 +2059,7 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
     onun yerine BUGÜNÜN uyanışı `gunun_uyanisi` alanında döner (K5).
 
     Değer hesaplanamıyorsa ilgili alan None (çağıran karar verir)."""
-    today = today or datetime.now(timezone.utc).date()
+    today = today or bugun_tr()
     start = today - timedelta(days=lookback_days - 1)
 
     bed_by_day: dict[date, int] = {}
@@ -2206,7 +2206,7 @@ def egitim_gunu(training_started_at: date | None,
     """Eğitimin kaçıncı günündeyiz (1'den başlar). Başlangıç yoksa None."""
     if training_started_at is None:
         return None
-    today = today or datetime.now(timezone.utc).date()
+    today = today or bugun_tr()
     return (today - training_started_at).days + 1
 
 
@@ -2252,7 +2252,7 @@ def detect_regression(training_completed_at: date | None, log_summary: dict,
 
     Dönen: (regression_detected, sebepler). Hiçbir şey otomatik üretilmez —
     karar kullanıcınındır (mobil "Programı baştan başlatalım mı?" kartı)."""
-    today = today or datetime.now(timezone.utc).date()
+    today = today or bugun_tr()
     reasons: list[str] = []
 
     if training_completed_at is None:
@@ -2391,7 +2391,7 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
       reasons: [str],
     }
     """
-    today = today or datetime.now(timezone.utc).date()
+    today = today or bugun_tr()
     if now_minute is None:
         now_minute = _simdi_dakika(today)
     logs = list(logs or [])
@@ -2516,7 +2516,8 @@ def _simdi_dakika(gun: date, tz_offset_min: int = TZ_OFFSET_MIN) -> int:
     """`gun` için "şu an" yerel dakikası — K6'nın 'zamanı geçti mi' ölçütü.
 
     Geçmiş gün → 1439 (gün bitti), gelecek gün → 0 (hiçbir blok geçmedi)."""
-    simdi = datetime.now(timezone.utc) + timedelta(minutes=tz_offset_min)
+    from api.zaman import simdi_utc
+    simdi = simdi_utc() + timedelta(minutes=tz_offset_min)
     bugun = simdi.date()
     if gun < bugun:
         return 24 * 60 - 1

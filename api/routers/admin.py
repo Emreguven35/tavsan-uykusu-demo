@@ -18,6 +18,7 @@ from sqlalchemy import Integer, func
 from sqlalchemy.orm import Session
 
 from api.config import GUNLUK_MALIYET_ESIGI_USD
+from api.zaman import tr_gunu
 from api.db import get_db
 from api.deps import get_current_user, require_admin
 from api.models import ApiUsage, ChatMessage, CommunityProfile, User
@@ -71,7 +72,7 @@ def _gunluk(db: Session, bas, bit) -> list[GunItem]:
     for olusma, tutar in rows:
         if olusma is None:
             continue
-        g = olusma.date()
+        g = tr_gunu(olusma)
         h = kova.setdefault(g, [0.0, 0])
         h[0] += float(tutar or 0.0)
         h[1] += 1
@@ -133,7 +134,8 @@ def usage_raporu(db: Session = Depends(get_db),
                                        pattern="^(day|operation|service)$")):
     _require_moderator(db, user)
 
-    bugun = datetime.now(timezone.utc).date()
+    from api.zaman import bugun_tr
+    bugun = bugun_tr()
     bitis = bitis or bugun
     baslangic = baslangic or (bitis - timedelta(days=VARSAYILAN_GUN - 1))
     if baslangic > bitis:

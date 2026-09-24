@@ -59,7 +59,8 @@ def anlik_goruntu(db: Session, user: User, baby: Baby, an: datetime) -> dict:
     from api.services import education
 
     an = _utc(an)
-    yerel_gun = (an + timedelta(minutes=plan_adapter.TZ_OFFSET_MIN)).date()
+    from api.zaman import tr_gunu
+    yerel_gun = tr_gunu(an)
     plan = (plan_service.plan_for_date(db, user, baby, an.date())
             or plan_service.latest_plan(db, user, baby))
     icerik = (plan.content or {}) if plan is not None else {}

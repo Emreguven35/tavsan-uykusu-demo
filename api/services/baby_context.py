@@ -167,7 +167,8 @@ def build_baby_context(db: Session, baby: Baby, today: date | None = None,
     Dönen None yalnız profil bile kurulamadığında (adsız, doğum tarihsiz kayıt)
     gelir; o durumda çağıran mevcut genel metodoloji davranışını sürdürür.
     """
-    today = today or (datetime.now(timezone.utc) + timedelta(minutes=tz)).date()
+    from api.zaman import bugun_tr
+    today = today or bugun_tr()
 
     # Pencere bir gün geniş: yerel gün sınırı UTC'de kayar, gece kayıtları kaçmasın.
     baslangic = datetime.combine(today - timedelta(days=LOOKBACK_DAYS),

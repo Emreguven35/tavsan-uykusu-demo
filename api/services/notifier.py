@@ -319,8 +319,9 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
     """Bir tur hatırlatma gönderimi. Test edilebilir olsun diye `now` enjekte edilir.
 
     Dönen: {'checked_plans': n, 'sent': n, 'skipped_duplicate': n}"""
-    now = now or datetime.now(timezone.utc)
-    local_now = now + timedelta(minutes=tz_offset_min)
+    from api.zaman import simdi_utc
+    now = now or simdi_utc()
+    local_now = now + timedelta(minutes=tz_offset_min)       # Türkiye günü (B6)
     today_local = local_now.date()
     now_minute = local_now.hour * 60 + local_now.minute
 

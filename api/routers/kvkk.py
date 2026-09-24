@@ -21,6 +21,7 @@ from api.db import get_db
 from api.deps import get_current_user
 from api.models import User
 from api.services import kvkk, rate_limit
+from api.zaman import bugun_tr
 
 consents_router = APIRouter(prefix="/consents", tags=["kvkk"])
 account_router = APIRouter(prefix="/account", tags=["kvkk"])
@@ -78,7 +79,7 @@ def disa_aktar(db: Session = Depends(get_db), user: User = Depends(get_current_u
     veri = kvkk.disa_aktar(db, user)
     user.son_export_at = datetime.now(timezone.utc)
     db.commit()
-    ad = f"tavsan-uykusu-verilerim-{date.today().isoformat()}.json"
+    ad = f"tavsan-uykusu-verilerim-{bugun_tr().isoformat()}.json"
     return JSONResponse(content=jsonable_encoder(veri), headers={
         "Content-Disposition": f'attachment; filename="{ad}"',
         "Cache-Control": "no-store"})

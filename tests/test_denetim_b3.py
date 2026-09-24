@@ -61,7 +61,8 @@ def check(name, cond, detail=""):
     results.append((name, bool(cond), str(detail)))
 
 
-BUGUN = datetime.now(timezone.utc).date()
+from api.zaman import bugun_tr  # noqa: E402
+BUGUN = bugun_tr()  # B6: sunucu günü Türkiye günü
 TZ = pa.TZ_OFFSET_MIN
 
 

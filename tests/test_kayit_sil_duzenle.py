@@ -49,6 +49,7 @@ import api.models                                           # noqa: E402,F401
 from api.models import SilinenSleepLog, SleepLog            # noqa: E402
 from api.main import app                                    # noqa: E402
 from api.routers import logs as logs_router                 # noqa: E402
+from api.zaman import bugun_tr                              # noqa: E402
 
 from tests.llm_muhuru import muhurle, TAM_PROFIL                        # noqa: E402
 muhurle()
@@ -244,7 +245,7 @@ check("PL2) PATCH planı yeniden hesaplattı",
 # bitiş kayınca uyanış kaymalı, DELETE ile kayıt gidince eski hâle dönmeli.
 H3, BID3 = hesap("plan@test.com")
 client.patch(f"/api/v1/babies/{BID3}", headers=H3,
-             json={"training_started_at": (SIMDI.date() - timedelta(days=4)).isoformat()})
+             json={"training_started_at": (bugun_tr() - timedelta(days=4)).isoformat()})
 _gen = client.post("/api/v1/plans/generate?sync=true", headers=H3,
                    json={"baby_id": BID3})
 check("PL3) Plan üretildi (fallback)", _gen.status_code == 201
@@ -262,7 +263,7 @@ def uyanis() -> str | None:
 
 def yerel(gun_farki: int, dk: int) -> datetime:
     """Yerel (UTC+3) gün + dakika → UTC."""
-    g = SIMDI.date() + timedelta(days=gun_farki)
+    g = bugun_tr() + timedelta(days=gun_farki)            # B6: Türkiye günü
     return (datetime(g.year, g.month, g.day, tzinfo=timezone.utc)
             + timedelta(minutes=dk - 180))
 

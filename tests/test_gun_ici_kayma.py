@@ -96,7 +96,8 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 # Ortak kurulum — 8 aylık bebek, 13 günlük programın 5. günü
 # =============================================================================
 TZ = pa.TZ_OFFSET_MIN
-TODAY = datetime.now(timezone.utc).date()
+from api.zaman import bugun_tr  # noqa: E402
+TODAY = bugun_tr()  # B6: sunucu günü Türkiye günü
 YAS_GUN = 243                                    # ≈ 8.0 ay
 
 

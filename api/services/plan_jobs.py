@@ -237,7 +237,8 @@ def run_generation(job_id: str, baby_id, req_overrides, dogum_haftasi,
         # buradan cevaplayabilir; iş sözlüğü istek bitince kaybolur.
         if ek_icerik:
             content.update(ek_icerik)
-        today = datetime.now(timezone.utc).date()
+        from api.zaman import bugun_tr
+        today = bugun_tr()                              # B6: Türkiye günü
         plan = plan_service.upsert_plan(db, user, baby, today, content)
         _set(job_id, status=STATUS_DONE, plan_id=str(plan.id))
         logger.info("Plan job tamam: job=%s plan=%s baby=%s (%s)",

@@ -469,7 +469,8 @@ def rapor_yaz(db: Session, gun: date) -> tuple[Path, str, int]:
 
 
 def dun() -> date:
-    return (datetime.now(timezone.utc) + timedelta(minutes=TZ)).date() - timedelta(days=1)
+    from api.zaman import bugun_tr
+    return bugun_tr() - timedelta(days=1)
 
 
 def _tek_worker(is_fn) -> None:

@@ -27,6 +27,7 @@ from api.schemas.plan import (
     RegresyonCevapReq, RegresyonCevapResp,
 )
 from api.services import plan_adapter, plan_jobs, plan_service
+from api.zaman import bugun_tr, tr_gunu
 
 logger = logging.getLogger("tavsan.plans")
 router = APIRouter(prefix="/plans", tags=["plans"])
@@ -104,7 +105,7 @@ def generate_plan(req: PlanGenerateReq,
             logger.warning("Plan üretimi başarısız (baby=%s): %s", baby.id, e)
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
                                 detail=f"Plan üretilemedi: {e}")
-        today = datetime.now(timezone.utc).date()
+        today = bugun_tr()                               # B6: Türkiye günü
         plan = plan_service.upsert_plan(db, user, baby, today, content)
         logger.info("Plan üretildi (sync): plan_id=%s baby=%s (%s)",
                     plan.id, baby.id, content["generated_with"])
@@ -151,7 +152,7 @@ def adapt_plan(baby_id: uuid.UUID = Query(...), db: Session = Depends(get_db),
 
     409: son 3 günde hiç kayıt yoksa ya da adapte edilecek bir plan yoksa."""
     baby = get_owned_baby(baby_id, db, user)
-    today = datetime.now(timezone.utc).date()
+    today = bugun_tr()
 
     base_plan = plan_service.latest_plan(db, user, baby)
     if base_plan is None:
@@ -213,7 +214,7 @@ def regresyon_cevapla(req: RegresyonCevapReq,
     db.commit()
     db.refresh(baby)
 
-    today = simdi.date()
+    today = tr_gunu(simdi)
     kart = plan_adapter.regresyon_karti(
         baby.training_started_at, plan_service.regresyon_cevabi(baby, today),
         today)

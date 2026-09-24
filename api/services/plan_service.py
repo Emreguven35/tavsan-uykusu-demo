@@ -24,6 +24,7 @@ from api.db import upsert
 from api.models import Baby, SleepLog, SleepPlan, User
 from api.services import plan_adapter
 from api.services import usage
+from api.zaman import bugun_tr
 from engine import plan_generator, plan_gunleri, yas_bantlari, yenidogan
 from engine.parameter_engine import (
     egitim_uygunlugu_kontrol, hesapla_yas_ay, ilk_tam_sayi, load_kb,
@@ -229,7 +230,7 @@ def dogum_tarihi_hatasi(dogum: date | None, bugun: date | None = None) -> str | 
     reddedilir (prod'da 77 aylık görünen bir bebek vardı — yanlış giriş)."""
     if dogum is None:
         return None
-    bugun = bugun or datetime.now(timezone.utc).date()
+    bugun = bugun or bugun_tr()
     if dogum > bugun:
         return ("Doğum tarihi ileri bir tarih olamaz. Lütfen bebeğinizin doğum "
                 "tarihini kontrol edin.")
@@ -1029,7 +1030,7 @@ def egitim_baslangicini_tamamla(db: Session, baby: Baby) -> date:
         if tip_turet(p.content or {}) == TYPE_EGITIM:
             ilk = p.plan_date
             break
-    baby.training_started_at = ilk or datetime.now(timezone.utc).date()
+    baby.training_started_at = ilk or bugun_tr()
     db.commit()
     logger.info("training_started_at tamamlandı: baby=%s → %s",
                 baby.id, baby.training_started_at)
@@ -1072,7 +1073,7 @@ def egitim_gecisini_baslat(db: Session, user: User, baby: Baby,
         logger.info("5 ay geçişi: eğitim planı üretimi başlatıldı "
                     "baby=%s job=%s", baby.id, job_id)
     if baby.training_started_at is None:
-        baby.training_started_at = datetime.now(timezone.utc).date()
+        baby.training_started_at = bugun_tr()
         db.commit()
     # Mobil bu iki bayrakla "program hazırlanıyor" ekranını gösterir; içerik
     # hâlâ eski önizleme planıdır, bir sonraki GET gerçek planı getirir.
@@ -1082,7 +1083,7 @@ def egitim_gecisini_baslat(db: Session, user: User, baby: Baby,
     # türetilir. Bu satırlar olmadan anne, plan hazırlanırken hâlâ "4.5 aylık,
     # eğitim uygun değil" uyarısını görüyordu (üretim anındaki donmuş metin).
     if baby.birth_date is not None:
-        turetilmis = uyarilari_turet(baby, [], datetime.now(timezone.utc).date(),
+        turetilmis = uyarilari_turet(baby, [], bugun_tr(),
                                      icerik.get("dogum_haftasi"))
         icerik["uyarilar"] = turetilmis["uyarilar"]
         icerik["uygun_mu"] = turetilmis["uygun_mu"]
@@ -1106,7 +1107,7 @@ def ensure_today_plan(db: Session, user: User, baby: Baby,
 
     Zamanlayıcı da bunu çağırır: kullanıcı uygulamayı hiç açmasa bile bildirim
     güncel hesaplanmış saate göre gider."""
-    today = today or datetime.now(timezone.utc).date()
+    today = today or bugun_tr()
     bugunku = plan_for_date(db, user, baby, today)
 
     base_plan = bugunku or latest_plan(db, user, baby)

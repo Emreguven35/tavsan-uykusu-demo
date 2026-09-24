@@ -71,7 +71,8 @@ def hesapla_yas_ay(dogum_tarihi: str, dogum_haftasi: int = 40) -> dict:
     Prematüre ise: her 4 hafta erkenlik = 1 ay geri (kayıt40 kuralı).
     """
     dt = datetime.strptime(dogum_tarihi, "%Y-%m-%d").date()
-    today = date.today()
+    from api.zaman import bugun_tr          # B6: yaş Türkiye gününe göre
+    today = bugun_tr()
     gercek_ay = max(0, (today - dt).days / 30.44)
 
     duzeltilmis_ay = gercek_ay

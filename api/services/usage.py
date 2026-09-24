@@ -140,7 +140,8 @@ _gun_durumu: dict[str, Any] = {"gun": None, "toplam": 0.0, "uyarildi": False}
 
 
 def _esik_kontrol(db, tutar: float) -> None:
-    bugun = datetime.now(timezone.utc).date()
+    from api.zaman import bugun_tr, tr_gun_araligi
+    bugun = bugun_tr()
     if _gun_durumu["gun"] != bugun:
         _gun_durumu.update(gun=bugun, toplam=_gunun_toplami(db, bugun), uyarildi=False)
     _gun_durumu["toplam"] += tutar
