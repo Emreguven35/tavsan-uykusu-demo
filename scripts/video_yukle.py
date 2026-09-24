@@ -66,13 +66,16 @@ def _railway(komut: str, girdi: bytes | None = None,
                           capture_output=True, timeout=zaman_asimi)
 
 
-def _uzak_python(kod: str, zaman_asimi: int = 600) -> str:
-    """Konteynerde Python kodu çalıştır (base64 ile — tırnak cehennemi yok)."""
+def _uzak_python(kod: str, zaman_asimi: int = 600,
+                 girdi: bytes | None = None) -> str:
+    """Konteynerde Python kodu çalıştır (base64 ile — tırnak cehennemi yok).
+    Büyük veri KOMUTA gömülmez, `girdi` ile stdin'den gider: railway bir .cmd
+    kabuğu ve Windows'ta komut satırı ~8 KB'ta kesiliyor."""
     b64 = base64.b64encode(kod.encode("utf-8")).decode()
     komut = (f"{UZAK_PYTHON} -c \"import base64;"
              f"exec(compile(base64.b64decode('{b64}').decode('utf-8'),"
              f"'uzak','exec'))\"")
-    p = _railway(komut, zaman_asimi=zaman_asimi)
+    p = _railway(komut, girdi=girdi, zaman_asimi=zaman_asimi)
     cikti = (p.stdout or b"").decode("utf-8", "replace")
     if p.returncode != 0:
         hata = (p.stderr or b"").decode("utf-8", "replace")
@@ -137,14 +140,17 @@ import json, sys
 sys.path.insert(0, "/app")
 from api.db import SessionLocal
 from api.services import education
+veri = json.loads(sys.stdin.read())
 db = SessionLocal()
 try:
-    sonuc = education.katalog_upsert(db, {satirlar!r}, {sureler!r})
+    sonuc = education.katalog_upsert(db, veri["satirlar"], veri["sureler"])
 finally:
     db.close()
 print("JSON" + json.dumps(sonuc))
 '''
-    return _cikti_json(_uzak_python(kod))
+    veri = json.dumps({"satirlar": satirlar, "sureler": sureler},
+                      ensure_ascii=False).encode("utf-8")
+    return _cikti_json(_uzak_python(kod, girdi=veri))
 
 
 def _cikti_json(cikti: str) -> dict:
@@ -269,7 +275,9 @@ def main() -> int:
 
 def _kayitlara_cevir(satirlar: list[dict]) -> list[dict]:
     """CSV satırı → katalog_upsert'ün beklediği biçim."""
-    from api.services.education import GENEL
+    # education.GENEL ile aynı. O modülü içe aktarmak api.db → config'i
+    # yükler ve Railway modunda gereksiz yerel JWT_SECRET ister.
+    GENEL = "genel"
     out = []
     for s in satirlar:
         out.append({
