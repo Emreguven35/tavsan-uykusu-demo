@@ -84,6 +84,15 @@ def _planlanan_yatis(plan: SleepPlan | None) -> int | None:
     return None
 
 
+def _sirala(ikili: tuple[int, int | None]) -> tuple[int, int]:
+    """(saat, bitiş/süre) sıralama anahtarı — ikinci alan None olabilir.
+
+    2026-09-25: aynı dakikada başlayan biri AÇIK biri KAPALI iki kayıt
+    (sayaç + elle giriş) düz `sorted()` ile int/None karşılaştırmasına düştü;
+    TypeError bağlamı, bağlam da bütün Sor cevabını 500'e düşürdü."""
+    return ikili[0], -1 if ikili[1] is None else ikili[1]
+
+
 def _gun_ozeti(gun_etiket: str, kayitlar: list[SleepLog], tz: int,
                planlanan_yatis: int | None) -> str | None:
     """Bir günün kayıtlarını tek cümlelik özete indir."""
@@ -117,13 +126,14 @@ def _gun_ozeti(gun_etiket: str, kayitlar: list[SleepLog], tz: int,
 
     if uyanmalar:
         detay = ", ".join(
-            _ss(saat) + (f", {sure}dk" if sure else "") for saat, sure in sorted(uyanmalar))
+            _ss(saat) + (f", {sure}dk" if sure else "")
+            for saat, sure in sorted(uyanmalar, key=_sirala))
         parcalar.append(f"gece uyanma {len(uyanmalar)} kez ({detay})")
 
     if sekerlemeler:
         detay = ", ".join(
             _ss(bas) + (f"-{_ss(bit)}" if bit is not None else "")
-            for bas, bit in sorted(sekerlemeler))
+            for bas, bit in sorted(sekerlemeler, key=_sirala))
         parcalar.append(f"şekerleme {len(sekerlemeler)} ({detay})")
 
     if not parcalar:

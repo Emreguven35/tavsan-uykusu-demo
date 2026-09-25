@@ -84,8 +84,17 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     # anneye ilk soruda "adını ve kaç aylık olduğunu yazın" dedirtiyordu.
     ctx = None
     if req.baby_id is not None:
-        baby = get_owned_baby(req.baby_id, db, user)
-        ctx = baby_ctx.build_baby_context(db, baby)
+        baby = get_owned_baby(req.baby_id, db, user)      # sahiplik 404'ü korunur
+        # Bağlam bir EKTİR: kurulamazsa soru bağlamsız cevaplanır, hata loglanır.
+        # 2026-09-25: tek bir kayıt çiftindeki TypeError bir annenin bütün
+        # sorularını gün boyu 500'e düşürdü ("şu an yanıt veremedi").
+        try:
+            ctx = baby_ctx.build_baby_context(db, baby)
+        except Exception:
+            logger.exception("Sohbet bağlamı kurulamadı, bağlamsız devam "
+                             "(baby=%s)", baby.id)
+            db.rollback()
+            ctx = None
         # ctx yalnız profil bile kurulamazsa None döner → genel davranış korunur.
 
     # Mevcut RAG + cache motoru (yeniden yazılmadı — import edildi).

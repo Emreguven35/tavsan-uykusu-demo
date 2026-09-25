@@ -486,6 +486,7 @@ def _tek_worker(is_fn) -> None:
             if not conn.execute(text("SELECT pg_try_advisory_lock(:k)"),
                                 {"k": KILIT_ID}).scalar():
                 conn.close()
+                conn = None          # kilit bizde değil → finally açmaya çalışmasın
                 return
         is_fn()
     except Exception:
