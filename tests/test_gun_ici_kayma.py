@@ -122,6 +122,11 @@ BID = client.post("/api/v1/babies", headers=H,
 client.patch(f"/api/v1/babies/{BID}", headers=H,
              json={"training_started_at": (TODAY - timedelta(days=4)).isoformat()})
 
+# Bu suite zincir MEKANİĞİNİ 07:00 şablonla ölçüyor (D: 05:00 erken uyanış,
+# L: "ŞABLON hâlâ 07:00"). v1.5'te 8 aylığın yeni şablon hedefi 06:00 oldu
+# (İlayda 3. cevaplar S4) — senaryolar anlamını korusun diye hedef 07:00'a
+# sabitlenir. Yaşa göre hedefin kendisi test_gercek_gun'da ölçülür.
+pa.sabah_hedefi_dk = lambda *_a, **_k: 7 * 60
 _gen = client.post("/api/v1/plans/generate?sync=true", headers=H,
                    json={"baby_id": BID})
 assert _gen.status_code == 201, _gen.text
@@ -158,9 +163,13 @@ def zincir(baslangic: int, nap_sayisi: int = None, sureler=None) -> list[int]:
     return out
 
 
+MUTLAK_TAVAN = yas_bantlari.gece_yatisi_mutlak_tavan()      # 24:00 (v1.5)
+
+
 def beklenen_yatis(son_uyku_bitisi: int) -> int:
-    """K4 — yatış = son uyku bitişi + pencere, bandın aralığına kırpılmış."""
-    return max(YATMA_LO, min(YATMA_HI, son_uyku_bitisi + WW))
+    """K4 v1.5 — yatış = son uyku bitişi + pencere. Bandın ALT ucuna çekilir;
+    üst ucu artık tavan değil (İlayda 3. cevaplar S3), yalnız 24:00 aşılamaz."""
+    return max(YATMA_LO, min(MUTLAK_TAVAN, son_uyku_bitisi + WW))
 
 
 # =============================================================================
@@ -825,9 +834,9 @@ def test_l_birikme_yok():
           len(set(uyanislar)) == 1 and uyanislar[0] == hhmm(gerc), uyanislar)
     check("L · 5 günün hepsinde yatış aynı, geceye kaymıyor",
           len(set(yatislar)) == 1 and yatislar[0] == bek_yatis, yatislar)
-    check("L · yatış bandın tavanını aşmadı",
-          max(YATMA_LO, min(YATMA_HI, zincir(gerc)[-1] + NAP_SURE + WW)) <= YATMA_HI,
-          f"tavan={hhmm(YATMA_HI)}")
+    check("L · yatış mutlak tavanı (24:00) aşmadı",
+          beklenen_yatis(zincir(gerc)[-1] + NAP_SURE) <= MUTLAK_TAVAN,
+          f"tavan={hhmm(MUTLAK_TAVAN)}")
     db = SessionLocal()
     row = _baby_row(db)
     son = plan_service.plan_for_date(db, row.user, row, TODAY + timedelta(days=4))
@@ -850,15 +859,26 @@ def test_m_yatis_tavani():
                 nap(row, TODAY, gec_bas)]
     kur(loglar)
     c, s = bugun(now_minute=gec_bit + 5)
-    check("M · ham yatış tavanı aşıyordu",
+    # v1.5 (İlayda 3. cevaplar S3): bant üst ucu aşılır, 24:00 aşılmaz.
+    check("M · ham yatış bant üst ucunu aşıyordu",
           gec_bit + WW > YATMA_HI, f"{hhmm(gec_bit + WW)} > {hhmm(YATMA_HI)}")
-    bekle("M", s, "bedtime", YATMA_HI, "tavana kırpıldı")
-    check("M · 'en geç saate denk geldi' uyarısı var",
-          any("en geç saate denk geldi" in u for u in c["adaptation"]["uyarilar"]),
+    bekle("M", s, "bedtime", gec_bit + WW, "bant üst ucu aşıldı (kırpılmadı)")
+    check("M · 'alışma evresine özgü' uyarısı ve gec_yatis izi var",
+          any("alışma evresine özgü" in u for u in c["adaptation"]["uyarilar"])
+          and (s["bedtime"].get("gec_yatis") or {}).get("bant_ust") == hhmm(YATMA_HI),
           c["adaptation"]["uyarilar"])
-    check("M · gece uykusu bandın minimumunun altına düşmedi",
-          s["bedtime"].get("gece_uykusu_dk", 0) >= GECE_LO,
-          f'{s["bedtime"].get("gece_uykusu_dk")} >= {GECE_LO}')
+
+    # M2 — son uyku gece yarısına dayanırsa yatış 24:00'e kırpılır. Kayıt
+    # zinciriyle bu güne varmak bant sınırları yüzünden zor; kural doğrudan
+    # yatış yerleştiricisinde ölçülür.
+    _bl = [{"key": "nap_3", "type": "nap", "start_minute": 22 * 60,
+            "end_minute": 22 * 60 + 50, "kaynak": "kayit"}]
+    _bl, _y, _u = pa._yatisi_yerlestir(_bl, 22 * 60 + 50, WW, YATMA_LO, YATMA_HI,
+                                        W, 23 * 60, mutlak_tavan=MUTLAK_TAVAN)
+    check("M2 · bedtime = 24:00'e kırpıldı",
+          _y["start_minute"] == MUTLAK_TAVAN, hhmm(_y["start_minute"]))
+    check("M2 · 'gece yarısını geçemeyeceği' uyarısı var",
+          any("gece yarısını geçemeyeceği" in u for u in _u), _u)
 
 
 # =============================================================================

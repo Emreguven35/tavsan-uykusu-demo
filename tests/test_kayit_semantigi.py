@@ -273,10 +273,11 @@ check("W2f) 14,5 aylık bant: 2 gündüz uykusu (tablo ile tutarlı)",
 
 
 # =============================================================================
-# W3 — sıfır süreli `sleep` yok sayılır (K12.1)
+# W3 — sıfır süreli `sleep` yok sayılır (K12.1) — 04:00-12:00 DIŞINDA.
+# 04:00-12:00 arası sıfır süreli uyku sabah sorusunun cevabıdır (K12.5, W3f+).
 # =============================================================================
 w3 = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, S8.wake),
-                 L("sleep", TODAY, 9 * 60, TODAY, 9 * 60)])     # 09:00-09:00
+                 L("sleep", TODAY, 14 * 60, TODAY, 14 * 60)])   # 14:00-14:00
 _sifir = [y for y in w3["adaptation"]["yok_sayilan_kayitlar"]
           if y.get("kod") == "sifir_sure"]
 check("W3a) Sıfır süreli kayıt yok_sayilan_kayitlar'a yazıldı",
@@ -288,9 +289,25 @@ check("W3c) Sıfır uzunluklu nap bloğu ÜRETİLMEDİ",
       not any(b["start_minute"] == b["end_minute"] for b in naplar(w3)),
       str([(b["key"], hhmm(b["start_minute"]), hhmm(b["end_minute"]))
            for b in naplar(w3)]))
-check("W3d) Zincir 09:00'dan BAŞLAMADI — plan şablonla aynı",
+check("W3d) Zincir 14:00'ten BAŞLAMADI — plan şablonla aynı",
       {b["key"]: b["start_minute"] for b in w3["schedule"]} == _tpl8,
       str({b["key"]: hhmm(b["start_minute"]) for b in w3["schedule"]}))
+
+# K12.5 — 09:00-09:00 (sabah sorusunun cevabı, build 21) artık UYANMADIR:
+# gece 07:00'de kapansa bile 09:00 daha geç ve ilk gündüz uykusundan önce →
+# SON uyanış (K10.1). yok_sayilan'a düşmez, gündüz uykusu da olmaz.
+w3f = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, S8.wake),
+                  L("sleep", TODAY, 9 * 60, TODAY, 9 * 60)])
+check("W3f) 09:00-09:00 kaydı yok_sayilan'da DEĞİL",
+      not w3f["adaptation"]["yok_sayilan_kayitlar"],
+      str(w3f["adaptation"]["yok_sayilan_kayitlar"]))
+check("W3g) Sabah uyanışı 09:00 (kaynak=kayit), gün 09:00'dan kuruldu",
+      bloklar(w3f)["wake"]["start_minute"] == 9 * 60
+      and w3f["adaptation"]["sabah_uyanis_kaynak"] == "kayit",
+      hhmm(bloklar(w3f)["wake"]["start_minute"]))
+check("W3h) Gündüz uykusu olarak sayılmadı (ilk uyku 09:00+pencere)",
+      min(b["start_minute"] for b in naplar(w3f)) > 9 * 60,
+      str([(b["key"], hhmm(b["start_minute"])) for b in naplar(w3f)]))
 
 # 5 dk altı kayıt da yuvaya eşlenmez ama izi kalır
 w3b = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, S8.wake),
@@ -448,12 +465,22 @@ try:
 finally:
     _db.close()
 
-_w7 = client.get(f"/api/v1/logs?date={TODAY.isoformat()}&baby_id={BID8}",
-                 headers=H).json()
+# K14.3 — dün başlayan açık uyku 16 saatten taze olduğu sürece listededir;
+# sorgu 07:00 TR'ye sabitlenir (9 saat 10 dk sonra).
+from api.zaman import saat_sabitle                           # noqa: E402
+with saat_sabitle(utc(TODAY, 7 * 60)):
+    _w7 = client.get(f"/api/v1/logs?date={TODAY.isoformat()}&baby_id={BID8}",
+                     headers=H).json()
+    # Aynı açık kayıt 16 saati geçince bugünün listesinden DÜŞER (K17 → liste).
+with saat_sabitle(utc(TODAY, 14 * 60)):
+    _w7_bayat = client.get(f"/api/v1/logs?date={TODAY.isoformat()}&baby_id={BID8}",
+                           headers=H).json()
 check("W7a) Açık gece uykusu BUGÜNÜN listesinde",
       len(_w7) == 1 and _w7[0]["type"] == "sleep", str(_w7)[:200])
 check("W7b) 'Sürüyor' olarak dönüyor (ended_at null)",
       bool(_w7) and _w7[0]["ended_at"] is None, str(_w7)[:200])
+check("W7e) 16 saati geçen açık kayıt bugünün listesinde YOK (K14.3)",
+      _w7_bayat == [], str(_w7_bayat)[:200])
 
 w7 = S8.hesapla([L("sleep", DUN, 21 * 60 + 50)])
 check("W7c) Motor da görüyor: açık gece uykusu kayıt olarak işlendi",

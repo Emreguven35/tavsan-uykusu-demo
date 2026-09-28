@@ -3,8 +3,9 @@ logs router — /api/v1/logs
 
 - POST /logs/batch: KAYIT BAZLI kabul/ret. Her kalem ayrı doğrulanır;
   geçerliler yazılır, geçersizler `skipped` listesinde sebebiyle döner. Yanıt
-  daima 200 — 422 yalnız gövdenin kendisi bozuksa (bkz. BatchReq). Eskiden tek
-  bozuk kayıt bütün batch'i düşürüyordu.
+  200 — 422 yalnız gövdenin kendisi bozuksa (bkz. BatchReq), 503 yalnız geçici
+  DB hatasında. Eskiden tek bozuk kayıt bütün batch'i düşürüyordu. Her ret
+  (kopya hariç) WARNING olarak loglanır.
 - POST /logs/batch: mobil SQLite sync-manager için toplu upsert. client_id ile
   idempotent: aynı (user_id, client_id) ikinci kez gelirse GÜNCELLENİR.
   client_id YOKSA (eski istemci) aynı bebek + aynı type + başlangıcı ±3 dk
@@ -13,8 +14,9 @@ logs router — /api/v1/logs
   yetmiyordu (prod'da 41 kopya çiftinin tamamında client_id'ler farklıydı).
   Ayrıca bir bebekte aynı anda EN FAZLA BİR açık kayıt bırakılır (K16.1).
 - GET /logs?from=&to=&baby_id=: tarih aralığı sorgusu (started_at'e göre).
-- GET /logs?date=YYYY-MM-DD: K14.1 "o günün kayıtları" — gece yarısını aşan ve
-  hâlâ açık olan kayıtlar da döner (bkz. _gun_filtresi).
+- GET /logs?date=YYYY-MM-DD: K14.1/K14.3 "o günün kayıtları" — gece yarısını
+  aşanlar ve dün akşamdan süren (16 saatten taze) açık uyku da döner (bkz.
+  gun_filtresi).
 - Uyku kayıtları yanıtta `kategori` + `kategori_etiket` taşır (K19.2): sınıfı
   saat belirler, istemcinin gönderdiği `type` DEĞİL.
 - GET /logs/weekly-summary: haftalık agregasyon (mobil grafikleri tüketir).
@@ -33,7 +35,7 @@ from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import ValidationError
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, not_, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -46,9 +48,9 @@ from api.schemas.log import (
 )
 from api.services import plan_adapter
 from api.services.plan_adapter import (
-    TZ_OFFSET_MIN, UYKU_ETIKETLERI, uyku_sinifi_ham,
+    ATLANDI_TIPI, TZ_OFFSET_MIN, UYKU_ETIKETLERI, sabah_cevabi_ham, uyku_sinifi_ham,
 )
-from api.zaman import bugun_tr, tr_gun_araligi, tr_gunu
+from api.zaman import bugun_tr, simdi_utc, tr_gun_araligi, tr_gunu
 from engine import yas_bantlari
 from engine.parameter_engine import hesapla_yas_ay
 
@@ -100,6 +102,14 @@ def _dogrulama_sebebi(exc: ValidationError) -> tuple[str, str]:
     return kod, metin
 
 
+def _ham_ozet(ham) -> str:
+    """Ret logu için kayıt özeti — tip ve zamanlar; not ve kimlik YOK."""
+    if not isinstance(ham, dict):
+        return f"<{type(ham).__name__}>"
+    return (f"type={ham.get('type')!r} started_at={ham.get('started_at')!r} "
+            f"ended_at={ham.get('ended_at')!r} baby={str(ham.get('baby_id'))[:8]}")
+
+
 def _client_id_oku(ham: dict) -> str | None:
     """Doğrulama patlasa bile mobilin kaydı eşleyebilmesi için client_id.
 
@@ -115,7 +125,10 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
                  user: User = Depends(get_current_user)):
     """Kayıt bazlı kabul/ret — geçerliler yazılır, geçersizler sebebiyle döner.
 
-    Yanıt DAİMA 200'dür (gövdenin kendisi bozuk değilse). Tüm kalemler geçersiz
+    Yanıt 200'dür (gövdenin kendisi bozuk değilse) — TEK İSTİSNA: bir kalem
+    GEÇİCİ bir DB hatasıyla yazılamazsa sağlamlar yazılır ve 503 döner (mobil
+    her şeyi bekleyen tutup yeniden gönderir; client_id ile idempotent).
+    Tüm kalemler geçersiz
     olsa bile 200 + hepsi `skipped` döner: mobil o kayıtları kalıcı reddedip
     kuyruktan düşürebilsin. 422 dönmek, mobili "hangisi bozuktu" diye ikili
     bölmeye zorluyordu."""
@@ -124,8 +137,17 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
     out: list[SleepLog] = []
     skipped: list[SkippedEntry] = []
     synced: list[SyncedEntry] = []
+    ret_izleri: list[tuple[str, str]] = []       # (sebep, kayıt özeti) — log için
+    _onceki_ret = 0
+    _son_ozet = ""
 
     for ham in req.logs:
+        # Bir önceki kalemde yeni ret eklendiyse izini tut (duplicate hariç).
+        for e in skipped[_onceki_ret:]:
+            if e.reason != "duplicate":
+                ret_izleri.append((f"{e.reason}: {e.detail}", _son_ozet))
+        _onceki_ret = len(skipped)
+        _son_ozet = _ham_ozet(ham)
         if not isinstance(ham, dict):
             skipped.append(SkippedEntry(
                 reason="invalid",
@@ -151,8 +173,15 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
         # ters kayıt ise listede "negatif süreli uyku" olarak görünüyordu.
         # Plan motoru ters kaydı zaten yok sayıyor (K12.1) — ama kaydı hiç
         # almamak, alıp gizlemekten dürüsttür.
-        _simdi = datetime.now(timezone.utc)
+        _simdi = simdi_utc()                     # testte dondurulabilir (B6)
         _tavan = _simdi + timedelta(minutes=GELECEK_TOLERANS_DK)
+        # K7 — "bu uykuyu atladı" bir ZAMAN KAYDI değil, bugünün planı hakkında
+        # bir beyandır: anne 13:00'te 15:00 uykusunu atlandı diye işaretleyince
+        # başlangıç (bloğun planlanan saati) gelecekte kalıyor. Bugün içinde
+        # olduğu sürece kabul edilir; yoksa mobil kaydı kalıcı "reddedildi"
+        # sayıp "Tekrar gönder"de bırakıyordu.
+        if item.type == ATLANDI_TIPI and tr_gunu(item.started_at) == bugun_tr():
+            _tavan = max(_tavan, tr_gun_araligi(bugun_tr())[1])
         if _as_utc(item.started_at) > _tavan:
             skipped.append(SkippedEntry(
                 client_id=cid, reason="invalid_time",
@@ -251,18 +280,46 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
                 client_id=cid, id=row.id, reason="duplicate",
                 detail="Bu kayıt zaten kaydedilmişti, güncellendi"))
 
+    for e in skipped[_onceki_ret:]:
+        if e.reason != "duplicate":
+            ret_izleri.append((f"{e.reason}: {e.detail}", _son_ozet))
+    # B (2026-09-28) — ret sebebi hiçbir yerde saklanmıyordu: mobil "Tekrar
+    # gönder" gösterirken sunucuda iz yoktu, teşhis tahmine kalıyordu. Her ret
+    # (kopya hariç) kişisel veri olmadan loglanır.
+    for sebep, kayit in ret_izleri:
+        logging.getLogger("tavsan.logs").warning(
+            "Batch kaydı reddedildi: user=%s %s | %s", user.id, sebep, kayit)
+
     # K13.3 — AÇIK SAYACI KAPAT. Anne sayacı başlatıp durdurmuyor, sonra aynı
     # uykuyu elle giriyor; iki kayıt iki ayrı uyku sanılıyordu. Hesap tarafı
     # (K13.1/K13.2) bunu zaten tekilleştiriyor ama kayıt DB'de açık kaldığı
     # sürece mobilde sayaç dönmeye devam ediyor. Burada TEK yazımla kapatılır.
-    timer_closed = _acik_sayaclari_kapat(db, user, out)
     # K16.1 — yeni bir AÇIK kayıt geldiyse aynı bebekteki diğer açık kayıtlar
     # kapatılır. Üç açık kaydın üçünün birden "sürüyor" sayılması gerçek vakada
     # günü 5 gündüz uykusuna çıkarıyordu.
-    if _tek_acik_kayit_birak(db, user, out):
-        timer_closed = True
+    # İkisi de YAN ETKİDİR ve kendi savepoint'inde koşar: burada bir hata
+    # yazılmış kayıtları 500 ile birlikte geri almamalı (mobil kuyruğu tıkanır).
+    timer_closed = False
+    try:
+        with db.begin_nested():
+            timer_closed = _acik_sayaclari_kapat(db, user, out)
+            if _tek_acik_kayit_birak(db, user, out):
+                timer_closed = True
+    except SQLAlchemyError:
+        timer_closed = False
+        logging.getLogger("tavsan.logs").exception(
+            "Açık sayaç kapatılamadı (user=%s) — kayıtlar yine yazılıyor", user.id)
 
     db.commit()
+
+    # db_error GEÇİCİDİR ama mobil `duplicate` dışındaki her sebebi KALICI ret
+    # sayıyor (sync-batch.ts) ve kaydı "Tekrar gönder"e düşürüyordu. Sağlam
+    # kayıtlar yukarıda yazıldı; batch 503 ile döner ki mobil hepsini bekleyen
+    # tutup yeniden göndersin (client_id ile idempotent — kopya oluşmaz).
+    if any(e.reason == "db_error" for e in skipped):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Bazı kayıtlar şu an yazılamadı; otomatik tekrar denenecek")
     for r in out:
         db.refresh(r)
 
@@ -284,6 +341,9 @@ KOPYA_PENCERE = timedelta(minutes=3)
 # K19.2 — yanıtta kategori taşıyacak tipler. `nap_skipped` HARİÇ: o bir uyku
 # değil, "bu uykuyu hiç yapmadı" beyanıdır.
 UYKU_TIPLERI_TUM = ("sleep", "nap", "sekerleme")
+
+# K12.5 — sıfır süreli sabah kaydının (sabah sorusunun cevabı) yanıttaki sınıfı.
+SABAH_UYANISI = "sabah_uyanisi"
 
 
 def _kaydi_guncelle(row: SleepLog, item) -> None:
@@ -483,22 +543,42 @@ def gun_araligi(gun: date, tz_offset_min: int = TZ_OFFSET_MIN
     return bas, bas + timedelta(days=1)
 
 
-def gun_filtresi(gun: date, tz_offset_min: int = TZ_OFFSET_MIN):
-    """K14.1 — "o günün kayıtları" SQL koşulu.
+# K14.3 — önceki günden "sürüyor" diye taşınabilecek açık uyku kaydının en
+# erken başlangıcı: DÜN 18:00 (gece uykusu en erken akşam başlar).
+DUNDEN_TASINAN_EN_ERKEN = timedelta(hours=6)          # gün başından 6 saat önce
+# K17 — liste için bayat eşiği: bundan eski AÇIK uyku kaydı "sürüyor" olamaz.
+ACIK_KAYIT_BAYAT = timedelta(hours=16)
 
-    Üç durumu birden kapsar; v2.1'e kadar yalnız birincisi vardı ve gece
-    yarısını aşan kayıtlar günün listesinden düşüyordu:
-      1. started_at o gün, VEYA
+
+def gun_filtresi(gun: date, tz_offset_min: int = TZ_OFFSET_MIN,
+                 simdi: datetime | None = None):
+    """K14.1/K14.3 — "o günün kayıtları" SQL koşulu.
+
+      1. started_at o gün — AMA 16 saatten eski AÇIK uyku kaydı hariç, VEYA
       2. ended_at o gün (dün 21:50 başlayıp bugün 07:05 biten gece uykusu), VEYA
-      3. HÂLÂ AÇIK ve o günden önce başlamış (dün akşam başlatılıp
-         durdurulmamış sayaç — "sürüyor" olarak görünmeli).
+      3. HÂLÂ AÇIK bir UYKU kaydı, DÜN 18:00'den sonra başlamış ve 16 saatten
+         taze (dün akşam başlatılıp durdurulmamış gece sayacı — "sürüyor").
+
+    K14.3 (2026-09-28): 3. madde eskiden "o günden önce başlamış HER açık
+    kayıt"tı. `feed`/`night_wake` nokta olaylardır, `ended_at`'leri doğası
+    gereği boştur — bu yüzden haftalar önceki beslenmeler bugünün listesine
+    taşınıyordu (prod: bir bebekte bugünün 19 kaydının 15'i 16-22 Eylül
+    beslenmeleriydi). Nokta olaylar yalnız KENDİ günlerinde görünür; açık uyku
+    ancak dün akşamdan taşınabilir ve K17 bayat kuralı listeye de uygulanır.
     """
     bas, bit = gun_araligi(gun, tz_offset_min)
+    taze_sinir = (simdi or simdi_utc()) - ACIK_KAYIT_BAYAT
+    acik_uyku = and_(SleepLog.ended_at.is_(None),
+                     SleepLog.type.in_(UYKU_TIPLERI_TUM))
     return or_(
-        and_(SleepLog.started_at >= bas, SleepLog.started_at < bit),
+        and_(SleepLog.started_at >= bas, SleepLog.started_at < bit,
+             or_(not_(acik_uyku), SleepLog.started_at >= taze_sinir)),
         and_(SleepLog.ended_at.isnot(None),
              SleepLog.ended_at >= bas, SleepLog.ended_at < bit),
-        and_(SleepLog.ended_at.is_(None), SleepLog.started_at < bas),
+        and_(acik_uyku,
+             SleepLog.started_at >= bas - DUNDEN_TASINAN_EN_ERKEN,
+             SleepLog.started_at < bas,
+             SleepLog.started_at >= taze_sinir),
     )
 
 
@@ -563,7 +643,11 @@ def _kategorili(row: SleepLog, bant: dict | None = None) -> SleepLogResp:
     yerde ayrı yazılsaydı mobilin bastığı etiket ile çizelgenin hesabı
     ayrışabilirdi."""
     resp = SleepLogResp.model_validate(row)
-    if row.type in UYKU_TIPLERI_TUM:
+    if sabah_cevabi_ham(row.type, row.started_at, row.ended_at, TZ_OFFSET_MIN):
+        # K12.5 — sabah sorusunun cevabı bir uyku değil, sabah uyanışıdır.
+        resp.kategori = SABAH_UYANISI
+        resp.kategori_etiket = "Sabah uyanışı"
+    elif row.type in UYKU_TIPLERI_TUM:
         resp.kategori = uyku_sinifi_ham(row.started_at, row.ended_at,
                                         TZ_OFFSET_MIN, bant)
         resp.kategori_etiket = UYKU_ETIKETLERI.get(resp.kategori)
@@ -749,7 +833,7 @@ def patch_log(log_id: uuid.UUID, req: SleepLogPatch,
     bas = req.started_at if "started_at" in gelen else row.started_at
     bit = req.ended_at if "ended_at" in gelen else row.ended_at
 
-    tavan = datetime.now(timezone.utc) + timedelta(minutes=GELECEK_TOLERANS_DK)
+    tavan = simdi_utc() + timedelta(minutes=GELECEK_TOLERANS_DK)
     if _as_utc(bas) > tavan:
         raise _gecersiz("Kayıt gelecek bir zamana ait; tarihi kontrol edin")
     if bit is not None and _as_utc(bit) > tavan:

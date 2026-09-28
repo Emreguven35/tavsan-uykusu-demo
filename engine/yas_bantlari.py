@@ -60,6 +60,50 @@ def kestirme_protokolu() -> dict:
     return dict(_tablo()["evrensel_kurallar"]["kestirme_protokolu"])
 
 
+def _hhmm_dk(s: str | None) -> int | None:
+    if not s:
+        return None
+    sa, dk = str(s).split(":")
+    return int(sa) * 60 + int(dk)
+
+
+def gece_yatisi_mutlak_tavan() -> int:
+    """Gece yatışının geçemeyeceği mutlak saat (dk, 24:00 = 1440) — v1.5.
+
+    Bandın yatış aralığı artık tavan değil; kayan günde yatış bunu aşabilir,
+    bu saati aşamaz (İlayda 3. cevaplar S3)."""
+    kural = _tablo()["evrensel_kurallar"].get("gece_yatisi_mutlak_tavan") or {}
+    return int(kural.get("dk") or 24 * 60)
+
+
+def sabah_hedefi(ay: float | None, tek_uyku: bool | None = None) -> dict | None:
+    """Yaşa ve uyku düzenine göre sabah hedefi (v1.5, İlayda 3. cevaplar S4).
+
+    Dönen: {hedef, hedef_dk, en_gec, en_gec_dk, uyari_toleransi_dk, not} ya da
+    yaş bilinmiyorsa None. 12-18 ay bandında düzen verilmemişse bandın
+    varsayılan varyantı (iki uyku) kullanılır."""
+    if ay is None:
+        return None
+    tablo_ = _tablo()["evrensel_kurallar"].get("sabah_hedefi") or {}
+    duzen = None
+    try:
+        duzen = yas_bandi_getir(ay, tek_uyku).get("varyant")
+    except YasBandiHatasi:
+        pass
+    if duzen is None:
+        duzen = "tek_uyku" if tek_uyku else "iki_uyku"
+    for k in tablo_.get("kurallar") or []:
+        if not (k["ay_min"] <= ay < k["ay_max"]):
+            continue
+        if k.get("uyku_duzeni") and k["uyku_duzeni"] != duzen:
+            continue
+        return {"hedef": k["hedef"], "hedef_dk": _hhmm_dk(k["hedef"]),
+                "en_gec": k.get("en_gec"), "en_gec_dk": _hhmm_dk(k.get("en_gec")),
+                "uyari_toleransi_dk": int(tablo_.get("uyari_toleransi_dk") or 0),
+                "not": k.get("not")}
+    return None
+
+
 def bant_idleri() -> list[str]:
     return [b["id"] for b in _tablo()["bantlar"]]
 

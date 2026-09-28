@@ -194,10 +194,15 @@ try:
     db.commit()
 finally:
     db.close()
+# Sor 2026-09-28'den beri yalnız premium (kota 0); gün sınırı mekanizması kota
+# > 0 iken ölçülür.
+import api.routers.chat as _chat_router                      # noqa: E402
+_chat_router.SOR_GUNLUK_UCRETSIZ = 3
 with saat_sabitle(tr(D, 23, 50)):
     r_once = client.post("/api/v1/chat", headers=HS, json={"message": "dördüncü"})
 with saat_sabitle(tr(D1, 0, 10)):
     r_sonra = client.post("/api/v1/chat", headers=HS, json={"message": "yeni gün"})
+_chat_router.SOR_GUNLUK_UCRETSIZ = 0
 check("S1) 23:50 TR'de 4. soru kotaya takılıyor",
       r_once.status_code == 403, str(r_once.status_code))
 check("S2) 00:10 TR'de (UTC hâlâ D) kota sıfırlandı",

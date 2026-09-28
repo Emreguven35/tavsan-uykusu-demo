@@ -114,7 +114,7 @@ def _ses_temizligi_durdur() -> None:
 # sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
 #
 # Sentry'den ÖNCE tanımlı olmak zorunda: release etiketi olarak oraya geçiyor.
-APP_VERSION = os.getenv("APP_VERSION", "v2.4.4")
+APP_VERSION = os.getenv("APP_VERSION", "v2.4.5")
 
 # Hata izleme — YALNIZ production + SENTRY_DSN. Uygulama nesnesi kurulmadan ÖNCE
 # başlatılır ki Starlette/FastAPI entegrasyonları middleware zincirini sarabilsin.

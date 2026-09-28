@@ -135,9 +135,21 @@ check("3) Uyanış 08:30 (+90dk) → kırpma YOK, gün 08:30'dan",
 # tavana kırpar. Hangisi olursa olsun tavan aşılmaz ve uyarı yazılır.
 _k4_uyari = [s for s in r3["reasons"]
              if "sınırına dayandı" in s or "kısaltıldı" in s or "kaldırıldı" in s]
-check("3b) Yatış bandın TAVANINI aşmadı (K4) ve müdahale uyarıya yazıldı",
-      _bed3["start_minute"] <= 20 * 60 and _k4_uyari,
+# v1.5 (İlayda 3. cevaplar S3): kayan günde yatış bandın üst ucunu AŞABİLİR,
+# yalnız mutlak tavanı (24:00) aşamaz; aşım "alışma evresi" uyarısıyla yazılır.
+_gec_uyari = [s for s in r3["reasons"] if "alışma evresine özgü" in s]
+check("3b) Kayan gün: yatış bant üst ucunu (20:00) aştı ama 24:00'ü aşmadı + uyarı",
+      20 * 60 < _bed3["start_minute"] <= 24 * 60 and _gec_uyari
+      and (_bed3.get("gec_yatis") or {}).get("bant_ust") == "20:00",
       f"bed={_bed3['time']} reasons={r3['reasons']}")
+# Eski davranış (bant tavanı) mutlak tavan kapatılınca aynen duruyor.
+_r3_eski = pa.recompute_day(pa.plan_sablonu(plan_with_schedule(7 * 60), BUCKET_8AY)[0],
+                            None, 7 * 60, wake_logs(8, 30), NOW, gun=TODAY,
+                            bucket_params=BUCKET_8AY, yatis_mutlak_tavan=None)
+_bed3e = next(b for b in _r3_eski["schedule"] if b["key"] == "bedtime")
+check("3c) yatis_mutlak_tavan=None → eski K4: yatış bant tavanında",
+      _bed3e["start_minute"] <= 21 * 60 and "gec_yatis" not in _bed3e,
+      f"bed={_bed3e['time']}")
 
 # =============================================================================
 # 4) Erken uyanış → gün erkene alınır, yatış da erkene (K2/K4)

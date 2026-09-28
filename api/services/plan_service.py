@@ -638,8 +638,12 @@ def generate_content(baby: Baby, req_overrides: dict | None,
                         f"{son_hata}")
 
     # Faz Y: çizelge YAŞ BANDI TABLOSUNDAN kurulur (düzeltilmiş ay üzerinden).
+    # v1.5 — sabah hedefi YAŞA GÖRE (İlayda 3. cevaplar S4): 5-8 ay 06:00,
+    # 11 ay→tek uyku 06:00… Şablon bir kez yazılır (K1); mevcut planlar değişmez.
     schedule = plan_adapter.build_schedule(
-        param.get("parametreler", {}), plan_adapter.DEFAULT_WAKE_MIN,
+        param.get("parametreler", {}),
+        plan_adapter.sabah_hedefi_dk(param["yas"]["duzeltilmis_ay"],
+                                     tek_uyku_bayragi(param)),
         yas_ay=param["yas"]["duzeltilmis_ay"],
         tek_uyku=tek_uyku_bayragi(param))
 

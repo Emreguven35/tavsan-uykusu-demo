@@ -87,11 +87,13 @@ ERISIM_KURALLARI: dict[str, str] = {
     "ses_diger": "premium",
     "ninni_ucretsiz": "ucretsiz",         # UCRETSIZ_NINNI (anne sesiyle hazırsa)
     "anne_sesi": "premium",               # ses klonlama + diğer masal/ninniler
-    "sor": "premium",                     # premium değilse günde SOR_GUNLUK_UCRETSIZ
+    "sor": "premium",                     # yalnız premium (SOR_GUNLUK_UCRETSIZ = 0)
 }
 UCRETSIZ_VIDEO_KATEGORILERI = ("baslarken",)
 UCRETSIZ_NINNI = "ninni_dandini"
-SOR_GUNLUK_UCRETSIZ = 3
+# 2026-09-28 ürün kararı: Sor YALNIZ PREMIUM — ücretsiz kullanıcıya günlük hak
+# 0. BETA_MODE açıkken herkes premium olduğu için etkisiz. Eskiden 3'tü.
+SOR_GUNLUK_UCRETSIZ = 0
 
 # Uygulama içi ürünler (RevenueCat / App Store Connect ürün kimlikleri).
 # Yenilenmeyen ürünün süresi mağazadan gelmez — burada tanımlıdır.

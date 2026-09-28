@@ -146,6 +146,41 @@ GECE_UYANMA_VARSAYILAN_DK = 10
 # "0 uyanma" olarak raporlanıyordu (beta verisinde ölçüldü).
 UZUN_UYANMA_MIN_DK = SELF_SOOTHE_FAIL_MIN
 
+# K12.5 — SABAH SORUSUNUN CEVABI (build 21 ve öncesi, geriye uyum).
+# Mobil "Bebeğiniz bugün kaçta uyandı?" sorusunu `sleep_end` + süre 0 olarak
+# yazıyor; sunucuya `type: sleep, started_at = ended_at = 09:00` diye geliyor.
+# K12.1 bunu "sıfır süreli uyku" diye yok sayıyordu: sabah uyanışı hiç
+# bilinmiyor, gün 07:00 varsayımıyla kuruluyordu (2026-09-28 prod: 3 günde 11
+# kayıt / 4 bebek, hepsi `sleep`). Bu pencerede başlayan sıfır süreli uyku
+# kaydı artık bir UYANMA (`wake`) kaydıdır — yeni istemcinin göndereceği `wake`
+# ile BİREBİR aynı yoldan geçer; gündüz uykusu sayılmaz, yok sayılmaz.
+SABAH_CEVABI_PENCERE = (4 * 60, 12 * 60)          # 04:00 ≤ başlangıç < 12:00
+
+# K12.3 — kapalı gece uykusundan SONRA gelen uyanma kaydı ne zaman "gereksiz"?
+# Gece bitişine bu kadar yakınsa aynı anın ikinci kaydıdır (sayaç durduruldu +
+# "Uyandı"ya basıldı). Daha geç ve ilk gündüz uykusundan önceyse bebek tekrar
+# uyumuş ve SON uyanış odur (K10.1) — anne açıkça "kaçta uyandı"ya cevap verdi.
+SABAH_AYNI_AN_DK = 15
+
+
+def sabah_cevabi_mi(tip: str | None, bas_dk: int, sure_dk: int | None,
+                    ters_mi: bool = False) -> bool:
+    """K12.5 — bu uyku kaydı aslında sabah sorusunun cevabı (uyanma) mı?"""
+    return (tip in ("sleep", "nap", "sekerleme") and not ters_mi
+            and sure_dk == 0
+            and SABAH_CEVABI_PENCERE[0] <= bas_dk < SABAH_CEVABI_PENCERE[1])
+
+
+def sabah_cevabi_ham(tip: str | None, started_at: datetime,
+                     ended_at: datetime | None,
+                     tz_offset_min: int = TZ_OFFSET_MIN) -> bool:
+    """`sabah_cevabi_mi`nin ORM satırı hâli (GET /logs, denetim)."""
+    if ended_at is None:
+        return False
+    _g, bas_dk = _local_minute(started_at, tz_offset_min)
+    sure = int((ended_at - started_at).total_seconds() // 60)
+    return sabah_cevabi_mi(tip, bas_dk, sure, ended_at < started_at)
+
 # --- K19 — UYKU TİPİ SAATE GÖRE BELİRLENİR (v2.2.2) -------------------------
 # ÜRÜN KARARI: mobil artık anneye uyku tipi sordurmuyor. Anne yalnız "Uyudu" /
 # "Uyandı" diyor; gündüz/gece ayrımını BACKEND yapıyor. İstemcinin gönderdiği
@@ -548,6 +583,16 @@ def normalize_schedule(schedule: list[dict] | None) -> list[dict]:
     return out
 
 
+def sabah_hedefi_dk(yas_ay: float | None, tek_uyku: bool | None = None) -> int:
+    """YENİ şablonun sabah hedefi (dk) — yaş tablosundan (v1.5), yoksa 07:00."""
+    try:
+        h = yas_bantlari.sabah_hedefi(yas_ay, tek_uyku)
+    except Exception:                          # tablo bozuksa plan üretimi durmasın
+        logger.exception("Sabah hedefi çözülemedi (yas_ay=%s)", yas_ay)
+        h = None
+    return int(h["hedef_dk"]) if h and h.get("hedef_dk") is not None else DEFAULT_WAKE_MIN
+
+
 def sabit_wake_minute(schedule_template: list[dict] | None) -> int:
     """K1 — şablondaki SABİT sabah uyanış hedefi. Şablon yoksa varsayılan 07:00.
 
@@ -827,6 +872,11 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
             continue
         tip = k["type"]
 
+        # --- K12.5 — sabah sorusunun cevabı (sıfır süreli uyku) = uyanma -----
+        if sabah_cevabi_mi(tip, k["bas_dk"], k["sure_dk"], k["ters_mi"]):
+            k = dict(k, type="wake", _sabah_cevabi=True)
+            tip = "wake"
+
         # --- K12.1 — UYANMA KAYITLARI: asla uyku değildir --------------------
         if tip in ("wake", "night_wake"):
             if k["bas_gun"] != gun:
@@ -856,8 +906,12 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
             # Gece uykusu BUGÜNE, bittiği güne göre bağlanır (dün 20:30 → bugün 07:00).
             if k["bit_gun"] == gun:
                 out["gece_uykulari"].append(k)
-            elif k["bit_dk"] is None and k["bas_gun"] < gun:
-                # K12.4/K14.1 — dün başlamış, HÂLÂ AÇIK gece uykusu.
+            elif k["bit_dk"] is None and (gun - k["bas_gun"]).days == 1:
+                # K12.4/K14.1 — DÜN başlamış, HÂLÂ AÇIK gece uykusu. K14.3
+                # (2026-09-28): daha eski açık kayıt bugünün gecesi DEĞİLDİR —
+                # prod'da 3 gün önce 19:38'de açık kalan sayaç bugünün gece
+                # uykusu sayılıyor, sabah uyanışı onu "kapatıp" 60 saatlik
+                # gece uykusu üretiyordu. Liste de aynı kuralı uyguluyor.
                 out["gece_uykulari"].append(dict(k, _devam=True))
             continue            # bugün akşam başlayan açık gece uykusu: yarının
 
@@ -1055,15 +1109,23 @@ def _wake_kayitlarini_coz(out: dict, wake_adaylari: list[dict]) -> None:
         Spec bu durumu "yok say" diye tanımlıyordu; UYGULANMADI, çünkü o zaman
         günün tek çıpası kaybolur ve "anne sadece Uyandı'ya bastı" senaryosunda
         gün varsayılan hedefe düşer (mevcut G5 senaryosu bunu ölçüyor).
-      • 06:00 SONRASI + KAPALI gece uykusu var → GEREKSİZ. Sabah uyanışı zaten
-        gece uykusunun bitişinden geliyor; kayıt yok_sayilan'a yazılır.
+      • 06:00 SONRASI + KAPALI gece uykusu var → gece bitişine SABAH_AYNI_AN_DK
+        (15 dk) kadar yakınsa GEREKSİZ: aynı anın ikinci kaydıdır, yok_sayilan'a
+        yazılır. Daha GEÇ ve 12:00'den önce ise (K12.5, 2026-09-28) sabah
+        adayıdır: bebek tekrar uyumuş, SON uyanış odur (K10.1); ilk gündüz
+        uykusundan sonraki uyanma zaten sabah_uyanisi'nda elenir. 12:00 sonrası
+        yine gereksizdir (eski istemcilerin öğleden sonraki "Uyandı"sı günü
+        öğleden başlatmasın). Sabah sorusunun cevabı (sıfır süreli uyku) da
+        `wake` da bu kuraldan AYNI sonuçla geçer.
 
     Elenen `wake` kayıtları `uyaniklik_kanitlari`nda KALIR: bebeğin o saatte
     uyanık olduğu bilgisi doğrudur ve zincirin geriye düşmesini engeller (K7/E)
     ile açık nap'in kapanmasında (K17.2) kullanılır."""
     acik_gece = any(g.get("_devam") or g.get("bit_dk") is None
                     for g in out["gece_uykulari"])
-    kapali_gece = any(g.get("bit_dk") is not None for g in out["gece_uykulari"])
+    kapali_bitisler = [g["bit_dk"] for g in out["gece_uykulari"]
+                       if g.get("bit_dk") is not None]
+    kapali_gece = bool(kapali_bitisler)
 
     for w in sorted(wake_adaylari, key=lambda x: x["bas_dk"]):
         if w["bas_dk"] < GUN_BASLANGICI_EN_ERKEN:
@@ -1072,7 +1134,9 @@ def _wake_kayitlarini_coz(out: dict, wake_adaylari: list[dict]) -> None:
             out["uyaniklik_kanitlari"].append(w)
             continue
         out["uyaniklik_kanitlari"].append(w)
-        if acik_gece or not kapali_gece:
+        if (acik_gece or not kapali_gece
+                or (max(kapali_bitisler) + SABAH_AYNI_AN_DK < w["bas_dk"]
+                    < SABAH_CEVABI_PENCERE[1])):
             out["wake_kayitlari"].append(w)
         else:
             _yok_say(out, w, "gereksiz_wake",
@@ -1354,8 +1418,16 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
                   sabit_wake: int, todays_logs: Iterable[Any],
                   now_minute: int, *, gun: date | None = None,
                   bucket_params: dict | None = None,
-                  tz_offset_min: int = TZ_OFFSET_MIN) -> dict:
+                  tz_offset_min: int = TZ_OFFSET_MIN,
+                  sabah_hedefi: dict | None = None,
+                  yatis_mutlak_tavan: int | None | str = "tablo") -> dict:
     """K2/K3/K4/K6/K7 — BUGÜNÜN çizelgesini şablon + bugünün kayıtlarından kur.
+
+    v1.5 — `yatis_mutlak_tavan`: gece yatışının geçemeyeceği mutlak saat.
+    Varsayılan tablodan (24:00, İlayda 3. cevaplar S3); None verilirse eski
+    davranış (bandın üst ucu tavan). `sabah_hedefi`: yas_bantlari.sabah_hedefi
+    sözlüğü — verilirse adaptation'a yazılır ve gerçek uyanış kabul edilen en
+    geç saati aşarsa anneye bilgi uyarısı düşülür (plan yine gerçekten kurulur).
 
     SAF FONKSİYON: DB'ye dokunmaz, LLM çağırmaz, ağa çıkmaz. Aynı girdi daima
     aynı çıktıyı verir (K8). `now_minute` yalnız ETİKETLEMEYİ etkiler
@@ -1422,6 +1494,21 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
     sabah = sabah_uyanisi(kayitlar, sabit_wake)
 
     uyarilar: list[str] = list(sabah["uyarilar"])
+
+    # --- v1.5 — yaşa göre sabah hedefi (İlayda 3. cevaplar S4) --------------
+    # Plan GERÇEK uyanıştan kurulur (K10.2); hedef yalnız bilgi olarak döner.
+    # Kabul edilen en geç saat + tolerans aşıldıysa anneye nedeni söylenir.
+    if (sabah_hedefi and sabah["kaynak"] == "kayit"
+            and sabah_hedefi.get("en_gec_dk") is not None
+            and sabah["minute"] > (sabah_hedefi["en_gec_dk"]
+                                   + int(sabah_hedefi.get("uyari_toleransi_dk") or 0))):
+        _en_gec = sabah_hedefi["en_gec_dk"]
+        uyarilar.append(
+            f"Bebeğiniz bugün {saatli(sabah['minute'])} uyandı; bu yaşta sabah "
+            f"hedefi {sabah_hedefi['hedef']}"
+            + (f" (en geç {sabah_hedefi['en_gec']})"
+               if _en_gec != sabah_hedefi.get("hedef_dk") else "")
+            + ". Günün planı gerçek uyanış saatine göre kaydırıldı.")
 
     # --- K16.2/K17 — otomatik kapatılan açık kayıtların uyarıları ------------
     # Anne "sayacı kapatmayı unuttum" bilgisini EKRANDA görmeli; aksi hâlde
@@ -1639,9 +1726,11 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
         en_erken_yatis = sekerleme_bilgi["end_minute"] + _gecis
 
     # --- K4: yatış zinciri + gece uykusu tavanı ------------------------------
+    if yatis_mutlak_tavan == "tablo":
+        yatis_mutlak_tavan = yas_bantlari.gece_yatisi_mutlak_tavan()
     bloklar, yatis, k4_uyari = _yatisi_yerlestir(
         bloklar, cursor, ww, yatma_lo, yatma_hi, sabit_wake, now_minute,
-        en_erken_yatis=en_erken_yatis)
+        en_erken_yatis=en_erken_yatis, mutlak_tavan=yatis_mutlak_tavan)
     uyarilar.extend(k4_uyari)
     if yatis.get("kaynak") == "varsayilan":
         varsayilan.append("bedtime")
@@ -1657,6 +1746,9 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
     adaptation = {
         "hesaplandi_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sabah_uyanis_hedef": _fmt(sabit_wake),
+        # v1.5 — yaş tablosundaki hedef (şablonunki eski olabilir, K1).
+        "sabah_hedefi": ({k: sabah_hedefi.get(k) for k in ("hedef", "en_gec", "not")}
+                         if sabah_hedefi else None),
         # K10: erken uyanmada GERÇEK saat yazılır (gösterilen 06:00 değil).
         "sabah_uyanis_gercek": _fmt(sabah["gercek_minute"]
                                     if sabah.get("gercek_minute") is not None
@@ -1930,9 +2022,18 @@ def _saat_dk(hhmm: str) -> int:
 def _yatisi_yerlestir(bloklar: list[dict], cursor: int, ww: int,
                       yatma_lo: int, yatma_hi: int, sabit_wake: int,
                       now_minute: int,
-                      en_erken_yatis: int | None = None
+                      en_erken_yatis: int | None = None,
+                      mutlak_tavan: int | None = None
                       ) -> tuple[list[dict], dict, list[str]]:
-    """K4 — yatış = son uyku bitişi + pencere; bandın tavanını aşamaz.
+    """K4 — yatış = son uyku bitişi + pencere.
+
+    v1.5 (İlayda 3. cevaplar S3, 2026-09-27) — "Gündüz uykuları kayınca gece
+    yatışı en geç yatış saatini geçebilir mi? Evet, 12'yi geçmeyeceği şekilde.
+    Bu sadece alışma evresi diye not düşülmeli." `mutlak_tavan` verilirse
+    bandın üst ucu (`yatma_hi`) artık tavan DEĞİLDİR: yatış onu aşabilir, yalnız
+    `mutlak_tavan`ı (24:00) aşamaz. Aşımda "alışma evresine özgü" uyarısı
+    yazılır. Aşağıdaki taşma sırası artık mutlak tavana göre işler.
+    `mutlak_tavan` None ise eski davranış (bant tavanı) aynen geçerli.
 
     TAŞMA SIRASI v1.4'te TERSİNE DÖNDÜ (eski K10.4):
       ① ŞEKERLEME kısaltılır, yetmezse İPTAL edilir,
@@ -1950,6 +2051,10 @@ def _yatisi_yerlestir(bloklar: list[dict], cursor: int, ww: int,
         return (b["type"] == "nap" and b["key"] != SEKERLEME_KEY
                 and b.get("kaynak") != "kayit")
 
+    # ETKİN TAVAN (v1.5): mutlak tavan verilmişse bant üst ucu tavan değildir.
+    bant_hi = yatma_hi
+    tavan = max(yatma_hi, int(mutlak_tavan)) if mutlak_tavan else yatma_hi
+
     # Doğal yatış = son gündüz uykusu + pencere. Şekerleme varsa yatış onun
     # bitişinden en az `gecis` dk sonra olmalı (zincire EKLENMEZ, alt sınır
     # koyar).
@@ -1958,15 +2063,15 @@ def _yatisi_yerlestir(bloklar: list[dict], cursor: int, ww: int,
         ham = max(ham, en_erken_yatis)
 
     # ① ŞEKERLEME önce gider — ilave bloktur, günü o taşırdıysa vazgeçilir.
-    if ham > yatma_hi:
+    if ham > tavan:
         sek = next((b for b in bloklar if b["key"] == SEKERLEME_KEY), None)
         if sek is not None:
             sure = sek["end_minute"] - sek["start_minute"]
-            fazla = ham - yatma_hi
+            fazla = ham - tavan
             if fazla >= sure:
                 bloklar.remove(sek)
                 uyarilar.append(
-                    f"Şekerleme eklenmedi; gece yatışını {saatli(yatma_hi, 'den')} "
+                    f"Şekerleme eklenmedi; gece yatışını {saatli(tavan, 'den')} "
                     f"sonraya itiyordu")
                 kalan = [b for b in bloklar if b["type"] == "nap"]
                 ham = (kalan[-1]["end_minute"] if kalan else cursor) + ww
@@ -1977,10 +2082,10 @@ def _yatisi_yerlestir(bloklar: list[dict], cursor: int, ww: int,
                 sek["note"] = "Gece yatışı gecikmesin diye kısaltıldı"
                 uyarilar.append(
                     f"Şekerleme {sure} dakika yerine {yeni} dakika yapıldı; "
-                    f"gece yatışı {saatli(yatma_hi, 'i')} geçmesin diye")
+                    f"gece yatışı {saatli(tavan, 'i')} geçmesin diye")
                 ham = sek["end_minute"] + ww
 
-    if ham > yatma_hi:
+    if ham > tavan:
         oynanabilir = [b for b in bloklar if _oynanabilir(b)]
         # Kısaltılamayan GERÇEK kayıt varsa sessiz kalma: anne neden yatışın
         # tavana dayandığını görmeli.
@@ -1989,35 +2094,37 @@ def _yatisi_yerlestir(bloklar: list[dict], cursor: int, ww: int,
                                    for b in bloklar):
             uyarilar.append(
                 "Gündüz uykusu sizin kaydınızdan geldiği için kısaltılmadı; "
-                f"gece yatışı {saatli(yatma_hi, 'e')} alındı")
+                f"gece yatışı {saatli(tavan, 'e')} alındı")
         son = oynanabilir[-1] if oynanabilir else None
         if son is not None:
-            if son["start_minute"] >= yatma_hi:
+            if son["start_minute"] >= tavan:
                 # ② Uyku tavanın ötesinde başlıyor: o gün hiç yapılamaz.
                 bloklar.remove(son)
                 uyarilar.append(
                     f"Son gündüz uykusu çıkarıldı; "
                     f"{saatli(son['start_minute'])} başlaması gece yatışından "
-                    f"({_fmt(yatma_hi)}) sonraya denk geliyordu")
+                    f"({_fmt(tavan)}) sonraya denk geliyordu")
                 kalan = [b for b in bloklar if b["type"] == "nap"]
                 ham = (kalan[-1]["end_minute"] if kalan else cursor) + ww
             else:
                 # ① Minimuma kadar kısalt (altına İNMEZ — 10 dk'lık uyku uyku değildir).
                 sure = son["end_minute"] - son["start_minute"]
-                yeni_sure = max(yas_bantlari.MIN_UYKU_DK, sure - (ham - yatma_hi))
+                yeni_sure = max(yas_bantlari.MIN_UYKU_DK, sure - (ham - tavan))
                 if yeni_sure < sure:
                     son["end_minute"] = son["start_minute"] + yeni_sure
                     son["note"] = "Gece yatışı çok gecikmesin diye kısaltıldı"
                     uyarilar.append(
                         f"Son gündüz uykusu {sure - yeni_sure} dakika "
-                        f"kısaltıldı; gece yatışı {saatli(yatma_hi, 'i')} geçmesin "
+                        f"kısaltıldı; gece yatışı {saatli(tavan, 'i')} geçmesin "
                         f"diye")
                     ham = son["end_minute"] + ww
 
-    yatis_dk = max(yatma_lo, min(yatma_hi, ham))
-    if ham > yatma_hi:
+    yatis_dk = max(yatma_lo, min(tavan, ham))
+    if ham > tavan:
         uyarilar.append("Bugün gece yatışı, yaşına uygun en geç saate "
-                        "denk geldi")
+                        "denk geldi" if tavan == bant_hi else
+                        "Bugün gece yatışı gece yarısını geçemeyeceği için "
+                        "en geç saate alındı")
     gece_suresi = (sabit_wake + 1440) - yatis_dk
 
     yatis = {
@@ -2026,9 +2133,23 @@ def _yatisi_yerlestir(bloklar: list[dict], cursor: int, ww: int,
         "title": "Gece uykusu",
         "kaynak": "varsayilan" if yatis_dk <= now_minute else "plan",
     }
-    if yatis_dk != ham:
+    if yatis_dk > bant_hi:
+        # v1.5 — kayan gün: bant üst ucu aşıldı, mutlak tavan korunuyor.
+        # İlayda: "Bu sadece alışma evresi diye not düşülmeli."
+        yatis["note"] = (f"Gündüz uykuları kaydığı için yaşına uygun en geç "
+                         f"yatıştan ({_fmt(bant_hi)}) sonraya kaydı; bu geç "
+                         f"yatış alışma evresine özgüdür")
+        yatis["gec_yatis"] = {"bant_ust": _fmt(bant_hi),
+                              "mutlak_tavan": _fmt(tavan),
+                              "gecikme_dk": yatis_dk - bant_hi}
+        uyarilar.append(
+            f"Gündüz uykuları kaydığı için gece yatışı {saatli(yatis_dk, 'e')} "
+            f"denk geldi (bu yaşta önerilen en geç yatış {_fmt(bant_hi)}). Bu "
+            f"yalnız alışma evresine özgü; yarın sabah hedef saatinde "
+            f"uyandırarak ritmi toparlayın.")
+    elif yatis_dk != ham:
         yatis["note"] = (f"Yaşına uygun yatış saatine "
-                         f"({_fmt(yatma_lo)}–{_fmt(yatma_hi)}) getirildi")
+                         f"({_fmt(yatma_lo)}–{_fmt(bant_hi)}) getirildi")
     yatis["gece_uykusu_dk"] = gece_suresi
     bloklar.append(yatis)
     return bloklar, yatis, uyarilar
@@ -2092,6 +2213,10 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
         if k is None:
             continue
         d, minute, typ = k["bas_gun"], k["bas_dk"], k["type"]
+        # K12.5 — sabah sorusunun cevabı uyku DEĞİL, uyanmadır (gün sayımına
+        # "0 dakikalık gündüz uykusu" olarak girmesin).
+        if sabah_cevabi_mi(typ, minute, k["sure_dk"], k["ters_mi"]):
+            typ = "wake"
 
         # --- Regresyon sinyali: gece uyanması (pencere: son 3 gece) -------------
         # Bu kontrol LOOKBACK_DAYS penceresinden BAĞIMSIZDIR (kendi penceresi var).
@@ -2356,7 +2481,7 @@ def plan_sablonu(plan_content: dict, bucket_params: dict,
         if sablon:
             reasons.append("v1 planı: mevcut çizelge değişmez şablona yükseltildi")
     if not sablon:
-        sablon = build_schedule(bucket_params, DEFAULT_WAKE_MIN,
+        sablon = build_schedule(bucket_params, sabah_hedefi_dk(yas_ay, tek_uyku),
                                 yas_ay=yas_ay, tek_uyku=tek_uyku)
         reasons.append("Planda yapısal çizelge yoktu; yaş bandından türetildi")
     return sablon, reasons
@@ -2441,8 +2566,14 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
         return result
 
     # --- K2/K3/K4/K6/K7: bugünün çizelgesi ----------------------------------
+    try:
+        _hedef = yas_bantlari.sabah_hedefi(yas_ay, tek_uyku)
+    except Exception:                      # bilgi alanı — plan hesabını durdurmasın
+        logger.exception("Sabah hedefi çözülemedi (yas_ay=%s)", yas_ay)
+        _hedef = None
     gun = recompute_day(sablon, bant, sabit_wake_minute(sablon), logs,
-                        now_minute, gun=today, bucket_params=bucket_params)
+                        now_minute, gun=today, bucket_params=bucket_params,
+                        sabah_hedefi=_hedef)
     result["schedule"] = gun["schedule"]
     result["adaptation"] = gun["adaptation"]
     # Aşama gün hesabının izine de düşer: recompute_day regresyonu bilmez, bu

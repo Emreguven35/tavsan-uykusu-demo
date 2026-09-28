@@ -64,11 +64,15 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     # Faz G6: geçmişi SON 6 mesaja kırp (karesel büyüme freni; sunucu tarafı garanti).
     req.history = trim_history(req.history)
 
-    # B4 — Sor: premium değilse günde SOR_GUNLUK_UCRETSIZ soru. Sayaç
+    # B4 — Sor: premium değilse günde SOR_GUNLUK_UCRETSIZ soru (2026-09-28: 0 → yalnız premium). Sayaç
     # chat_messages'taki bugünkü (Türkiye günü) kullanıcı mesajlarıdır; LLM'e
     # gitmeden ÖNCE kontrol edilir.
     kalan = _ucretsiz_kalan(db, user)
     if kalan is not None and kalan <= 0:
+        if SOR_GUNLUK_UCRETSIZ <= 0:                # Sor yalnız premium
+            raise PremiumGerekli(
+                detail="Sor yalnız Premium üyelikte kullanılabilir.",
+                kural="sor_premium")
         raise PremiumGerekli(
             detail=(f"Bugünkü {SOR_GUNLUK_UCRETSIZ} ücretsiz sorunuzu kullandınız. "
                     "Sınırsız soru için Premium'a geçebilir ya da yarın tekrar "

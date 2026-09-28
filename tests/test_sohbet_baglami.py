@@ -161,9 +161,11 @@ tok = client.post("/api/v1/auth/register", json={
 hk = {"Authorization": f"Bearer {tok}"}
 yanitlar = [client.post("/api/v1/chat", headers=hk, json={"message": f"s{i}"}) for i in range(4)]
 son = yanitlar[-1]
-check("K1) 4. soru 403 + premium_required + Türkçe detail (5xx değil)",
-      son.status_code == 403 and son.json().get("premium_required") is True
-      and "ücretsiz sorunuzu" in son.json().get("detail", ""), son.text[:200])
+# 2026-09-28: Sor yalnız premium — ücretsiz kullanıcının İLK sorusu da 403.
+check("K1) Ücretsiz soru 403 + premium_required + Türkçe detail (5xx değil)",
+      all(y.status_code == 403 for y in yanitlar)
+      and son.json().get("premium_required") is True
+      and "Premium" in son.json().get("detail", ""), son.text[:200])
 os.environ["BETA_MODE"] = "true"
 get_settings.cache_clear()
 

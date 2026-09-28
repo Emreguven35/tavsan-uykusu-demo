@@ -394,8 +394,17 @@ def test_g6():
     tok = _register("g6_user@example.com")
     big_history = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"}
                    for i in range(20)]
-    r = client.post("/api/v1/chat", headers=_auth(tok),
-                    json={"message": "Bebeğim nasıl uyur?", "history": big_history})
+    # 2026-09-28: Sor yalnız premium — bu kontrol geçmiş kırpmayı ölçüyor,
+    # kilidi değil; premium kararı beta moduyla açılır.
+    from api.config import get_settings
+    _ayar = get_settings()
+    _beta = _ayar.beta_mode
+    _ayar.beta_mode = True
+    try:
+        r = client.post("/api/v1/chat", headers=_auth(tok),
+                        json={"message": "Bebeğim nasıl uyur?", "history": big_history})
+    finally:
+        _ayar.beta_mode = _beta
     check("G6.4 20 mesajlık geçmişle /chat → 200 (çökmez)",
           r.status_code == 200 and r.json().get("answer") == "MOCK CEVAP",
           f"status={r.status_code} body={r.text[:120]}")

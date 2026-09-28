@@ -376,6 +376,9 @@ def _sahte_cache(message, yas=None, baby_context=None):
 
 
 _cb._cevap_uret = _sahte_llm
+# Sor 2026-09-28'den beri yalnız premium; bu bölüm maliyet kaydını ölçüyor.
+from api.config import get_settings as _ayarlar               # noqa: E402
+_ayarlar().beta_mode = True
 r = client.post("/api/v1/chat", headers=BASLIK, json={"message": "merhaba", "history": []})
 check("6a) /chat 200 döndü", r.status_code == 200, str(r.status_code))
 k = kayitlar()

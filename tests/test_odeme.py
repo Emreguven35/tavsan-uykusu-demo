@@ -336,9 +336,18 @@ check("L4) Anne Sesi: yalnız 1 ninni açık",
       [k for k, v in kl["hikaye"].items() if not v] == ["ninni_dandini"], str(kl["hikaye"]))
 check("L5) Ses klonlama 403 + premium_required", kl["klon"] == (403, True), str(kl["klon"]))
 check("L6) Kayıt girme ücretsiz (200)", kl["kayit"] == 200, str(kl["kayit"]))
+# 2026-09-28: Sor YALNIZ PREMIUM (SOR_GUNLUK_UCRETSIZ = 0) — ilk soru 403.
+_sor0 = client.post("/api/v1/chat", headers=HL, json={"message": "soru"})
+check("L7a) Sor ücretsizde KAPALI: ilk soru 403 + premium_required + kural sor_premium",
+      _sor0.status_code == 403 and _sor0.json().get("premium_required") is True
+      and _sor0.json().get("kural") == "sor_premium", _sor0.text[:200])
+# Günlük kota mekanizması (sayı > 0 yapılırsa) aynen çalışmalı.
+import api.routers.chat as _chat_router                      # noqa: E402
+_chat_router.SOR_GUNLUK_UCRETSIZ = 3
 _sor = [client.post("/api/v1/chat", headers=HL, json={"message": f"soru {i}"})
         for i in range(4)]
-check("L7) Sor: 3 soru ücretsiz, kalan hak 2→1→0",
+_chat_router.SOR_GUNLUK_UCRETSIZ = 0
+check("L7) Sor (kota 3 yapılınca): 3 soru ücretsiz, kalan hak 2→1→0",
       [x.status_code for x in _sor[:3]] == [200, 200, 200]
       and [x.json().get("ucretsiz_kalan") for x in _sor[:3]] == [2, 1, 0],
       str([(x.status_code, x.json().get("ucretsiz_kalan")) for x in _sor]))
