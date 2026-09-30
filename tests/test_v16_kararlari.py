@@ -245,6 +245,57 @@ check("F6) Akşam 19:40 gece uykusu hâlâ yatış olarak yazılıyor",
                                            bc._gunduz_uykulari(_aksam, GUN, TZ)) or ""))
 
 # =============================================================================
+# G) K21 — günlerce açık kalıp sonra durdurulmuş (KAPALI gelen) sayaç
+# =============================================================================
+# Prod 2026-09-30: 18:50'de başlayıp 2 gün sonra 21:21'de durdurulan kayıt günü
+# 21:21'den kuruyordu (1. gündüz uykusu 23:51) ve gerçek 07:10 uyanış kaydını
+# "gereksiz" diye atıyordu.
+def _gun_gece(bas_gun_once: int, bh: int, bm: int, eh: int, em: int) -> datetime:
+    return _utc(bh, bm) - timedelta(days=bas_gun_once), _utc(eh, em)
+
+_b, _e = _gun_gece(2, 18, 50, 21, 21)
+_dev = [FakeLog("sleep", _b, _e)]
+r_dev = pa.adapt(plan(type="egitim_plani"), BUCKET_8AY, _dev, today=TODAY, now_minute=21 * 60 + 30)
+check("G1) 2 günlük sayaç (21:21'de durdu) sabah uyanışı DEĞİL",
+      r_dev["adaptation"]["sabah_uyanis_gercek"] != "21:21"
+      and blok(r_dev, "nap_1")["start_minute"] < 12 * 60,
+      f"sabah={r_dev['adaptation']['sabah_uyanis_gercek']} nap_1={blok(r_dev, 'nap_1')['time']}")
+check("G2) Kayıt 'asiri_uzun' sebebiyle yok sayıldı (iz bırakıldı)",
+      any(y["kod"] == "asiri_uzun" for y in r_dev["adaptation"]["yok_sayilan_kayitlar"]),
+      str(r_dev["adaptation"]["yok_sayilan_kayitlar"]))
+r_dev2 = pa.adapt(plan(type="egitim_plani"), BUCKET_8AY,
+                  _dev + [FakeLog("wake", _utc(7, 10), _utc(7, 10))],
+                  today=TODAY, now_minute=9 * 60)
+check("G3) Gerçek 07:10 uyanış kaydı kullanılıyor (atılmıyor)",
+      r_dev2["adaptation"]["sabah_uyanis_gercek"] == "07:10"
+      and r_dev2["adaptation"]["sabah_uyanis_kaynak"] == "kayit"
+      and not any(y["kod"] == "gereksiz_wake"
+                  for y in r_dev2["adaptation"]["yok_sayilan_kayitlar"]),
+      str(r_dev2["adaptation"]))
+_b, _e = _gun_gece(1, 8, 12, 6, 52)
+r_sabah = pa.adapt(plan(type="egitim_plani"), BUCKET_8AY, [FakeLog("sleep", _b, _e)],
+                   today=TODAY, now_minute=9 * 60)
+check("G4) Sabah (06:52) durdurulan 22 saatlik sayaç eskisi gibi: bitiş sabah uyanışı",
+      r_sabah["adaptation"]["sabah_uyanis_gercek"] == "06:52"
+      and r_sabah["adaptation"]["sabah_uyanis_kaynak"] == "kayit",
+      str(r_sabah["adaptation"]["sabah_uyanis_gercek"]))
+_b, _e = _gun_gece(1, 15, 25, 7, 10)                        # 15 sa 45 dk — sınır altı
+r_sinir = pa.adapt(plan(type="egitim_plani"), BUCKET_8AY, [FakeLog("nap", _b, _e)],
+                   today=TODAY, now_minute=9 * 60)
+check("G5) 16 saatin altındaki uzun gece (15:25→07:10) eskisi gibi gece uykusu",
+      r_sinir["adaptation"]["sabah_uyanis_gercek"] == "07:10"
+      and not r_sinir["adaptation"]["yok_sayilan_kayitlar"],
+      str(r_sinir["adaptation"]["yok_sayilan_kayitlar"]))
+_b, _e = _gun_gece(1, 20, 30, 6, 45)
+r_normal = pa.adapt(plan(type="egitim_plani"), BUCKET_8AY, [FakeLog("sleep", _b, _e)],
+                    today=TODAY, now_minute=9 * 60)
+check("G6) Normal gece (20:30→06:45) değişmedi",
+      r_normal["adaptation"]["sabah_uyanis_gercek"] == "06:45")
+_oz_dev = pa.summarize_logs(_dev, today=TODAY)
+check("G7) summarize_logs: 2 günlük sayaç ne sabah uyanışı ne gündüz uykusu",
+      _oz_dev["gunun_uyanisi"] is None and _oz_dev["avg_nap_count"] is None, str(_oz_dev))
+
+# =============================================================================
 print("=" * 78)
 print("v1.6 KARARLARI")
 print("=" * 78)

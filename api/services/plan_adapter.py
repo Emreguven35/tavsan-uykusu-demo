@@ -156,6 +156,25 @@ UZUN_UYANMA_MIN_DK = SELF_SOOTHE_FAIL_MIN
 # ile BİREBİR aynı yoldan geçer; gündüz uykusu sayılmaz, yok sayılmaz.
 SABAH_CEVABI_PENCERE = (4 * 60, 12 * 60)          # 04:00 ≤ başlangıç < 12:00
 
+# K21 — KAPALI gece uykusu kaydının akla yatkın üst süresi. Mobil, sayacı
+# günlerce açık kalmış kaydı durdurulduğu an KAPALI olarak gönderiyor
+# (prod 2026-09-30: son 14 günde 14 saati aşan 15 kayıt / 8 bebek, en uzunu
+# 50 sa). Bu kayıt gece uykusu sayılırsa BİTİŞİ sabah uyanışı olur: 21:21'de
+# durdurulan sayaç günü 21:21'den kuruyor, annenin gerçek 07:10 uyanış kaydını
+# "gereksiz" diye atıyordu. Eşik açık sayaç kuralıyla (ACIK_KAYIT_BAYAT,
+# acik_sayac_kapat TERK_SAAT) aynı: 16 saat.
+# YALNIZ bitiş sabah penceresinin DIŞINDAYSA: sabah durdurulan uzun sayacın
+# bitişi güvenilir bir uyanıştır (Z4 gerçek vakası: dün 14:20 → bugün 08:25,
+# sabah 08:25 kalmalı). Sorunlu olan öğleden sonra/akşam durdurulanlardır.
+GECE_KAYIT_MAKS_DK = 16 * 60
+
+
+def asiri_uzun_gece_mi(k: dict) -> bool:
+    """K21 — kapalı kayıt günlerce açık kalmış sayaç mı (bitişi uyanış DEĞİL)?"""
+    return ((k.get("sure_dk") or 0) > GECE_KAYIT_MAKS_DK
+            and k.get("bit_dk") is not None
+            and not (SABAH_CEVABI_PENCERE[0] <= k["bit_dk"] < SABAH_CEVABI_PENCERE[1]))
+
 # K12.3 — kapalı gece uykusundan SONRA gelen uyanma kaydı ne zaman "gereksiz"?
 # Gece bitişine bu kadar yakınsa aynı anın ikinci kaydıdır (sayaç durduruldu +
 # "Uyandı"ya basıldı). Daha geç ve ilk gündüz uykusundan önceyse bebek tekrar
@@ -913,7 +932,15 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
         # --- K19.1 — SINIF SAATTEN gelir, type'tan DEĞİL --------------------
         if uyku_tipi_belirle(k, bant) == GECE_UYKUSU:
             # Gece uykusu BUGÜNE, bittiği güne göre bağlanır (dün 20:30 → bugün 07:00).
-            if k["bit_gun"] == gun:
+            if k["bit_gun"] == gun and asiri_uzun_gece_mi(k):
+                # K21 — sayacı günlerce açık kalıp SABAH DIŞINDA durdurulmuş
+                # kayıt. Bitişi sabah uyanışı sayılırsa gün 21:21'den kurulur
+                # ve annenin gerçek sabah kaydı "gereksiz" diye atılırdı.
+                _yok_say(out, k, "asiri_uzun",
+                         f"{k['sure_dk'] // 60} saat sürmüş ve {_fmt(k['bit_dk'])}'"
+                         f"de bitmiş görünüyor; sayaç açık kalmış olabilir, "
+                         f"gece uykusu sayılmadı")
+            elif k["bit_gun"] == gun:
                 out["gece_uykulari"].append(k)
             elif k["bit_dk"] is None and (gun - k["bas_gun"]).days == 1:
                 # K12.4/K14.1 — DÜN başlamış, HÂLÂ AÇIK gece uykusu. K14.3
@@ -2247,6 +2274,10 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
         # "0 dakikalık gündüz uykusu" olarak girmesin).
         if sabah_cevabi_mi(typ, minute, k["sure_dk"], k["ters_mi"]):
             typ = "wake"
+        # K21 — sabah dışında durdurulmuş günlük sayaç: ne gece uykusu (bitişi
+        # sabah uyanışı olurdu) ne gündüz uykusu (20 saatlik "şekerleme").
+        if typ in UYKU_TIPLERI and asiri_uzun_gece_mi(k):
+            continue
 
         # --- Regresyon sinyali: gece uyanması (pencere: son 3 gece) -------------
         # Bu kontrol LOOKBACK_DAYS penceresinden BAĞIMSIZDIR (kendi penceresi var).
