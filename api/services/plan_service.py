@@ -859,6 +859,14 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
                              if tip_turet(base_content) == TYPE_EGITIM else None),
         regresyon_kendi_donuyor=regresyon_cevabi(baby, today))
 
+    # Doğum tarihi yoksa yaş bandı çözülemez ve yeniden üretim YAPILAMAZ
+    # (profile_from_baby birth_date ister). Eskiden bu yol 500 veriyordu ve
+    # anne "plan yok" görüyordu; mevcut plan şablonuyla devam edilir.
+    if result["regenerate_required"] and baby.birth_date is None:
+        logger.warning("Yeniden üretim atlandı: bebekte doğum tarihi yok "
+                       "(baby=%s) — mevcut plan korunuyor", baby.id)
+        result["regenerate_required"] = False
+
     if result["regenerate_required"]:
         content = generate_content(baby, None, dogum_haftasi,
                                    operation=usage.OP_PLAN_ADAPT)  # PlanError yükselebilir

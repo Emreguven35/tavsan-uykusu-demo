@@ -115,7 +115,7 @@ def _ses_temizligi_durdur() -> None:
 # sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
 #
 # Sentry'den ÖNCE tanımlı olmak zorunda: release etiketi olarak oraya geçiyor.
-APP_VERSION = os.getenv("APP_VERSION", "v2.5.2")
+APP_VERSION = os.getenv("APP_VERSION", "v2.5.3")
 
 # Hata izleme — YALNIZ production + SENTRY_DSN. Uygulama nesnesi kurulmadan ÖNCE
 # başlatılır ki Starlette/FastAPI entegrasyonları middleware zincirini sarabilsin.
@@ -320,7 +320,9 @@ BUILD_TIME = os.getenv("BUILD_TIME") or _SUREC_BASLANGIC
 _GIT_SHA = (os.getenv("GIT_SHA") or os.getenv("RAILWAY_GIT_COMMIT_SHA") or "")
 
 
-@app.get("/health")
+# HEAD de kabul edilir: UptimeRobot her kontrolde önce HEAD atıyor ve 405
+# alıyordu (günde ~290 sahte hata, gerçek kesintiyi gürültüde saklıyordu).
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health(detail: int = 0, x_api_key: str | None = Header(default=None,
                                                            alias="X-API-Key")):
     """Altyapı sağlığı: DB bağlantısı + RAG index yüklü mü + hangi sürüm çalışıyor.

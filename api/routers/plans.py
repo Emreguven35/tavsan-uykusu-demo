@@ -49,8 +49,14 @@ def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
     from api.services import erisim
     premium, _k = premium_karari(db, user)
     resp = PlanResp.model_validate(plan)
-    resp.content = plan_service.zamana_bagli_alanlari_tazele(
-        resp.content, db.get(Baby, plan.baby_id), referans or plan.plan_date)
+    # Tazeleme bir SÜSLEMEDİR: hesaplanamazsa saklanan içerik döner, plan ASLA
+    # düşmez (eksik alanlı eski plan, doğum tarihi silinmiş bebek vb.).
+    try:
+        resp.content = plan_service.zamana_bagli_alanlari_tazele(
+            resp.content, db.get(Baby, plan.baby_id), referans or plan.plan_date)
+    except Exception:
+        logger.exception("Zamana bağlı alanlar tazelenemedi (plan=%s) — "
+                         "saklanan içerik dönüyor", plan.id)
     icerik, kilitli = erisim.plan_icerigi_kilitle(resp.content or {}, premium)
     if kilitli:
         resp.content = icerik
