@@ -46,8 +46,14 @@ Zaten yazılmış tam-16-saatlik kayıtlar `--duzelt-16saat` ile onarılır.
 
 GÜVENLİK: iki adımlıdır. `--uygula` verilmedikçe hiçbir satır değişmez, yalnız
 ne yapılacağı listelenir.
+
+v1.6 (2026-09-30): kapatılan her kaydın notuna "otomatik kapatıldı" EKLENİR
+(annenin notu ezilmez) ve satırların DEĞİŞİKLİKTEN ÖNCEKİ hâli tam olarak
+/data/arsiv/acik-sayac-kapat-<zaman>.json'a yazılır (geri almak için). Bütün
+geçmişi taramak için: `--gun 3650 --uygula`.
 """
 import argparse
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -66,6 +72,7 @@ from api.models import Baby, SleepLog                       # noqa: E402
 from api.services.plan_service import uyku_sureleri         # noqa: E402
 
 UYKU_TIPLERI = ("sleep", "nap")
+KAPATMA_NOTU = "otomatik kapatıldı"
 TERK_SAAT = 16                 # mutlak tavan: bundan uzun açık kayıt "terk edilmiş"
 ASGARI_DK = 60                 # kapanış başlangıcın gerisine düşerse
 TZ_OFFSET_MIN = 180            # UTC+3 — motorla aynı
@@ -225,12 +232,40 @@ def main():
                   "--uygula ekleyin.)")
             return
 
+        yol = _arsivle([r for r, _k, _g in adaylar])
+        print(f"\narşiv (eski hâl): {yol}")
         for r, kapanis, _g in adaylar:
             r.ended_at = kapanis
+            _not_ekle(r, KAPATMA_NOTU)
         db.commit()
-        print(f"\n{len(adaylar)} açık sayaç kaydı kapatıldı.")
+        print(f"{len(adaylar)} açık sayaç kaydı kapatıldı.")
+        kalan = _adaylar(db, a.gun)
+        print(f"Kalan {TERK_SAAT} saatten uzun açık uyku kaydı: {len(kalan)}")
     finally:
         db.close()
+
+
+def _not_ekle(row, metin: str) -> None:
+    """notes alanına not EKLE (annenin notunu ezme) — logs._not_ekle ile aynı."""
+    mevcut = (row.notes or "").strip()
+    if metin in mevcut:
+        return
+    row.notes = f"{mevcut} | {metin}".strip(" |") if mevcut else metin
+
+
+def _arsivle(satirlar: list) -> Path:
+    """Değişiklikten ÖNCE satırların tam hâlini JSON'a yaz (geri alınabilir)."""
+    from api.services.denetim import denetim_koku
+    from api.services.kvkk import _satir
+    klasor = denetim_koku().parent / "arsiv"
+    klasor.mkdir(parents=True, exist_ok=True)
+    zaman = datetime.now(timezone.utc)
+    yol = klasor / f"acik-sayac-kapat-{zaman:%Y%m%dT%H%M%S}.json"
+    yol.write_text(json.dumps({"zaman": zaman.isoformat(),
+                               "sebep": f"{TERK_SAAT} saatten eski açık uyku sayacı kapatıldı",
+                               "kayitlar": [_satir(r) for r in satirlar]},
+                              ensure_ascii=False, indent=1, default=str), "utf-8")
+    return yol
 
 
 def _duzelt_gunduz_uzun(db, uygula: bool) -> None:

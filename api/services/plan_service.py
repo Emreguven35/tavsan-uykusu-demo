@@ -851,6 +851,8 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         training_completed_at=baby.training_completed_at, today=today,
         now_minute=now_minute, yas_ay=yas_ay, tek_uyku=tek_uyku,
         log_summary=summary,
+        # v1.6 — geç yatış istisnası yalnız egitim_plani'nda.
+        plan_tipi=tip_turet(base_content),
         # Denetim B3: bekleme/yenidoğan planında eğitim günü YOK — mobil
         # training_started_at'i Eğitim sekmesi açılınca her bebek için yazıyordu.
         training_started_at=(egitim_baslangicini_tamamla(db, baby)

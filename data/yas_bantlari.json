@@ -1,8 +1,9 @@
 {
-  "version": "1.5",
-  "guncelleme": "2026-09-28",
+  "version": "1.6",
+  "guncelleme": "2026-09-30",
   "kaynak": "RESMİ yaş bandı tablosu (Faz Y). Plan motorunun TEK sayısal kaynağıdır.",
   "surum_notlari": {
+    "1.6": "(a) sabah_hedefi: tolerans KURAL BAŞINA (uyari_toleransi_dk) — 06:00 hedefli katı kurallarda 30 dk (06:30 sonrası), 08:00'e kadar olan kurallarda 0 (yalnız 08:00 sonrası); fark artık uyarı (Dikkat kartı) DEĞİL, sabah bloğunun notu. (b) gece_yatisi_mutlak_tavan YALNIZ egitim_plani'nda (gecerli_plan_tipleri); egitim_bekleme ve yenidoğanda yatış bant tavanında kalır, gerekirse son uyku kısaltılır. (c) asama_gecisi: İlayda 4. cevap (7 gün dolup ilerlenemezse 1 hafta mola, sonra program en baştan) — kural olarak yazıldı, motor HENÜZ UYGULAMIYOR.",
     "1.5": "İlayda'nın 2026-09-27 tarihli 3. sesli cevapları (ilayda-cevaplar-3/RAPOR.md) S3 ve S4 işlendi. (a) evrensel_kurallar.gece_yatisi_mutlak_tavan (24:00): gündüz uykuları kayınca gece yatışı bandın yatış aralığını aşabilir, 24:00'ü geçemez; aşımda 'alışma evresine özgü' uyarısı. (b) evrensel_kurallar.sabah_hedefi: yaş/uyku düzenine göre şablonun sabah hedefi — 5-8 ay 06:00, 9-10 ay 07:00 (08:00'e kadar), 11 ay→tek uyku 06:00 (katı), tek uyku 07:00 (08:00'e kadar). Yeni üretilen şablonlara uygulanır; mevcut şablonlar (K1) değişmez.",
     "1.4": "İlayda'nın 2026-09-21 tarihli sesli cevapları (ilayda-cevaplar/RAPOR.md) işlendi. (a) 12-18 ay TEK UYKU uyanıklık penceresi [240,360] → [300,360]: kendisi 'tek uykuda uyanıklık 5-6 saattir' dedi, tablodaki 4 saat alt sınırı buna aykırıydı. (b) Her banda kisa_uyku_esigi_dk eklendi — 6 ay altı 45 dk, 6 ay ve üstü 60 dk: 'bir saatin altında kalan uykulara kısa gündüz uykusu denir, altı ay üzeri bebeklerde; altı ayın altında 45 dakika'. Bu eşik hem K19 gündüz/gece sınıflandırmasını hem K20 parça birleştirmesini besler. (c) kestirme_protokolu: sure_dk (30) yerine sure_dk_min/sure_dk_max (30/60), gece_yatisina_kalan_min_dk 150 ve saat_penceresi 17:00-19:00 — '30 dakika minimum süredir, gece uykusunu geciktirmiyorsak bir saat de şekerleme yapabilir'. Tetikleyicinin erken uyanma DEĞİL gündüz uyku açığı olduğu açıklamaya yazıldı.",
     "1.3": "0-3 ay TEK KAYNAK (Faz P). 0-2_ay bandı 0-3 ay olarak yeniden etiketlendi ve yenidoğan alt bantları (0-1 ay 30-60 dk, 1-2 ay 45-75 dk, 2-3 ay 60-90 dk) BANDIN İÇİNE alındı; yas_bandi_getir artık yaşa göre doğru alt bandın penceresini çözüyor. Görsel 0-6 hafta tablosunun diğer değerleri de bu banda yazıldı: 24 saat toplam 14-17 saat, gece 9-12 saat, gündüz 4-8 saat, uyku sayısı 4-6+, yatma vakti 21:00-23:00, gündüz uykusunu bitirme 20:00. ÖNCEKİ DEĞERLER (40-80 dk / 8-10 saat / 5-7 saat / 4-5 uyku / 15-18 saat) ARTIK GEÇERSİZ. KB yas_buckets 0-6_hafta, 7-12_hafta ve 3_ay kayıtlarındaki çakışan sayısal alanlar ARŞİVLENDİ.",
@@ -43,21 +44,29 @@
     "gece_yatisi_mutlak_tavan": {
       "saat": "24:00",
       "dk": 1440,
+      "gecerli_plan_tipleri": ["egitim_plani"],
       "kaynak": "İlayda, 3. sesli cevaplar S3 (2026-09-27, ilayda-cevaplar-3/RAPOR.md): 'Gündüz uykuları kaydığı bir günde gece yatışı en geç yatış saatini geçebilir mi? Evet, 12'yi geçmeyeceği şekilde geçebilir. 12'yi geçerse orada sıkıntı var. Bu sadece alışma evresi diye not düşülmeli.' '12' gece yarısı (24:00) olarak okundu — teyit sorusu açık.",
-      "aciklama": "Gündüz uykuları kaydığında gece yatışı = son uyku bitişi + uyanıklık penceresi. Bandın yatış aralığının üst ucu (sabah hedefi + 1440 - gece uykusu alt sınırı) artık TAVAN DEĞİL; yatış yalnız bu mutlak saati geçemez. Bant üst ucu aşıldığında anneye 'bu geç yatış alışma evresine özgüdür' uyarısı gösterilir."
+      "aciklama": "Gündüz uykuları kaydığında gece yatışı = son uyku bitişi + uyanıklık penceresi. Bandın yatış aralığının üst ucu (sabah hedefi + 1440 - gece uykusu alt sınırı) artık TAVAN DEĞİL; yatış yalnız bu mutlak saati geçemez. Bant üst ucu aşıldığında anneye 'bu geç yatış alışma evresine özgüdür' uyarısı gösterilir. v1.6: YALNIZ egitim_plani'nda geçerli (alışma evresi eğitime özgü); egitim_bekleme ve yenidoğanda yatış bandın üst ucunda kalır, gerekirse son gündüz uykusu kısaltılır."
     },
     "sabah_hedefi": {
       "kaynak": "İlayda, 3. sesli cevaplar S4 (2026-09-27): '5., 6., 7. ayda altıda kalkmayı isteriz. 8. ayda da yine altıda kalkılabilir. 8. ve 9. aylarda sekize kadar kalkılabilir... 10. ay da aynı şekilde. Ama 11, 12, 13, 14, 15. ayda altı kabul edilir. Tek uykuya geçene kadar altıyı tavsiye ediyorum. Tek uykuya geçildiğinde sekize kadar kalkabilir.' 2. cevaplar S5: 'Toplam programda sabah uyanış her bebek için 07:00 gibi sabit.' '6.5' diye bir hedef YOK.",
-      "aciklama": "Yaş/uyku düzenine göre şablonun sabah hedefi (hedef) ve kabul edilen en geç kalkış (en_gec). Aralıklar düzeltilmiş ay, yarı açık [ay_min, ay_max). uyku_duzeni verilmişse yalnız o düzende geçerlidir (iki_uyku | tek_uyku). Aile seçimi SONRAKİ iş. Gerçek uyanış en_gec + uyari_toleransi_dk'yı aşarsa anneye bilgi uyarısı gösterilir; plan yine gerçek uyanıştan kurulur.",
+      "aciklama": "Yaş/uyku düzenine göre şablonun sabah hedefi (hedef) ve kabul edilen en geç kalkış (en_gec). Aralıklar düzeltilmiş ay, yarı açık [ay_min, ay_max). uyku_duzeni verilmişse yalnız o düzende geçerlidir (iki_uyku | tek_uyku). Aile seçimi SONRAKİ iş. Gerçek uyanış en_gec + uyari_toleransi_dk'yı aşarsa sabah bloğuna bilgi NOTU düşülür (v1.6: Dikkat kartı değil; tolerans kural başına, kural vermezse aşağıdaki varsayılan); plan yine gerçek uyanıştan kurulur.",
       "uyari_toleransi_dk": 30,
       "kurallar": [
         {"ay_min": 0, "ay_max": 5, "hedef": "07:00", "en_gec": null, "not": "İlayda bu yaş için sabah saati vermedi; programın genel 07:00'ı."},
-        {"ay_min": 5, "ay_max": 9, "hedef": "06:00", "en_gec": "06:00", "not": "5.-8. ay (3 uyku): 06:00."},
-        {"ay_min": 9, "ay_max": 11, "hedef": "07:00", "en_gec": "08:00", "not": "İki uykunun ilk dönemi (9.-10. ay): 08:00'e kadar kalkılabilir."},
-        {"ay_min": 11, "ay_max": 18, "uyku_duzeni": "iki_uyku", "hedef": "06:00", "en_gec": "06:00", "not": "11. aydan tek uykuya geçene kadar 06:00 (katı): 06:00'da kalkmayınca ikinci uykuyu reddediyor, gece uyanmaları başlıyor."},
-        {"ay_min": 12, "ay_max": 18, "uyku_duzeni": "tek_uyku", "hedef": "07:00", "en_gec": "08:00", "not": "Tek uykuya geçildiğinde 08:00'e kadar."},
-        {"ay_min": 18, "ay_max": 999, "hedef": "07:00", "en_gec": "08:00", "not": "Tek uyku dönemi (18 ay+): 08:00'e kadar."}
+        {"ay_min": 5, "ay_max": 9, "hedef": "06:00", "en_gec": "06:00", "uyari_toleransi_dk": 30, "not": "5.-8. ay (3 uyku): 06:00."},
+        {"ay_min": 9, "ay_max": 11, "hedef": "07:00", "en_gec": "08:00", "uyari_toleransi_dk": 0, "not": "İki uykunun ilk dönemi (9.-10. ay): 08:00'e kadar kalkılabilir."},
+        {"ay_min": 11, "ay_max": 18, "uyku_duzeni": "iki_uyku", "hedef": "06:00", "en_gec": "06:00", "uyari_toleransi_dk": 30, "not": "11. aydan tek uykuya geçene kadar 06:00 (katı): 06:00'da kalkmayınca ikinci uykuyu reddediyor, gece uyanmaları başlıyor."},
+        {"ay_min": 12, "ay_max": 18, "uyku_duzeni": "tek_uyku", "hedef": "07:00", "en_gec": "08:00", "uyari_toleransi_dk": 0, "not": "Tek uykuya geçildiğinde 08:00'e kadar."},
+        {"ay_min": 18, "ay_max": 999, "hedef": "07:00", "en_gec": "08:00", "uyari_toleransi_dk": 0, "not": "Tek uyku dönemi (18 ay+): 08:00'e kadar."}
       ]
+    },
+    "asama_gecisi": {
+      "kaynak": "İlayda, 4. cevap (2026-09-30): bir aşamada 7 gün dolup ilerlenemezse 1 hafta mola, sonra program en baştan.",
+      "uygulama_durumu": "HENÜZ UYGULANMADI — aşama geçişi işi bu kuralı okuyacak; motor şu an bu alanı KULLANMIYOR.",
+      "asamada_en_fazla_gun": 7,
+      "ilerlenemezse": {"mola_gun": 7, "sonra": "program_bastan"},
+      "aciklama": "Eğitim planında bir aşamada asamada_en_fazla_gun gün dolup sonraki aşamaya geçilemezse eğitim mola_gun gün durdurulur; mola bitince program 1. günden (en baştan) yeniden başlar."
     }
   },
   "yenidogan_ritim": {

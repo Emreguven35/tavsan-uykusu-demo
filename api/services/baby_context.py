@@ -93,9 +93,35 @@ def _sirala(ikili: tuple[int, int | None]) -> tuple[int, int]:
     return ikili[0], -1 if ikili[1] is None else ikili[1]
 
 
+def _gunduz_uykulari(tum_kayitlar: list[SleepLog], gun: date, tz: int
+                     ) -> list[tuple[int, int | None]] | None:
+    """Günün gündüz uykuları — MOTORUN kuralıyla (gun_kayitlari).
+
+    2026-09-30: eskiden yalnız `type == "nap"` sayılıyordu. K19'dan beri tip
+    yalnız "bu bir uyku" demek; mobil gündüz uykusunu `sleep` olarak da
+    gönderiyor ve bu kayıtlar sohbet bağlamına HİÇ girmiyordu (prod, son 7 gün:
+    gündüz uykusu olan 33 bebek-günün 19'unda sayı yanlış; örn. 11:02-13:06
+    `sleep` → "şekerleme" hiç yazılmadı). Motor K12 (sıfır süre), K13/K18
+    (çakışan/kopya), K19 (sınıf) ve K20 (parça birleştirme) kurallarını
+    uyguluyor; bağlam da aynı günü görmeli. Motor hata verirse None döner ve
+    çağıran eski sayıma düşer (bağlam Sor cevabını düşürmesin)."""
+    try:
+        k = plan_adapter.gun_kayitlari(tum_kayitlar, gun,
+                                       plan_adapter.DEFAULT_WAKE_MIN, tz)
+    except Exception:
+        logger.warning("gündüz uykuları motordan alınamadı (gün=%s)", gun,
+                       exc_info=True)
+        return None
+    return [(u["bas_dk"], u.get("bit_dk")) for u in k["gunduz_uykulari"]]
+
+
 def _gun_ozeti(gun_etiket: str, kayitlar: list[SleepLog], tz: int,
-               planlanan_yatis: int | None) -> str | None:
-    """Bir günün kayıtlarını tek cümlelik özete indir."""
+               planlanan_yatis: int | None,
+               gunduz: list[tuple[int, int | None]] | None = None) -> str | None:
+    """Bir günün kayıtlarını tek cümlelik özete indir.
+
+    `gunduz` verilirse gündüz uykuları oradan (motorun sınıflandırıp
+    birleştirdiği liste) alınır; verilmezse eski yol: yalnız `nap` kayıtları."""
     yatis: int | None = None
     uyanmalar: list[tuple[int, int | None]] = []      # (saat, süre_dk)
     sekerlemeler: list[tuple[int, int | None]] = []   # (başlangıç, bitiş)
@@ -107,12 +133,17 @@ def _gun_ozeti(gun_etiket: str, kayitlar: list[SleepLog], tz: int,
         if lg.ended_at is not None:
             sure = max(0, int((lg.ended_at - lg.started_at).total_seconds() // 60))
 
-        if lg.type == "sleep" and dk >= 16 * 60:          # akşam yatışı
+        uyku = lg.type in ("sleep", "nap", "sekerleme")
+        gece = uyku and (plan_adapter.uyku_sinifi_ham(lg.started_at, lg.ended_at, tz)
+                         == plan_adapter.GECE_UYKUSU)
+        if gece and dk >= 16 * 60:                        # akşam yatışı (K19)
             yatis = dk if yatis is None else max(yatis, dk)
         elif lg.type == "night_wake":
             uyanmalar.append((dk, sure))
-        elif lg.type == "nap":
+        elif gunduz is None and lg.type == "nap":
             sekerlemeler.append((dk, bitis_dk))
+    if gunduz is not None:
+        sekerlemeler = list(gunduz)
 
     parcalar: list[str] = []
     if yatis is not None:
@@ -229,7 +260,7 @@ def build_baby_context(db: Session, baby: Baby, today: date | None = None,
     for fark in range(LOOKBACK_DAYS):
         g = today - timedelta(days=fark)
         ozet = _gun_ozeti(GUN_ETIKET.get(fark, g.isoformat()), gunluk.get(g, []),
-                          tz, planlanan)
+                          tz, planlanan, _gunduz_uykulari(kayitlar, g, tz))
         if ozet:
             gun_ozetleri.append(ozet)
 

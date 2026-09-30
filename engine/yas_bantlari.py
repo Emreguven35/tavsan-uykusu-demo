@@ -76,6 +76,14 @@ def gece_yatisi_mutlak_tavan() -> int:
     return int(kural.get("dk") or 24 * 60)
 
 
+def gece_yatisi_mutlak_tavan_gecerli_mi(plan_tipi: str | None) -> bool:
+    """v1.6 — geç yatış istisnası (bant tavanını aşıp mutlak tavana kadar) bu
+    plan tipinde geçerli mi? "Alışma evresi" eğitime özgüdür: egitim_bekleme ve
+    yenidoğanda yatış bandın üst ucunda kalır (eski davranış)."""
+    kural = _tablo()["evrensel_kurallar"].get("gece_yatisi_mutlak_tavan") or {}
+    return plan_tipi in (kural.get("gecerli_plan_tipleri") or ["egitim_plani"])
+
+
 def sabah_hedefi(ay: float | None, tek_uyku: bool | None = None) -> dict | None:
     """Yaşa ve uyku düzenine göre sabah hedefi (v1.5, İlayda 3. cevaplar S4).
 
@@ -99,7 +107,11 @@ def sabah_hedefi(ay: float | None, tek_uyku: bool | None = None) -> dict | None:
             continue
         return {"hedef": k["hedef"], "hedef_dk": _hhmm_dk(k["hedef"]),
                 "en_gec": k.get("en_gec"), "en_gec_dk": _hhmm_dk(k.get("en_gec")),
-                "uyari_toleransi_dk": int(tablo_.get("uyari_toleransi_dk") or 0),
+                # v1.6 — tolerans KURAL BAŞINA: katı 06:00'da 30 dk, "08:00'e
+                # kadar" kurallarında 0 (en_gec zaten toleransın kendisi).
+                "uyari_toleransi_dk": int(k["uyari_toleransi_dk"]
+                                          if k.get("uyari_toleransi_dk") is not None
+                                          else tablo_.get("uyari_toleransi_dk") or 0),
                 "not": k.get("not")}
     return None
 
