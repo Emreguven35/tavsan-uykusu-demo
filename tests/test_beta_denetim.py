@@ -65,7 +65,10 @@ def check(name, cond, detail=""):
 
 
 SIMDI = datetime.now(timezone.utc).replace(microsecond=0)
-BUGUN = SIMDI.date()
+# TR günü (uygulama bugun_tr kullanır). UTC günü TR 00:00–03:00 arasında bir
+# gün geride kalıyor ve F6/F7 o saatlerde kırılıyordu.
+from api.zaman import bugun_tr               # noqa: E402
+BUGUN = bugun_tr()
 
 
 def hesap(email: str, **bebek):

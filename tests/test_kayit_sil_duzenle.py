@@ -284,6 +284,63 @@ check("PL6) DELETE → plan kayıtsız hâline döndü", r.status_code == 204
       and w3 == w0 and w3 != "08:40", f"{w0} / {w3}")
 
 # =============================================================================
+# G — "GERİ AL": silinen kayıt aynı client_id ile yeniden gelir (2026-10-01)
+# =============================================================================
+# Eskiden YENİ kimlikle yeni kayıt açılıyor, arşiv izi kalıyordu; mobil eski
+# kimlikle tekrar silince DELETE arşive bakıp 204 dönüyor, kayıt yaşıyordu.
+H4, BID4 = hesap("geri@test.com")
+G1 = kayit_ekle(H4, BID4, SIMDI - timedelta(hours=5), SIMDI - timedelta(hours=4), "geri-1")
+client.delete(f"/api/v1/logs/{G1}", headers=H4)
+check("G0) Ön koşul: silindi, arşivde", satir(G1) is None and len(arsiv(G1)) == 1)
+r = client.post("/api/v1/logs/batch", headers=H4, json={"logs": [{
+    "baby_id": BID4, "type": "nap", "started_at": iso(SIMDI - timedelta(hours=5)),
+    "ended_at": iso(SIMDI - timedelta(hours=4, minutes=10)), "client_id": "geri-1"}]})
+j = r.json()
+check("G1) Aynı client_id ile batch → kabul, created=1, skipped yok",
+      r.status_code == 200 and j["created"] == 1 and not j["skipped"], r.text[:300])
+check("G2) Kayıt ÖZGÜN kimlikle geri geldi (synced id = eski id)",
+      j["synced"][0]["id"] == G1 and satir(G1) is not None, str(j["synced"]))
+check("G3) Arşivden çıktı", arsiv(G1) == [], str(len(arsiv(G1))))
+check("G4) Geri gelen kayıt GÜNCEL veriyi taşıyor (yeni bitiş)",
+      satir(G1).ended_at.replace(tzinfo=None) == (SIMDI - timedelta(hours=4, minutes=10)).replace(tzinfo=None),
+      str(satir(G1).ended_at))
+r = client.delete(f"/api/v1/logs/{G1}", headers=H4)
+check("G5) Eski kimlikle yeniden silme GERÇEKTEN siliyor (204 + satır yok + arşivde)",
+      r.status_code == 204 and satir(G1) is None and len(arsiv(G1)) == 1, "")
+
+# Kopya temizliğinin sildiği kayıt geri ALINMAZ (ikizdi) — yeni kayıt açılır.
+import uuid as _uuid_g
+G2 = kayit_ekle(H4, BID4, SIMDI - timedelta(hours=8), SIMDI - timedelta(hours=7), "kopya-1")
+_db = SessionLocal()
+try:
+    _s = _db.get(SleepLog, _uuid_g.UUID(G2))
+    _db.add(SilinenSleepLog(sleep_log_id=_s.id, user_id=_s.user_id, baby_id=_s.baby_id,
+                            veri=json.dumps({"id": str(_s.id), "client_id": "kopya-1"},
+                                            ensure_ascii=False),
+                            sebep="K18.3 kopya (test)"))
+    _db.delete(_s)
+    _db.commit()
+finally:
+    _db.close()
+r = client.post("/api/v1/logs/batch", headers=H4, json={"logs": [{
+    "baby_id": BID4, "type": "nap", "started_at": iso(SIMDI - timedelta(hours=8)),
+    "ended_at": iso(SIMDI - timedelta(hours=7)), "client_id": "kopya-1"}]})
+check("G6) Kopya temizliğinin sildiği kayıt geri ALINMAZ (yeni kimlik, arşiv kalır)",
+      r.json()["synced"][0]["id"] != G2 and len(arsiv(G2)) == 1, r.text[:200])
+
+# Başka bebeğin arşivi karışmaz.
+G3 = kayit_ekle(H4, BID4, SIMDI - timedelta(hours=10), SIMDI - timedelta(hours=9), "bebek-1")
+client.delete(f"/api/v1/logs/{G3}", headers=H4)
+BID4b = client.post("/api/v1/babies", headers=H4,
+                    json={**TAM_PROFIL, "name": "İkinci",
+                          "birth_date": (SIMDI.date() - timedelta(days=200)).isoformat()}).json()["id"]
+r = client.post("/api/v1/logs/batch", headers=H4, json={"logs": [{
+    "baby_id": BID4b, "type": "nap", "started_at": iso(SIMDI - timedelta(hours=10)),
+    "ended_at": iso(SIMDI - timedelta(hours=9)), "client_id": "bebek-1"}]})
+check("G7) Aynı client_id BAŞKA bebekte → geri alma yok (arşiv kalır)",
+      r.json()["synced"][0]["id"] != G3 and len(arsiv(G3)) == 1, r.text[:200])
+
+# =============================================================================
 print("=" * 78)
 print("KAYIT SİL / DÜZENLE TEST SONUÇLARI")
 print("=" * 78)

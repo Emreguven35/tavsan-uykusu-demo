@@ -202,6 +202,7 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
 
         row = None
         kopya = False
+        geri = None                              # "Geri al": arşivdeki silinmiş kayıt
         if item.client_id is not None:
             # Birincil idempotency anahtarı. Bebek de süzülüyor: tekillik
             # (baby_id, client_id) üzerinde de tanımlı (K18.1).
@@ -216,6 +217,8 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
                                SleepLog.client_id == item.client_id)
                        .one_or_none())
             kopya = row is not None
+            if row is None:
+                geri = _silineni_bul(db, user, item)
         else:
             # K18.2 — client_id yok: zaman penceresiyle kopya ara.
             row = _kopya_bul(db, user, item)
@@ -226,12 +229,20 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
         _yeni_satir = row is None
         try:
             with db.begin_nested():
-                if row is None:                  # yeni kayıt
+                if row is None:                  # yeni kayıt (ya da geri alınan)
                     row = SleepLog(
                         user_id=user.id, baby_id=item.baby_id, type=item.type,
                         started_at=item.started_at, ended_at=item.ended_at,
                         notes=item.notes, client_id=item.client_id,
                     )
+                    if geri is not None:
+                        # GERİ AL: özgün kimlikle geri gelir, arşivden çıkar.
+                        # Mobilin elindeki eski kimlik geçerli kalır.
+                        row.id = geri.sleep_log_id
+                        db.query(SilinenSleepLog).filter(
+                            SilinenSleepLog.user_id == user.id,
+                            SilinenSleepLog.sleep_log_id == geri.sleep_log_id,
+                        ).delete(synchronize_session=False)
                     db.add(row)
                     created += 1
                 else:                            # mevcut → güncelle (idempotent)
@@ -856,6 +867,34 @@ def timeline(
 # Tek kayıt: sil / düzelt
 # ---------------------------------------------------------------------------
 SILME_SEBEBI = "kullanici_sildi"
+
+
+def _silineni_bul(db: Session, user: User, item) -> "SilinenSleepLog | None":
+    """"Geri al" — kullanıcının SİLDİĞİ (kopya temizliği değil) ve aynı
+    client_id + bebekle arşive düşmüş son kayıt.
+
+    Silme sonrası aynı client_id ile gelen batch eskiden YENİ kimlikle yeni
+    kayıt açıyordu; arşivdeki iz kalıyordu ve mobil eski kimlikle yeniden
+    silmek istediğinde DELETE arşive bakıp 204 dönüyor, kayıt yaşamaya devam
+    ediyordu. Arşiv JSON'u _arsiv_json biçiminde (varsayılan ayraçlar)."""
+    if not item.client_id:
+        return None
+    desen = f'%"client_id": {json.dumps(item.client_id, ensure_ascii=False)}%'
+    adaylar = (db.query(SilinenSleepLog)
+               .filter(SilinenSleepLog.user_id == user.id,
+                       SilinenSleepLog.baby_id == item.baby_id,
+                       SilinenSleepLog.sebep == SILME_SEBEBI,
+                       SilinenSleepLog.veri.like(desen))
+               .order_by(SilinenSleepLog.silindi_at.desc()).all())
+    for a in adaylar:
+        try:
+            if json.loads(a.veri).get("client_id") == item.client_id:
+                # Özgün kimlik başka bir satırda yaşıyorsa (olmamalı) geri alma.
+                if db.get(SleepLog, a.sleep_log_id) is None:
+                    return a
+        except (ValueError, TypeError):
+            continue
+    return None
 
 
 def _kayit_bul(db: Session, user: User, log_id: uuid.UUID) -> SleepLog:

@@ -55,7 +55,10 @@ muhurle()                                    # canlı Sonnet YOK
 
 Base.metadata.create_all(bind=engine)
 client = TestClient(app)
-TODAY = datetime.now(timezone.utc).date()
+# TR günü (uygulama bugun_tr kullanır). UTC günü TR 00:00–03:00 arasında bir
+# gün geride kalıyor ve 4a o saatlerde 10 yerine 11 görüyordu.
+from api.zaman import bugun_tr                            # noqa: E402
+TODAY = bugun_tr()
 
 results: list[tuple[str, bool, str]] = []
 
