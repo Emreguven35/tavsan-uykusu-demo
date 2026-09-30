@@ -253,6 +253,21 @@ check("I3) Eksik kayıt yok",
       sb(i) and sb(i)["eksik_kayit"] is None, str(sb(i)))
 
 # =============================================================================
+# N — Sabahın ilk dakikaları: sıradaki blok GECE UYKUSU DEĞİL, 1. gündüz uykusu
+# =============================================================================
+# 2026-09-30 prod vakası (11 ay): 06:30 uyanış girildi, 06:57 civarında mobil
+# "sıradaki" kartını sordu. Sunucu nap_1 dönüyordu; bu davranış sabitlensin.
+# Uyanış kaydı henüz ulaşmamışken de (mobil kaydı 4 sn sonra gönderdi) ve
+# şablonun sabah saatinden ÖNCE sorulduğunda da gece uykusu dönmemeli.
+for _ad, _loglar, _now in (
+        ("wake 06:30 kayıtlı, 06:57", [L("wake", 6 * 60 + 30)], 6 * 60 + 57),
+        ("uyanış kaydı YOK, 06:57", [], 6 * 60 + 57),
+        ("uyanış kaydı YOK, şablon sabahından 3 dk önce", [], WAKE - 3)):
+    _n = hesapla(_loglar, now_minute=_now)
+    check(f"N) {_ad} → sıradaki nap_1 (gece uykusu değil)",
+          sb(_n) and sb(_n)["key"] == "nap_1", str(sb(_n)))
+
+# =============================================================================
 # J — Sözleşme: değerler yalnız tanımlı kümeden çıkar
 # =============================================================================
 _GUVEN = {"kesin", "tahmini"}
