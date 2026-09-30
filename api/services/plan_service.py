@@ -1013,7 +1013,13 @@ def egitim_zamani_geldi_mi(baby: Baby, plan: SleepPlan | None,
     # uygunluk kontrolünün tamamı yeniden koşturulur, yalnız yaş bakılmaz.
     hafta = etkin_dogum_haftasi(baby, dogum_haftasi or icerik.get("dogum_haftasi"))
     yas = hesapla_yas_ay(baby.birth_date.isoformat(), hafta)
-    if yas["duzeltilmis_ay"] < EGITIM_YAS_ALT_SINIRI:
+    # 2026-09-30 (onaylı): geçiş, ekranda gösterilen tahmini_tarih GÜNÜ olur.
+    # Eskiden yuvarlanmış yaşa bakılıyordu (4.95 → 5.0): program gösterilen
+    # tarihten 1-2 gün önce başlıyordu. Tarih ile tetik artık AYNI fonksiyondan.
+    bugun = bugun_tr()
+    baslangic = date.fromisoformat(
+        egitim_baslangic_hesapla(baby, bugun, hafta)["tahmini_tarih"])
+    if bugun < baslangic:
         return False
     sonuc = egitim_uygunlugu_kontrol(
         yas["duzeltilmis_ay"], hafta, getattr(baby, "saglik_problemi", None),

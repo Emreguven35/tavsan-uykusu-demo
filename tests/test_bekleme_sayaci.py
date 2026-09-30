@@ -111,6 +111,11 @@ class _B:
     dogum_haftasi = None
 
 
+class _B_TAM(_B):                       # geçiş kontrolü uygunluk alanlarını da okur
+    saglik_problemi = None
+    night_wakes = 2
+
+
 check("C2) 10 Kasım'da 1, 11 Kasım'da 0, sonrası 0 (negatif değil)",
       [plan_service.egitim_baslangic_hesapla(_B, d)["kalan_gun"]
        for d in (date(2026, 11, 10), date(2026, 11, 11), date(2026, 11, 20))] == [1, 0, 0])
@@ -161,6 +166,31 @@ check("G2) Eski planın metnindeki '55 gün' → '42 gün'; '55 günlük' ve '15
       "yaklaşık 42 gün sonra" in _taze["markdown"]
       and "55 günlük" in _taze["markdown"] and "155 gün" in _taze["markdown"],
       _taze["markdown"])
+
+# --- H — geçiş, ekrandaki tahmini_tarih GÜNÜ (onaylı, 2026-09-30) -----------
+# Eskiden yuvarlanmış yaş (4.95 → 5.0) geçişi 9 Kasım'da tetikliyordu.
+class _Bekleyen:
+    content = {"type": "egitim_bekleme", "dogum_haftasi": 40}
+
+
+_tetik = {}
+for _g in (9, 10, 11):
+    with saat_sabitle(an(11, _g)):
+        _tetik[_g] = plan_service.egitim_zamani_geldi_mi(_B_TAM, _Bekleyen)
+check("H1) Tetik: 9 ve 10 Kasım YOK, 11 Kasım VAR", _tetik == {9: False, 10: False, 11: True},
+      str(_tetik))
+with saat_sabitle(an(11, 10)):
+    t10 = client.get(f"/api/v1/plans/today?baby_id={DEFNE}", headers=H).json()["content"]
+check("H2) 10 Kasım GET /plans/today: geçiş YOK (bekleme, 1 gün kaldı)",
+      not t10.get("egitim_zamani_geldi") and t10.get("type") == "egitim_bekleme"
+      and (t10.get("egitim_baslangic") or {}).get("kalan_gun") == 1, str({k: t10.get(k) for k in ("type", "egitim_zamani_geldi", "egitim_baslangic")}))
+with saat_sabitle(an(11, 11)):
+    t11 = client.get(f"/api/v1/plans/today?baby_id={DEFNE}", headers=H).json()["content"]
+check("H3) 11 Kasım GET /plans/today: geçiş VAR (egitim_zamani_geldi + yeniden_uretiliyor)",
+      t11.get("egitim_zamani_geldi") is True and t11.get("yeniden_uretiliyor") is True,
+      str({k: t11.get(k) for k in ("type", "egitim_zamani_geldi", "yeniden_uretiliyor")}))
+check("H4) Geçiş günü = ekrandaki tahmini_tarih (2026-11-11)",
+      (t10.get("egitim_baslangic") or {}).get("tahmini_tarih") == "2026-11-11")
 
 check("Z) Canlı LLM çağrısı YOK", canli_cagri_sayisi() == 0, canli_cagri_sayisi())
 
