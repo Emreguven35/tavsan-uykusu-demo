@@ -271,7 +271,9 @@ def rehber_markdown(rehber: dict, bebek_ad: str, yas: dict,
         L += [
             f"Uyku eğitimi düzeltilmiş yaşa göre {egitim['alt_sinir_ay']}. ayın "
             f"dolmasıyla başlar — bebeğiniz için tahminen "
-            f"**{egitim['tahmini_tarih']}** (yaklaşık {egitim['kalan_gun']} gün). "
+            # Kalan gün METNE yazılmaz: metin saklanır, sayı ertesi gün eskir
+            # (uygulama geri sayımı egitim_baslangic.kalan_gun'dan gösterir).
+            f"**{egitim['tahmini_tarih']}**. "
             "O güne kadar aşağıdaki ritim yeterlidir.",
             "",
         ]

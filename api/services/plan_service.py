@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import os
 import time
 import uuid
@@ -587,8 +588,8 @@ def generate_content(baby: Baby, req_overrides: dict | None,
     # yapmasın. Aynı sözlük hem prompt'a hem content'e gider — metindeki tarih
     # ile mobilin gösterdiği tarih AYRIŞAMAZ.
     if not gun_bolumu_zorunlu:
-        param["egitim_baslangic"] = yenidogan.egitim_uygunluk_tarihi(
-            baby.birth_date.isoformat(), param["yas"]["duzeltilmis_ay"])
+        param["egitim_baslangic"] = egitim_baslangic_hesapla(
+            baby, bugun_tr(), dogum_haftasi)
 
     # Gün bölümleri ayrıştırılamazsa plan REDDEDİLİR ve yeniden üretilir: eğitim
     # ekranının sessizce boş kalmasının sebebi buydu (başlık biçimi LLM'e bağlıydı,
@@ -735,8 +736,7 @@ def _yenidogan_content(baby: Baby, param: dict, dogum_haftasi: int | None) -> di
     except yenidogan.YenidoganHatasi as e:
         raise PlanError(str(e)) from e
 
-    egitim = yenidogan.egitim_uygunluk_tarihi(
-        baby.birth_date.isoformat(), yas["duzeltilmis_ay"])
+    egitim = egitim_baslangic_hesapla(baby, bugun_tr(), dogum_haftasi)
     markdown = yenidogan.rehber_markdown(
         rehber, baby.name or "Bebeğiniz", yas, kurallar=kurallar, egitim=egitim)
 
@@ -1019,6 +1019,59 @@ def egitim_zamani_geldi_mi(baby: Baby, plan: SleepPlan | None,
         yas["duzeltilmis_ay"], hafta, getattr(baby, "saglik_problemi", None),
         ilk_tam_sayi(baby.night_wakes), "beyan")
     return bool(sonuc["uygun_mu"])
+
+
+def egitim_baslangic_hesapla(baby: Baby, gun: date,
+                             dogum_haftasi: int | None = None) -> dict:
+    """Eğitimin açılacağı gün ve KALAN GÜN — `gun`e göre, her çağrıda taze.
+
+    2026-09-30: `kalan_gun` plan üretilirken bir kez yazılıp saklanıyordu;
+    17 Eylül'de üretilen bekleme planı 30 Eylül'de hâlâ "55 gün kaldı"
+    gösteriyordu (doğrusu 42). Artık saklanan değere güvenilmez.
+
+    Tarih, düzeltilmiş yaşın YUVARLAMASIZ 5.0 aya ulaştığı ilk gündür
+    ("5. ayını doldurduğunda"; hesapla_yas_ay ile aynı 30.44 gün/ay ve 4 hafta
+    = 1 ay düzeltmesi). Eski formül kalanı YUVARLANMIŞ yaştan türetiyordu
+    (0.1 ay ≈ 3 gün adım): her gün yeniden hesaplansa sayaç 3'er atlar, tarih
+    günden güne oynardı. Burada tarih doğumdan sabittir, sayaç günde tam 1
+    azalır. NOT: egitim_zamani_geldi_mi yuvarlanmış yaşa bakar (4.95 → 5.0),
+    geçiş bu tarihten ~1-2 gün önce tetiklenebilir."""
+    hafta = etkin_dogum_haftasi(baby, dogum_haftasi)
+    dogum = baby.birth_date.isoformat()
+    yas = hesapla_yas_ay(dogum, hafta, bugun=gun)
+    sablon = yenidogan.egitim_uygunluk_tarihi(dogum, yas["duzeltilmis_ay"], bugun=gun)
+    erken_ay = (40 - hafta) / 4 if hafta < 40 else 0.0
+    gun_sayisi = math.ceil((EGITIM_YAS_ALT_SINIRI + erken_ay) * yenidogan.GUN_PER_AY)
+    tarih = baby.birth_date + timedelta(days=gun_sayisi)
+    return dict(sablon, kalan_gun=max(0, (tarih - gun).days),
+                tahmini_tarih=tarih.isoformat())
+
+
+def zamana_bagli_alanlari_tazele(content: dict | None, baby: Baby | None,
+                                 gun: date) -> dict | None:
+    """Plan içeriğinde ZAMANA BAĞLI alanları `gun`e göre yeniden hesapla.
+
+    Plan döndüren her uç (bkz. plans._plan_yaniti) bunu çağırır; DB'ye
+    yazmaz. `yas` (ay yaşı; plan geçmişi "X aylık" buradan yazıyor) ve
+    `egitim_baslangic` (kalan gün / başlangıç tarihi) tazelenir. Bant/bucket
+    ve uyarılar run_adaptation'da zaten her hesapta tazeleniyor."""
+    if not content or baby is None or baby.birth_date is None:
+        return content
+    c = dict(content)
+    hafta = etkin_dogum_haftasi(baby, c.get("dogum_haftasi"))
+    if "yas" in c:
+        c["yas"] = hesapla_yas_ay(baby.birth_date.isoformat(), hafta, bugun=gun)
+    if c.get("egitim_baslangic"):
+        eski = (c["egitim_baslangic"] or {}).get("kalan_gun")
+        c["egitim_baslangic"] = egitim_baslangic_hesapla(baby, gun, hafta)
+        yeni = c["egitim_baslangic"]["kalan_gun"]
+        # Eski planların METNİNDE de üretim günündeki sayı yazılı ("yaklaşık
+        # 55 gün sonra"). Yalnız saklanan eski sayı + tam "gün" kelimesi
+        # değişir; "13 günlük" gibi ifadeler eşleşmez.
+        if isinstance(eski, int) and eski != yeni and isinstance(c.get("markdown"), str):
+            c["markdown"] = re.sub(rf"(?<![\d.,]){eski}(\s+gün)(?![a-zçğıöşü])",
+                                   rf"{yeni}\1", c["markdown"])
+    return c
 
 
 def egitim_baslangicini_tamamla(db: Session, baby: Baby) -> date:

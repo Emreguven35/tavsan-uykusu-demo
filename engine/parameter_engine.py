@@ -65,14 +65,20 @@ def load_decision_tree() -> dict:
 # ---------------------------------------------------------------------------
 # Yaş hesabı
 # ---------------------------------------------------------------------------
-def hesapla_yas_ay(dogum_tarihi: str, dogum_haftasi: int = 40) -> dict:
+def hesapla_yas_ay(dogum_tarihi: str, dogum_haftasi: int = 40,
+                   bugun=None) -> dict:
     """
     Bebeğin gerçek yaşını ve düzeltilmiş yaşını ay olarak hesapla.
     Prematüre ise: her 4 hafta erkenlik = 1 ay geri (kayıt40 kuralı).
+    `bugun` verilirse yaş O GÜNE göre hesaplanır (geçmiş plan / tarih arama);
+    verilmezse Türkiye'nin bugünü.
     """
     dt = datetime.strptime(dogum_tarihi, "%Y-%m-%d").date()
-    from api.zaman import bugun_tr          # B6: yaş Türkiye gününe göre
-    today = bugun_tr()
+    if bugun is not None:
+        today = bugun
+    else:
+        from api.zaman import bugun_tr      # B6: yaş Türkiye gününe göre
+        today = bugun_tr()
     gercek_ay = max(0, (today - dt).days / 30.44)
 
     duzeltilmis_ay = gercek_ay

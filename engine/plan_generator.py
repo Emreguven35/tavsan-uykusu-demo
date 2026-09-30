@@ -183,12 +183,13 @@ Bu bebek {eb['alt_sinir_ay']}. ayını DOLDURMADI, bu yüzden eğitim BUGÜN ba�
 
 EĞİTİMİN AÇILACAĞI TARİH (MOTORDAN GELDİ — AYNEN KULLAN):
 - Tahmini tarih: {eb['tahmini_tarih']}
-- Kalan gün: {eb['kalan_gun']}
 - {eb['aciklama']}
 
 TARİH KURALI (KESİN): Kendin TARİH HESAPLAMA, gün/ay EKLEME ÇIKARMA, doğum \
 tarihinden yola çıkarak "şu ayda dolar" gibi bir sonuç ÜRETME. Yukarıdaki \
-tahmini tarihi ve kalan gün sayısını AYNEN yaz. Bebek prematüreyse bu tarih \
+tahmini tarihi AYNEN yaz. KALAN GÜN SAYISI YAZMA ("X gün kaldı / sonra" gibi): \
+metin saklanır ve o sayı ertesi gün yanlış olur; uygulama geri sayımı kendisi \
+gösterir. Bebek prematüreyse bu tarih \
 düzeltilmiş yaşa göre hesaplanmıştır; takvim yaşından yapılan hesap YANLIŞ olur.
 
 "## Eğitim Planı" bölümünü YAZ — ama ÖNİZLEME olarak. Bölümün EN BAŞINA şu \
@@ -456,8 +457,8 @@ def _fallback_plan(param: dict) -> str:
         if eb:
             lines.append(
                 f"> **Eğitim bugün başlamıyor.** Bebeğiniz {eb['alt_sinir_ay']}. ayını "
-                f"doldurduğunda — tahminen **{eb['tahmini_tarih']}**, yaklaşık "
-                f"{eb['kalan_gun']} gün sonra — aşağıdaki program başlayabilir. "
+                f"doldurduğunda — tahminen **{eb['tahmini_tarih']}** — "
+                "aşağıdaki program başlayabilir. "
                 "O güne kadar günlük program ve ön hazırlık uygulanır; "
                 "eğitim planı bölümü ÖNİZLEMEDİR.")
         else:

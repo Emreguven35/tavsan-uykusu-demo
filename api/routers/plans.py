@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from api.db import get_db
 from api.deps import get_current_user, get_owned_baby
-from api.models import SleepPlan, User
+from api.models import Baby, SleepPlan, User
 from api.schemas.plan import (
     PlanAdaptResp, PlanGenerateReq, PlanJobResp, PlanJobStatusResp, PlanResp,
     RegresyonCevapReq, RegresyonCevapResp,
@@ -33,15 +33,24 @@ logger = logging.getLogger("tavsan.plans")
 router = APIRouter(prefix="/plans", tags=["plans"])
 
 
-def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None) -> PlanResp | None:
+def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
+                 referans: date | None = None) -> PlanResp | None:
     """PlanResp + B4 kilidi. Premium değilse eğitim programı çıkarılır
-    (services.erisim.plan_icerigi_kilitle); günlük çizelge kalır."""
+    (services.erisim.plan_icerigi_kilitle); günlük çizelge kalır.
+
+    ZAMANA BAĞLI ALANLAR (2026-09-30): `egitim_baslangic.kalan_gun` ve `yas`
+    saklanan değerden DEĞİL, `referans` güne göre yeniden hesaplanır — bekleme
+    planı 17 Eylül'deki "55 gün kaldı"da donuyordu. `referans` verilmezse
+    planın kendi tarihi (geçmiş plan o günkü yaşı gösterir); /plans/today
+    bugünü verir (geçişte dönen plan eski tarihli olabilir)."""
     if plan is None:
         return None
     from api.deps import premium_karari
     from api.services import erisim
     premium, _k = premium_karari(db, user)
     resp = PlanResp.model_validate(plan)
+    resp.content = plan_service.zamana_bagli_alanlari_tazele(
+        resp.content, db.get(Baby, plan.baby_id), referans or plan.plan_date)
     icerik, kilitli = erisim.plan_icerigi_kilitle(resp.content or {}, premium)
     if kilitli:
         resp.content = icerik
@@ -259,7 +268,7 @@ def get_today_plan(baby_id: uuid.UUID = Query(...), db: Session = Depends(get_db
             "detail": detay,
             "plan_isi": ({"job_id": is_["job_id"], "status": is_["status"]}
                          if is_ else None)})
-    return _plan_yaniti(db, user, plan)
+    return _plan_yaniti(db, user, plan, referans=bugun_tr())
 
 
 @router.get("", response_model=list[PlanResp])
