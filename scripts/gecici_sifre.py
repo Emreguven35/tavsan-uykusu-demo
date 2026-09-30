@@ -38,6 +38,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv                                # noqa: E402
+from sqlalchemy import String                                 # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
@@ -60,7 +61,11 @@ def _sayimlar(db, user_id) -> dict[str, int]:
         tablo = m.__table__
         if tablo.name in DEGISEN or "user_id" not in tablo.c or ad == "User":
             continue
-        out[tablo.name] = db.query(m).filter(tablo.c.user_id == user_id).count()
+        # Bazı tablolarda user_id METİN (ör. plan_uretim_isleri). Postgres
+        # varchar = uuid karşılaştırmasını reddeder; SQLite sessizce geçer.
+        kolon = tablo.c.user_id
+        deger = str(user_id) if isinstance(kolon.type, String) else user_id
+        out[tablo.name] = db.query(m).filter(kolon == deger).count()
     return out
 
 
