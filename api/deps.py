@@ -88,6 +88,24 @@ def get_current_user(
     return user
 
 
+def get_optional_user(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """Oturum İSTEĞE BAĞLI uçlar için: geçerli token → kullanıcı, yoksa None.
+
+    Eksik, bozuk ya da süresi dolmuş token 401 DEĞİL None'dır — uç anonim
+    yanıt verir (ör. uygulama açılışında token yenilenmeden önce /config)."""
+    if creds is None or not creds.credentials:
+        return None
+    payload = decode_access_token(creds.credentials)
+    try:
+        user_id = uuid.UUID(str((payload or {}).get("sub")))
+    except (ValueError, TypeError):
+        return None
+    return db.get(User, user_id)
+
+
 def require_demo_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")):
     """Demo endpoint'leri (/ask, /avatar-session) için paylaşılan anahtar koruması.
 

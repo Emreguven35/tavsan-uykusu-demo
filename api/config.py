@@ -195,6 +195,15 @@ class Settings:
         # göreli path'e düşülür (lokal geliştirme + mevcut testler bozulmaz).
         self.public_base_url = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
 
+        # --- Arayüz anahtarı (GET /api/v1/config) -----------------------------
+        # Yeni tasarımı build'siz aç/kapat. Karar: listedeki oturumlu kullanıcıya
+        # True; değilse genel bayrak (varsayılan KAPALI). E-postalar küçük harf.
+        self.ui_yeni_tasarim = _bayrak("UI_YENI_TASARIM")
+        self.ui_yeni_tasarim_kullanicilar = frozenset(
+            e.strip().lower()
+            for e in (os.getenv("UI_YENI_TASARIM_KULLANICILAR") or "").split(",")
+            if e.strip())
+
         # --- Abonelik / beta (Faz G5 → Faz V) --------------------------------
         # Gerçek Apple/Google IAP doğrulaması ayrı sprint. Beta süresince premium'u
         # SUNUCU TARAFI bu bayrakla aç — istemcinin gönderdiği bir "premium"

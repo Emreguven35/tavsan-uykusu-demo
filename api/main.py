@@ -50,6 +50,7 @@ from api.routers import feedback      # noqa: E402 — plan geri bildirimi
 from api.routers import webhooks      # noqa: E402 — RevenueCat (B4)
 from api.routers import kvkk as kvkk_router  # noqa: E402 — KVKK (B5)
 from api.routers import denetim as denetim_router  # noqa: E402 — imzalı denetim sayfası
+from api.routers import app_config    # noqa: E402 — istemci ayarları / arayüz anahtarı
 from api.services import notifier     # noqa: E402 — Faz 6.2 (bildirim zamanlayıcısı)
 from api.services import storage       # noqa: E402 — medya deposu (ses paketleri)
 from api.services import voice_temizlik, voice_uretim  # noqa: E402 — Faz 4 (v2.3)
@@ -114,7 +115,7 @@ def _ses_temizligi_durdur() -> None:
 # sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
 #
 # Sentry'den ÖNCE tanımlı olmak zorunda: release etiketi olarak oraya geçiyor.
-APP_VERSION = os.getenv("APP_VERSION", "v2.4.7")
+APP_VERSION = os.getenv("APP_VERSION", "v2.4.8")
 
 # Hata izleme — YALNIZ production + SENTRY_DSN. Uygulama nesnesi kurulmadan ÖNCE
 # başlatılır ki Starlette/FastAPI entegrasyonları middleware zincirini sarabilsin.
@@ -297,6 +298,7 @@ app.include_router(feedback.router, prefix=API_V1_PREFIX)
 app.include_router(webhooks.router, prefix=API_V1_PREFIX)
 app.include_router(kvkk_router.consents_router, prefix=API_V1_PREFIX)
 app.include_router(kvkk_router.account_router, prefix=API_V1_PREFIX)
+app.include_router(app_config.router, prefix=API_V1_PREFIX)  # GET /api/v1/config
 # SIRA ÖNEMLİ — media router, dosyanın ilerisindeki imzalı
 # `/media/{yol:path}` yakalayıcısından ÖNCE kaydedilir. Ters sırada
 # /media/videos/x.mp4 de imza ister ve iOS oynatıcı 403 alırdı.
