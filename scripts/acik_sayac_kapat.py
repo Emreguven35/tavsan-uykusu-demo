@@ -163,10 +163,11 @@ def _tahmini_kapanis(db, kayit, bas: datetime, bebek_kayitlari: list):
     sabah 09:50'de başlayan bir gündüz uykusuna 11 saatlik gece tavanı
     uygulanıyor ve kayıt "sonraki kaydın başlangıcına" kadar uzuyordu."""
     nap_dk, gece_dk = _bant_sureleri(db, kayit.baby_id)
-    yerel_dk = (bas + timedelta(minutes=TZ_OFFSET_MIN))
-    yerel_dk = yerel_dk.hour * 60 + yerel_dk.minute
-    gece_mi = (kayit.type == "sleep"
-               and (yerel_dk >= GECE_BASLANGIC_DK or yerel_dk < GUNDUZ_BASLANGIC_DK))
+    # v1.6: sınıf MOTORUN K19 kuralıyla (tipten bağımsız, gece 19:00+). Eski
+    # yerel kural yalnız `sleep`e bakıyordu: 00:15'te açılmış `nap` 60 dk'lık
+    # gündüz uykusu diye kapanıyordu.
+    from api.services.plan_adapter import GECE_UYKUSU, uyku_sinifi_ham
+    gece_mi = uyku_sinifi_ham(bas, None, TZ_OFFSET_MIN) == GECE_UYKUSU
     sure_dk = gece_dk if gece_mi else nap_dk
     adaylar = [(bas + timedelta(minutes=sure_dk),
                 f"bant süresi +{sure_dk} dk"),
