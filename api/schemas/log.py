@@ -133,3 +133,48 @@ class WeeklySummaryResp(BaseModel):
     total_night_wakes: int
     total_night_feeds: int
     days: list[DaySummary]
+
+
+# --- GET /logs/timeline (temiz zaman çizelgesi) -----------------------------
+class TimelineOturum(BaseModel):
+    """Motorun temizlediği TEK uyku oturumu (K13 tekil, K20 birleşik).
+
+    Gece yarısını aşan oturum BİR KEZ döner (bittiği günün altında — motorun
+    kuralı); istemci günlere böler. `parcalar` yalnız birleşik oturumda dolu."""
+    id: uuid.UUID
+    client_id: str | None
+    baslangic: datetime
+    bitis: datetime | None
+    sinif: str                         # gece | gunduz
+    sure_dk: int | None
+    devam: bool = False                # açık kayıt (bitis=null)
+    otomatik_kapatildi: bool = False   # sunucu kapattı (not) ya da motor tahmini
+    parcalar: list[uuid.UUID] = []
+
+
+class TimelineSabah(BaseModel):
+    saat: str                          # "06:30" (TR)
+    kaynak: str                        # kayit | erken_uyanma
+
+
+class TimelineYokSayilan(BaseModel):
+    id: uuid.UUID | None
+    kod: str
+    sebep: str
+
+
+class TimelineGun(BaseModel):
+    tarih: date
+    oturumlar: list[TimelineOturum]
+    gece_dk: int
+    gunduz_dk: int
+    gece_uyanma: int
+    sabah_uyanisi: TimelineSabah | None
+    yok_sayilan: list[TimelineYokSayilan]
+
+
+class TimelineResp(BaseModel):
+    baby_id: uuid.UUID
+    from_date: date
+    to_date: date
+    gunler: list[TimelineGun]

@@ -40,11 +40,12 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from api.db import get_db
-from api.deps import get_current_user
+from api.deps import get_current_user, get_owned_baby
 from api.models import Baby, SilinenSleepLog, SleepLog, User
 from api.schemas.log import (
     BatchReq, BatchResult, DaySummary, SkippedEntry, SleepLogIn, SleepLogPatch,
-    SleepLogResp, SyncedEntry, WeeklySummaryResp,
+    SleepLogResp, SyncedEntry, TimelineGun, TimelineOturum, TimelineResp,
+    TimelineSabah, TimelineYokSayilan, WeeklySummaryResp,
 )
 from api.services import plan_adapter
 from api.services.plan_adapter import (
@@ -744,6 +745,111 @@ def weekly_summary(
         total_sleep_hours=round(total_sleep, 2),
         total_night_wakes=int(total_wakes), total_night_feeds=int(total_feeds),
         days=days)
+
+
+# ---------------------------------------------------------------------------
+# GET /logs/timeline — temiz zaman çizelgesi (mobil "Son 7 gün")
+# ---------------------------------------------------------------------------
+TIMELINE_EN_FAZLA_GUN = 14
+TIMELINE_ONBELLEK_SN = 60
+_OTOMATIK_NOT = "otomatik kapat"          # sunucunun kapattığı kayıtların notu
+
+
+def _tr_an(gun: date, dakika: int) -> datetime:
+    """Yerel gün + o günün dakikası (1440'ı aşabilir) → UTC an."""
+    return tr_gun_araligi(gun)[0] + timedelta(minutes=int(dakika))
+
+
+def _oturum(k: dict, sinif: str, satirlar: dict) -> TimelineOturum:
+    """Motorun temizlediği kayıt sözlüğü → yanıt oturumu."""
+    parcalar = [p for p in (k.get("_parcalar") or []) if p]
+    idler = parcalar or [k["id"]]
+    ham = [satirlar[i] for i in idler if i in satirlar]
+    ana = satirlar.get(k["id"])
+    bit_lin = k.get("bit_dk_lin")
+    devam = bool(k.get("_devam")) or bit_lin is None
+    return TimelineOturum(
+        id=uuid.UUID(k["id"]),
+        client_id=ana.client_id if ana is not None else None,
+        baslangic=_tr_an(k["bas_gun"], k["bas_dk"]),
+        bitis=None if devam else _tr_an(k["bas_gun"], bit_lin),
+        sinif="gece" if sinif == plan_adapter.GECE_UYKUSU else "gunduz",
+        sure_dk=None if devam else k.get("sure_dk"),
+        devam=devam,
+        otomatik_kapatildi=(bool(k.get("_otomatik_kapandi"))
+                            or any(_OTOMATIK_NOT in (r.notes or "") for r in ham)),
+        parcalar=[uuid.UUID(p) for p in parcalar] if len(parcalar) > 1 else [],
+    )
+
+
+@router.get("/timeline", response_model=TimelineResp)
+def timeline(
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    baby_id: uuid.UUID = Query(...),
+    days: int = Query(default=7, ge=1, le=TIMELINE_EN_FAZLA_GUN),
+):
+    """Son `days` Türkiye gününün TEMİZ oturum listesi (eskiden yeniye).
+
+    Temizlik plan motorunun kendisidir (`gun_kayitlari`), weekly-summary ile
+    AYNI çağrı: sıfır süreli ve sabah cevabı kayıtları oturum değildir (sabah
+    uyanışı `sabah_uyanisi`nda), çakışanlar tekil (K13), parçalar birleşik
+    (K20), sabah dışında biten 16 saat üstü kayıt (K21) oturum değil ve
+    `yok_sayilan`da. Gece uykusu BİTTİĞİ günün altında BİR KEZ döner.
+    `gece_dk + gunduz_dk` = weekly-summary `sleep_hours × 60` (24 sa kırpması
+    hariç). Açık kayıt: bitis=null, devam=true, süresi toplama girmez."""
+    baby = get_owned_baby(baby_id, db, user)
+    today = bugun_tr()
+    start = today - timedelta(days=days - 1)
+    rows = (db.query(SleepLog)
+            .filter(SleepLog.user_id == user.id,
+                    SleepLog.baby_id == baby.id,
+                    SleepLog.started_at >= tr_gun_araligi(start)[0] - timedelta(days=1),
+                    SleepLog.started_at < tr_gun_araligi(today)[1])
+            .all())
+    satirlar = {str(r.id): r for r in rows}
+    bant = _bebek_bantlari(db, {baby.id}).get(baby.id)
+
+    def _gun(g: date) -> dict:
+        return plan_adapter.gun_kayitlari(
+            rows, g, plan_adapter.DEFAULT_WAKE_MIN,
+            tz_offset_min=plan_adapter.TZ_OFFSET_MIN, bant=bant)
+
+    gunler: list[TimelineGun] = []
+    for i in range(days):
+        g = start + timedelta(days=i)
+        k = _gun(g)
+        oturumlar = ([_oturum(x, plan_adapter.GECE_UYKUSU, satirlar)
+                      for x in k["gece_uykulari"]]
+                     + [_oturum(x, plan_adapter.GUNDUZ_UYKUSU, satirlar)
+                        for x in k["gunduz_uykulari"]])
+        if g == today:
+            # Motor bu akşam başlayan AÇIK gece uykusunu yarına bağlar; yarın
+            # listede olmadığı için sürdüğü bugün gösterilir (toplama girmez).
+            oturumlar += [_oturum(x, plan_adapter.GECE_UYKUSU, satirlar)
+                          for x in _gun(today + timedelta(days=1))["gece_uykulari"]
+                          if x.get("_devam") and x["bas_gun"] == today]
+        oturumlar.sort(key=lambda o: o.baslangic)
+        s = plan_adapter.sabah_uyanisi(k, plan_adapter.DEFAULT_WAKE_MIN)
+        sabah = None
+        if s["kaynak"] != "varsayilan":
+            dk = s.get("gercek_minute") if s.get("gercek_minute") is not None else s["minute"]
+            sabah = TimelineSabah(saat=plan_adapter._fmt(dk), kaynak=s["kaynak"])
+        gunler.append(TimelineGun(
+            tarih=g, oturumlar=oturumlar,
+            gece_dk=sum(int(x.get("sure_dk") or 0) for x in k["gece_uykulari"]),
+            gunduz_dk=sum(int(x.get("sure_dk") or 0) for x in k["gunduz_uykulari"]),
+            gece_uyanma=len(k["gece_uyanmalari"]),
+            sabah_uyanisi=sabah,
+            yok_sayilan=[TimelineYokSayilan(
+                id=uuid.UUID(y["id"]) if y.get("id") else None,
+                kod=y["kod"], sebep=y["sebep"]) for y in k["yok_sayilan"]],
+        ))
+
+    response.headers["Cache-Control"] = f"private, max-age={TIMELINE_ONBELLEK_SN}"
+    response.headers["Vary"] = "Authorization"
+    return TimelineResp(baby_id=baby.id, from_date=start, to_date=today, gunler=gunler)
 
 
 # ---------------------------------------------------------------------------
