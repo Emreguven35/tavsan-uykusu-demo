@@ -29,29 +29,39 @@ ESKI_KATEGORILER = ["uyku", "beslenme", "gelisim", "anne_hali", "oneri"]
 YENI_ESKI = {"gece_uyanmasi": "uyku", "gunduz_uykulari": "uyku", "egitim": "uyku",
              "beslenme": "beslenme", "diger": "oneri"}
 
-_GUNDUZ = re.compile(r"gündüz|gunduz|şekerleme|sekerleme|kestirme|öğle uyku|ogle uyku|"
+_GUNDUZ = re.compile(r"gündüz|gunduz|şekerleme|sekerleme|kestirme|öğle|ogle|tek uyku|"
                      r"uyku sayısı|kısa uyku|kisa uyku|30 dakika", re.I)
 _EGITIM = re.compile(r"eğitim|egitim|program|aşama|asama|yöntem|yontem|ağlat|aglat|"
                      r"uzaklaş|uzaklas|merdiven|kendi kendine", re.I)
 _GECE = re.compile(r"gece|uyan|uyku düzen|uyku duzen", re.I)
+_SIRA = (("gunduz_uykulari", _GUNDUZ), ("egitim", _EGITIM), ("gece_uyanmasi", _GECE))
+
+
+def _anahtar_kelime(metin: str) -> str | None:
+    for kategori, desen in _SIRA:
+        if desen.search(metin or ""):
+            return kategori
+    return None
 
 
 def kategori_siniflandir(category: str | None, title: str = "", body: str = "") -> str:
-    """Eski ya da v2 anahtar → v2 kategori. v2 anahtar olduğu gibi döner."""
+    """Eski ya da v2 anahtar → v2 kategori. v2 anahtar olduğu gibi döner.
+
+    BAŞLIK ÖNCE: metinde geçen bir kelime başlığın söylediğini ezmesin ("Bebek
+    gece uyanıp oyun oynuyorsa" metninde "gündüz" geçiyordu → gündüz sanılıyordu).
+    Eski 'uyku' konusu başlıkta ipucu yoksa metne bakar, orada da yoksa eğitim
+    sayılır; diğer eski kategoriler (gelisim/anne_hali/oneri) YALNIZ başlığa
+    bakar, ipucu yoksa 'diger'."""
     if category in KATEGORI_ADI:
         return category
     if category == "beslenme":
         return "beslenme"
+    baslikta = _anahtar_kelime(title)
+    if baslikta:
+        return baslikta
     if category == "uyku":
-        metin = f"{title} {body}"
-        if _GUNDUZ.search(metin):
-            return "gunduz_uykulari"
-        if _EGITIM.search(metin):
-            return "egitim"
-        if _GECE.search(metin):
-            return "gece_uyanmasi"
-        return "egitim"              # genel uyku sorusu en çok eğitim sürecine ait
-    return "diger"                   # gelisim | anne_hali | oneri | bilinmeyen
+        return _anahtar_kelime(body) or "egitim"
+    return "diger"
 
 
 def eski_kategori(kategori: str) -> str:

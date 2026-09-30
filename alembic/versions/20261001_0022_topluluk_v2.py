@@ -21,25 +21,30 @@ depends_on = None
 
 from api.db.base import GUID as _GUID   # önceki migrasyonlarla aynı tip (PG: UUID)
 
-_GUNDUZ = re.compile(r"gündüz|gunduz|şekerleme|sekerleme|kestirme|öğle uyku|ogle uyku|"
+_GUNDUZ = re.compile(r"gündüz|gunduz|şekerleme|sekerleme|kestirme|öğle|ogle|tek uyku|"
                      r"uyku sayısı|kısa uyku|kisa uyku|30 dakika", re.I)
 _EGITIM = re.compile(r"eğitim|egitim|program|aşama|asama|yöntem|yontem|ağlat|aglat|"
                      r"uzaklaş|uzaklas|merdiven|kendi kendine", re.I)
 _GECE = re.compile(r"gece|uyan|uyku düzen|uyku duzen", re.I)
+_SIRA = (("gunduz_uykulari", _GUNDUZ), ("egitim", _EGITIM), ("gece_uyanmasi", _GECE))
+
+
+def _kelime(m):
+    for k, d in _SIRA:
+        if d.search(m or ""):
+            return k
+    return None
 
 
 def _siniflandir(category, title, body):
+    """api.services.topluluk.kategori_siniflandir ile aynı: başlık önce."""
     if category == "beslenme":
         return "beslenme"
+    b = _kelime(title)
+    if b:
+        return b
     if category == "uyku":
-        m = f"{title or ''} {body or ''}"
-        if _GUNDUZ.search(m):
-            return "gunduz_uykulari"
-        if _EGITIM.search(m):
-            return "egitim"
-        if _GECE.search(m):
-            return "gece_uyanmasi"
-        return "egitim"
+        return _kelime(body) or "egitim"
     return "diger"
 
 

@@ -146,6 +146,16 @@ check("B3) category alanında v2 anahtar ('diger') → kategori diger, category 
 check("B4) Eski 'uyku' + 'gece/uyan' → gece_uyanmasi",
       r_gece.json()["kategori"] == "gece_uyanmasi", r_gece.text[:200])
 check("B5) Kategori hiç yok → 422", r_bos.status_code == 422, r_bos.status_code)
+# Prod'daki gerçek başlıklar (2026-10-01): başlık önce; eski diğer kategoriler de başlığa bakar.
+_ks = topluluk.kategori_siniflandir
+check("B6) Başlık metni ezer: 'Bebek gece uyanıp…' (metinde 'gündüz') → gece_uyanmasi",
+      _ks("uyku", "Bebek gece uyanıp oyun oynuyorsa", "gece uyanıyor ... gündüz uykusu") == "gece_uyanmasi")
+check("B7) Eski anne_hali 'Eğitimin 3.-4. günü zorlaşınca' → egitim",
+      _ks("anne_hali", "Eğitimin 3.-4. günü zorlaşınca", "") == "egitim")
+check("B8) Eski gelisim 'Öğlen uykusunu reddediyor: tek uykuya geçiş' → gunduz_uykulari",
+      _ks("gelisim", "Öğlen uykusunu reddediyor: tek uykuya geçiş zamanı mı?", "") == "gunduz_uykulari")
+check("B9) Eski oneri 'Uyku ortamı: karartma…' (ipucu yok) → diger",
+      _ks("oneri", "Uyku ortamı: karartma, sıcaklık ve beyaz gürültü", "gece gündüz") == "diger")
 T_GUNDUZ, T_EGITIM, T_DIGER, T_GECE, T_BES = (r.json()["id"] for r in
                                                (r_eski, r_v2, r_v2c, r_gece, r_bes))
 
