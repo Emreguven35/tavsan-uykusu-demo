@@ -836,9 +836,11 @@ def build_index_to_disk(verbose: bool = True) -> dict:
     return {"shape": list(emb.shape), "n_rows": len(row_texts), **stats}
 
 
-def _init_semantic() -> None:
+def _init_semantic(yeniden_uret: bool = True) -> None:
     """Model + embedding index'i yükle. Eksik/bayatsa diske yeniden yaz.
-    Hata olursa istisnayı yukarı fırlatır (init_index TF-IDF'e düşer)."""
+    Hata olursa istisnayı yukarı fırlatır (init_index TF-IDF'e düşer).
+    `yeniden_uret=False`: bayat önbellekte embed etmek yerine hata fırlatır
+    (fork öncesi yükleme — bkz. on_yukle)."""
     needs_build = True
     units = build_corpus()                          # ucuz (sadece JSON)
     row_texts, row_unit = _build_rows(units)        # cache hizası için yeniden kur
@@ -857,6 +859,8 @@ def _init_semantic() -> None:
         except Exception as e:  # bozuk cache → yeniden kur
             logger.warning("Embedding cache okunamadı, yeniden kurulacak: %s", e)
 
+    if needs_build and not yeniden_uret:
+        raise RuntimeError("embedding önbelleği yok/bayat")
     if needs_build:
         logger.info("Embedding cache yok/bayat — yeniden üretiliyor (%d birim, %d satır)...",
                     len(units), len(row_texts))
@@ -971,6 +975,29 @@ def init_index() -> None:
         _state["active"] = "tfidf"
         logger.info("Retrieval: TF-IDF FALLBACK aktif (%d birim)", len(_state["units"]))
     _state["ready"] = True
+
+
+def on_yukle() -> bool:
+    """Fork ÖNCESİ yükleme (gunicorn `when_ready`, ana süreç).
+
+    `init_index`ten iki farkı var: (1) önbellek bayatsa yeniden embed ETMEZ —
+    ana süreçte torch hesabı fork'tan sonra worker'ı kilitleyebilir; (2) hata
+    olursa TF-IDF'e DÜŞMEZ — ana süreç 'ready' işaretlerse worker'lar da
+    kalıcı olarak TF-IDF'te kalırdı. Başarısızsa durum temizlenir, False döner
+    ve her worker `init_index`i kendisi koşar (eski davranış)."""
+    if _state["ready"]:
+        return True
+    try:
+        _init_semantic(yeniden_uret=False)
+    except Exception as e:
+        logger.warning("Önyükleme atlandı (%s)", e)
+        for k in ("model", "embeddings", "units", "row_unit", "row_texts",
+                  "vectorizer", "vectors"):
+            _state[k] = None
+        return False
+    _state["active"] = "semantic"
+    _state["ready"] = True
+    return True
 
 
 def active_retrieval() -> str | None:

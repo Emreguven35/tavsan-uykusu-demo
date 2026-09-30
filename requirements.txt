@@ -14,6 +14,9 @@ sentence-transformers>=2.2,<4
 # --- API katmanı (FastAPI backend + ElevenLabs TTS). Streamlit'i etkilemez. ---
 fastapi>=0.110
 uvicorn[standard]>=0.29
+# Üretim sunucusu: gunicorn preload + uvicorn worker (gunicorn.conf.py).
+gunicorn>=23.0
+uvicorn-worker>=0.3
 requests>=2.31
 
 # --- Production backend: DB (PostgreSQL) + migration + auth (Railway). ---

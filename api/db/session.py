@@ -24,6 +24,7 @@ _connect_args = {"check_same_thread": False} if settings.is_sqlite else {}
 # sayısı Postgres'in bağlantı tavanını zorlar. Toplam = WORKERS × (pool_size +
 # max_overflow); 4 worker × 10 = 40 bağlantı, Railway Postgres tavanının
 # (100) altında ve zamanlayıcı/işler/bakım betikleri için yer bırakıyor.
+# 2026-09-30: gunicorn preload + WEB_CONCURRENCY=2 → 2 × 10 = 20 bağlantı.
 # ÖLÇÜM: konteyner içinden 50 eşzamanlı GET /plans/today → p95 68 ms,
 # 0 hata. 8 worker denendi, KAZANÇ YOK (sunucu zaten darboğaz değil);
 # 4 worker ~3,8 GB RAM ile aynı sonucu veriyor.
