@@ -4,7 +4,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-CATEGORY_PATTERN = "^(uyku|beslenme|gelisim|anne_hali|oneri)$"
+# Eski 5 anahtar (build <= 23) VE v2 anahtarları kabul edilir.
+CATEGORY_PATTERN = ("^(uyku|beslenme|gelisim|anne_hali|oneri|"
+                    "gece_uyanmasi|gunduz_uykulari|egitim|diger)$")
+KATEGORI_PATTERN = "^(gece_uyanmasi|gunduz_uykulari|egitim|beslenme|diger)$"
 CATEGORIES = ["uyku", "beslenme", "gelisim", "anne_hali", "oneri"]
 TARGET_PATTERN = "^(thread|reply)$"
 REASON_PATTERN = "^(spam|hakaret|tibbi_risk|reklam|uygunsuz|diger)$"
@@ -34,6 +37,8 @@ class ProfileResp(BaseModel):
     is_moderator: bool
     rules_accepted_at: datetime | None = None
     created_at: datetime
+    # v2 — yazar görünümü (uzman: "Tavşan Uykusu" / "Uzman").
+    yazar: "Yazar | None" = None
 
     model_config = {"from_attributes": True}
 
@@ -44,19 +49,41 @@ class CategoryItem(BaseModel):
     thread_count: int
 
 
+class KategoriItem(BaseModel):
+    """v2 kategori: gece_uyanmasi | gunduz_uykulari | egitim | beslenme | diger."""
+    key: str
+    ad: str
+    konu_sayisi: int
+
+
 class CategoriesResp(BaseModel):
-    categories: list[CategoryItem]
+    categories: list[CategoryItem]          # eski (build <= 23) — dokunulmaz
+    kategoriler: list[KategoriItem] = []    # v2
 
 
 # --- Konu / cevap ------------------------------------------------------------
 class ThreadCreateReq(BaseModel):
-    category: str = Field(pattern=CATEGORY_PATTERN)
+    # Eski istemci `category` (eski anahtar) gönderir; v2 `kategori` gönderir.
+    # İkisinden biri ZORUNLU (router doğrular).
+    category: str | None = Field(default=None, pattern=CATEGORY_PATTERN)
+    kategori: str | None = Field(default=None, pattern=KATEGORI_PATTERN)
     title: str = Field(min_length=1, max_length=100)
     body: str = Field(min_length=1, max_length=1000)
+    anonim: bool = False
 
 
 class ReplyCreateReq(BaseModel):
     body: str = Field(min_length=1, max_length=1000)
+    anonim: bool = False
+    # Cevaba cevap: aynı konudaki bir cevabın id'si ("Cevabınıza yanıt geldi").
+    yanitlanan_cevap_id: uuid.UUID | None = None
+
+
+class Yazar(BaseModel):
+    """Mobil v2 yazar görünümü. Anonimde gorunen_ad "Anonim anne", avatar "anonim"."""
+    gorunen_ad: str
+    avatar: str                  # tavsan | ayi | kedi | civciv | tilki | anonim
+    rozet: str | None = None     # "Uzman" | "Resmi" | None
 
 
 class ThreadListItem(BaseModel):
@@ -78,11 +105,22 @@ class ThreadListItem(BaseModel):
     status: str                  # visible | hidden (hidden yalnız sahibine döner)
     last_activity_at: datetime
     created_at: datetime
+    # --- v2 ---
+    kategori: str = "diger"
+    uzman_cevapladi: bool = False
+    faydali_sayisi: int = 0      # = like_count ("faydalı")
+    cevap_sayisi: int = 0        # = reply_count
+    kaydedildi_mi: bool = False
+    anonim: bool = False
+    benim: bool = False          # konu bu kullanıcının mı (anonim olsa da)
+    yazar: Yazar | None = None
 
 
 class ThreadListResp(BaseModel):
     items: list[ThreadListItem]
     next_cursor: str | None = None      # None → son sayfa
+    # v2 — sabitlenmiş "haftanın konusu" (items'ta TEKRAR edilmez).
+    haftanin_konusu: ThreadListItem | None = None
 
 
 class ReplyItem(BaseModel):
@@ -99,6 +137,12 @@ class ReplyItem(BaseModel):
     liked_by_me: bool
     status: str                  # visible | hidden (hidden yalnız sahibine döner)
     created_at: datetime
+    # --- v2 ---
+    faydali_sayisi: int = 0
+    anonim: bool = False
+    benim: bool = False
+    yanitlanan_cevap_id: uuid.UUID | None = None
+    yazar: Yazar | None = None
 
 
 class ThreadDetailResp(BaseModel):
@@ -122,6 +166,15 @@ class ThreadDetailResp(BaseModel):
     created_at: datetime
     replies: list[ReplyItem]
     replies_next_cursor: str | None = None
+    # --- v2 ---
+    kategori: str = "diger"
+    uzman_cevapladi: bool = False
+    faydali_sayisi: int = 0
+    cevap_sayisi: int = 0
+    kaydedildi_mi: bool = False
+    anonim: bool = False
+    benim: bool = False
+    yazar: Yazar | None = None
 
 
 # --- Etkileşim ---------------------------------------------------------------
@@ -182,3 +235,26 @@ class ModActionReq(BaseModel):
 class ModUserReq(BaseModel):
     user_id: uuid.UUID
     action: str = Field(pattern="^(mute|unmute|ban|unban)$")
+
+
+# --- v2: kaydetme, sabitleme, avatar --------------------------------------------
+class BookmarkResp(BaseModel):
+    kaydedildi: bool
+
+
+class PinReq(BaseModel):
+    thread_id: uuid.UUID
+    sabit: bool = True
+
+
+class AvatarUpdateReq(BaseModel):
+    avatar: str = Field(pattern="^(tavsan|ayi|kedi|civciv|tilki)$")
+
+
+class MeResp(BaseModel):
+    id: uuid.UUID
+    avatar: str                  # seçilmediyse kimlikten sabit seçim
+    avatar_secildi: bool
+
+
+ProfileResp.model_rebuild()

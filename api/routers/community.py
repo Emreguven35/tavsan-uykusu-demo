@@ -19,15 +19,16 @@ from sqlalchemy.orm import Session
 
 from api.db import get_db
 from api.deps import get_current_user
-from api.models import (Block, CommunityProfile, Like, Reply, Report, Thread,
-                        User)
+from api.models import (Block, Bookmark, CommunityProfile, Like, Reply, Report,
+                        Thread, User)
 from api.schemas.community import (
     CATEGORIES, DELETED_NICKNAME, BlockItem, BlockReq, CategoriesResp,
-    CategoryItem, LikeReq, LikeResp, MessageResp, ModActionReq, ModReportItem,
-    ModReportsResp, ModUserReq, ProfileCreateReq, ProfileResp, ProfileUpdateReq,
-    ReplyCreateReq, ReplyItem, ReportReq, ThreadCreateReq, ThreadDetailResp,
-    ThreadListItem, ThreadListResp)
-from api.services import moderation, notifier
+    CategoryItem, KATEGORI_PATTERN, BookmarkResp, KategoriItem, LikeReq, LikeResp,
+    MessageResp, ModActionReq, ModReportItem, ModReportsResp, ModUserReq, PinReq,
+    ProfileCreateReq, ProfileResp, ProfileUpdateReq, ReplyCreateReq, ReplyItem,
+    ReportReq, ThreadCreateReq, ThreadDetailResp, ThreadListItem, ThreadListResp,
+    Yazar)
+from api.services import moderation, topluluk, topluluk_bildirim
 
 logger = logging.getLogger("tavsan.community")
 router = APIRouter(prefix="/community", tags=["community"])
@@ -119,9 +120,16 @@ def _guard_posting(db: Session, prof: CommunityProfile) -> None:
 # ===========================================================================
 # Profil
 # ===========================================================================
+def _profil_yaniti(prof: CommunityProfile, user: User) -> ProfileResp:
+    resp = ProfileResp.model_validate(prof)
+    resp.badge = _rozet(prof, user.id)["badge"]
+    resp.yazar = Yazar(**topluluk.yazar(prof, user.id, user.avatar, False))
+    return resp
+
+
 @router.get("/profile", response_model=ProfileResp)
 def get_profile(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return _require_profile(db, user)
+    return _profil_yaniti(_require_profile(db, user), user)
 
 
 @router.post("/profile", response_model=ProfileResp, status_code=status.HTTP_201_CREATED)
@@ -143,7 +151,7 @@ def create_profile(req: ProfileCreateReq, db: Session = Depends(get_db),
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Bu takma ad kullanılıyor")
     db.refresh(prof)
-    return prof
+    return _profil_yaniti(prof, user)
 
 
 @router.patch("/profile", response_model=ProfileResp)
@@ -161,7 +169,7 @@ def update_profile(req: ProfileUpdateReq, db: Session = Depends(get_db),
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Bu takma ad kullanılıyor")
     db.refresh(prof)
-    return prof
+    return _profil_yaniti(prof, user)
 
 
 # ===========================================================================
@@ -169,11 +177,75 @@ def update_profile(req: ProfileUpdateReq, db: Session = Depends(get_db),
 # ===========================================================================
 @router.get("/categories", response_model=CategoriesResp)
 def categories(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Eski `categories` (build <= 23) + v2 `kategoriler` [{key, ad, konu_sayisi}]."""
     counts = dict(db.query(Thread.category, func.count(Thread.id))
                   .filter(Thread.status == "published")
                   .group_by(Thread.category).all())
-    return CategoriesResp(categories=[
-        CategoryItem(key=c, thread_count=int(counts.get(c, 0))) for c in CATEGORIES])
+    yeni = dict(db.query(Thread.kategori, func.count(Thread.id))
+                .filter(Thread.status == "published")
+                .group_by(Thread.kategori).all())
+    return CategoriesResp(
+        categories=[CategoryItem(key=c, thread_count=int(counts.get(c, 0)))
+                    for c in CATEGORIES],
+        kategoriler=[KategoriItem(key=k, ad=ad, konu_sayisi=int(yeni.get(k, 0)))
+                     for k, ad in topluluk.KATEGORILER])
+
+
+# ===========================================================================
+# Konular — ortak görünüm
+# ===========================================================================
+def _kayitli_set(db: Session, user: User, ids: list) -> set:
+    if not ids:
+        return set()
+    return {r[0] for r in db.query(Bookmark.thread_id).filter(
+        Bookmark.user_id == user.id, Bookmark.thread_id.in_(ids))}
+
+
+def _thread_q(db: Session, user: User):
+    """Konu + yazar profili + yazarın avatar seçimi; görünürlük kuralıyla."""
+    blocked = _blocked_ids(db, user)
+    q = (db.query(Thread, CommunityProfile, User.avatar)
+         .outerjoin(CommunityProfile, CommunityProfile.user_id == Thread.user_id)
+         .outerjoin(User, User.id == Thread.user_id)
+         # published herkese; hidden YALNIZ sahibine; removed hiç kimseye.
+         .filter(or_(Thread.status == "published",
+                     and_(Thread.status == "hidden", Thread.user_id == user.id))))
+    if blocked:                              # engellenenlerin konuları gizli (NULL yazar kalır)
+        q = q.filter(or_(Thread.user_id.is_(None), Thread.user_id.notin_(blocked)))
+    return q
+
+
+def _madde(t: Thread, prof, avatar_secimi, user: User, liked: set,
+           kayitli: set) -> ThreadListItem:
+    anonim = bool(t.anonim)
+    return ThreadListItem(
+        # Anonim konuda yazar kimliği HİÇ dönmez (moderasyon için DB'de durur).
+        id=t.id, author_id=None if anonim else t.user_id,
+        nickname=topluluk.eski_takma_ad(prof, t.user_id, anonim),
+        is_expert=False if anonim else bool(prof is not None and prof.is_expert),
+        **(_rozet(None, None) if anonim else _rozet(prof, t.user_id)),
+        category=t.category, title=t.title, body_preview=t.body[:140],
+        reply_count=t.reply_count, like_count=t.like_count,
+        expert_replied=t.expert_replied, liked_by_me=t.id in liked,
+        status=_resp_status(t.status), last_activity_at=t.last_activity_at,
+        created_at=t.created_at,
+        kategori=t.kategori, uzman_cevapladi=t.expert_replied,
+        faydali_sayisi=t.like_count, cevap_sayisi=t.reply_count,
+        kaydedildi_mi=t.id in kayitli, anonim=anonim, benim=t.user_id == user.id,
+        yazar=Yazar(**topluluk.yazar(prof, t.user_id, avatar_secimi, anonim)))
+
+
+def _maddeler(db: Session, user: User, rows) -> list[ThreadListItem]:
+    ids = [t.id for t, _p, _a in rows]
+    liked, kayitli = _liked_set(db, user, "thread", ids), _kayitli_set(db, user, ids)
+    return [_madde(t, p, a, user, liked, kayitli) for t, p, a in rows]
+
+
+def _detay(t: Thread, ust: ThreadListItem, replies: list, rnext) -> ThreadDetailResp:
+    alanlar = {k: v for k, v in ust.model_dump().items()
+               if k in ThreadDetailResp.model_fields}
+    return ThreadDetailResp(**alanlar, body=t.body, replies=replies,
+                            replies_next_cursor=rnext)
 
 
 # ===========================================================================
@@ -182,46 +254,66 @@ def categories(db: Session = Depends(get_db), user: User = Depends(get_current_u
 @router.get("/threads", response_model=ThreadListResp)
 def list_threads(db: Session = Depends(get_db), user: User = Depends(get_current_user),
                  category: str | None = Query(default=None),
+                 kategori: str | None = Query(default=None, pattern=KATEGORI_PATTERN),
+                 filtre: str | None = Query(default=None, pattern="^(uzman|benim)$"),
+                 q: str | None = Query(default=None, max_length=100),
                  cursor: str | None = Query(default=None),
                  limit: int = Query(default=PAGE_DEFAULT, ge=1, le=PAGE_MAX)):
-    blocked = _blocked_ids(db, user)
-    q = (db.query(Thread, CommunityProfile)
-         .outerjoin(CommunityProfile, CommunityProfile.user_id == Thread.user_id)
-         # published herkese; hidden YALNIZ sahibine (kendi gizlenen gönderisini görür);
-         # removed hiç kimseye.
-         .filter(or_(Thread.status == "published",
-                     and_(Thread.status == "hidden", Thread.user_id == user.id))))
+    """Konu listesi. v2 filtreleri: kategori, filtre=uzman|benim, q (metin).
+
+    Sabitlenmiş "haftanın konusu" `haftanin_konusu`nda döner, items'ta tekrar
+    etmez. Eski `category` filtresi eski anahtarla çalışmaya devam eder."""
+    sorgu = _thread_q(db, user)
     if category is not None:
-        q = q.filter(Thread.category == category)
-    if blocked:                              # engellenenlerin konuları gizli (NULL yazar kalır)
-        q = q.filter(or_(Thread.user_id.is_(None), Thread.user_id.notin_(blocked)))
+        sorgu = sorgu.filter(Thread.category == category)
+    if kategori is not None:
+        sorgu = sorgu.filter(Thread.kategori == kategori)
+    if filtre == "uzman":
+        sorgu = sorgu.filter(Thread.expert_replied.is_(True))
+    elif filtre == "benim":
+        sorgu = sorgu.filter(Thread.user_id == user.id)
+    if q and q.strip():
+        desen = f"%{q.strip()}%"
+        sorgu = sorgu.filter(or_(Thread.title.ilike(desen), Thread.body.ilike(desen)))
+
+    sabit_row = (_thread_q(db, user).filter(Thread.sabit.is_(True),
+                                            Thread.status == "published")
+                 .order_by(Thread.created_at.desc()).first())
+    if sabit_row is not None:
+        sorgu = sorgu.filter(Thread.id != sabit_row[0].id)
+
     cur = _decode_cursor(cursor)
     if cur is not None:
         cdt, cid = cur
-        q = q.filter(or_(Thread.last_activity_at < cdt,
-                         and_(Thread.last_activity_at == cdt, Thread.id < cid)))
-    rows = (q.order_by(Thread.last_activity_at.desc(), Thread.id.desc())
+        sorgu = sorgu.filter(or_(Thread.last_activity_at < cdt,
+                                 and_(Thread.last_activity_at == cdt, Thread.id < cid)))
+    rows = (sorgu.order_by(Thread.last_activity_at.desc(), Thread.id.desc())
             .limit(limit + 1).all())
     has_more = len(rows) > limit
     rows = rows[:limit]
 
-    liked = _liked_set(db, user, "thread", [t.id for t, _ in rows])
-    items = []
-    for t, prof in rows:
-        nick, is_expert = _author(prof, t.user_id)
-        items.append(ThreadListItem(
-            id=t.id, author_id=t.user_id, nickname=nick, is_expert=is_expert,
-            **_rozet(prof, t.user_id),
-            category=t.category, title=t.title, body_preview=t.body[:140],
-            reply_count=t.reply_count, like_count=t.like_count,
-            expert_replied=t.expert_replied, liked_by_me=t.id in liked,
-            status=_resp_status(t.status), last_activity_at=t.last_activity_at,
-            created_at=t.created_at))
+    items = _maddeler(db, user, rows)
     next_cursor = None
     if has_more and items:
         last = rows[-1][0]
         next_cursor = _encode_cursor(last.last_activity_at, last.id)
-    return ThreadListResp(items=items, next_cursor=next_cursor)
+    return ThreadListResp(
+        items=items, next_cursor=next_cursor,
+        haftanin_konusu=(_maddeler(db, user, [sabit_row])[0] if sabit_row else None))
+
+
+def _cevap(r: Reply, rp, avatar_secimi, user: User, rliked: set) -> ReplyItem:
+    anonim = bool(r.anonim)
+    return ReplyItem(
+        id=r.id, author_id=None if anonim else r.user_id,
+        nickname=topluluk.eski_takma_ad(rp, r.user_id, anonim),
+        is_expert=False if anonim else bool(rp is not None and rp.is_expert),
+        **(_rozet(None, None) if anonim else _rozet(rp, r.user_id)),
+        body=r.body, like_count=r.like_count, liked_by_me=r.id in rliked,
+        status=_resp_status(r.status), created_at=r.created_at,
+        faydali_sayisi=r.like_count, anonim=anonim, benim=r.user_id == user.id,
+        yanitlanan_cevap_id=r.yanitlanan_id,
+        yazar=Yazar(**topluluk.yazar(rp, r.user_id, avatar_secimi, anonim)))
 
 
 @router.get("/threads/{thread_id}", response_model=ThreadDetailResp)
@@ -236,11 +328,14 @@ def get_thread(thread_id: uuid.UUID, db: Session = Depends(get_db),
     if not gorunur:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konu bulunamadı")
     tprof = _profile_of(db, t.user_id)
-    nick, is_expert = _author(tprof, t.user_id)
+    tyazar = db.get(User, t.user_id) if t.user_id is not None else None
+    ust = _madde(t, tprof, tyazar.avatar if tyazar else None, user,
+                 _liked_set(db, user, "thread", [t.id]), _kayitli_set(db, user, [t.id]))
 
     blocked = _blocked_ids(db, user)
-    rq = (db.query(Reply, CommunityProfile)
+    rq = (db.query(Reply, CommunityProfile, User.avatar)
           .outerjoin(CommunityProfile, CommunityProfile.user_id == Reply.user_id)
+          .outerjoin(User, User.id == Reply.user_id)
           # published herkese; hidden yalnız sahibine; removed hiç.
           .filter(Reply.thread_id == thread_id,
                   or_(Reply.status == "published",
@@ -255,25 +350,10 @@ def get_thread(thread_id: uuid.UUID, db: Session = Depends(get_db),
     rrows = rq.order_by(Reply.created_at.asc(), Reply.id.asc()).limit(limit + 1).all()
     has_more = len(rrows) > limit
     rrows = rrows[:limit]
-    rliked = _liked_set(db, user, "reply", [r.id for r, _ in rrows])
-    replies = []
-    for r, rp in rrows:
-        rnick, rexp = _author(rp, r.user_id)
-        replies.append(ReplyItem(id=r.id, author_id=r.user_id, nickname=rnick,
-                                 is_expert=rexp, **_rozet(rp, r.user_id),
-                                 body=r.body, like_count=r.like_count,
-                                 liked_by_me=r.id in rliked, status=_resp_status(r.status),
-                                 created_at=r.created_at))
+    rliked = _liked_set(db, user, "reply", [r.id for r, _p, _a in rrows])
+    replies = [_cevap(r, rp, ra, user, rliked) for r, rp, ra in rrows]
     rnext = _encode_cursor(rrows[-1][0].created_at, rrows[-1][0].id) if (has_more and rrows) else None
-
-    return ThreadDetailResp(
-        id=t.id, author_id=t.user_id, nickname=nick, is_expert=is_expert,
-        **_rozet(tprof, t.user_id),
-        category=t.category, title=t.title, body=t.body, reply_count=t.reply_count,
-        like_count=t.like_count, expert_replied=t.expert_replied,
-        liked_by_me=bool(_liked_set(db, user, "thread", [t.id])),
-        status=_resp_status(t.status), last_activity_at=t.last_activity_at,
-        created_at=t.created_at, replies=replies, replies_next_cursor=rnext)
+    return _detay(t, ust, replies, rnext)
 
 
 def _profile_of(db: Session, user_id) -> CommunityProfile | None:
@@ -295,11 +375,19 @@ def _run_moderation_create(db: Session, prof: CommunityProfile, text_for_check: 
                     target_type, target_id)
 
 
+def _anonim_izni(prof: CommunityProfile, istek: bool) -> bool:
+    """Uzman ve resmi hesap anonim yazamaz (rozeti olan hesabın anonimliği yok)."""
+    return bool(istek) and not prof.is_expert and not getattr(prof, "is_official", False)
+
+
 @router.post("/threads", response_model=ThreadDetailResp, status_code=status.HTTP_201_CREATED)
 def create_thread(req: ThreadCreateReq, background: BackgroundTasks,
                   db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     prof = _require_profile(db, user)
     _guard_posting(db, prof)
+    if req.category is None and req.kategori is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Kategori seçin (kategori ya da category)")
     limited, retry = moderation.check_rate(user.id, "thread")   # B4: konu sayacı (60 sn)
     if limited:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -310,23 +398,21 @@ def create_thread(req: ThreadCreateReq, background: BackgroundTasks,
     if reason is not None:
         raise _content_blocked(reason)
 
-    t = Thread(user_id=user.id, category=req.category, title=req.title.strip(),
-               body=req.body.strip(), status="published",
+    title, body = req.title.strip(), req.body.strip()
+    # v2 kategori: açıkça verildiyse o; yoksa eski anahtardan (başlık/metinle) türet.
+    kategori = req.kategori or topluluk.kategori_siniflandir(req.category, title, body)
+    # Eski `category` sütunu daima eski 5 anahtardan biri kalır (build <= 23 okur).
+    category = (req.category if req.category in CATEGORIES
+                else topluluk.eski_kategori(kategori))
+    t = Thread(user_id=user.id, category=category, kategori=kategori, title=title,
+               body=body, status="published", anonim=_anonim_izni(prof, req.anonim),
                last_activity_at=datetime.now(timezone.utc))
     db.add(t)
     prof.post_count += 1
     db.commit()
     db.refresh(t)
     _run_moderation_create(db, prof, combined, background, "thread", t.id, combined)   # K1+K2
-
-    nick, is_expert = prof.nickname, bool(prof.is_expert)
-    return ThreadDetailResp(
-        id=t.id, author_id=user.id, nickname=nick, is_expert=is_expert,
-        **_rozet(prof, user.id),
-        category=t.category, title=t.title, body=t.body, reply_count=0, like_count=0,
-        expert_replied=False, liked_by_me=False, status="visible",
-        last_activity_at=t.last_activity_at, created_at=t.created_at,
-        replies=[], replies_next_cursor=None)
+    return _detay(t, _madde(t, prof, user.avatar, user, set(), set()), [], None)
 
 
 @router.post("/threads/{thread_id}/replies", response_model=ReplyItem,
@@ -338,6 +424,13 @@ def create_reply(thread_id: uuid.UUID, req: ReplyCreateReq, background: Backgrou
     t = db.get(Thread, thread_id)
     if t is None or t.status != "published":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konu bulunamadı")
+    ust_cevap = None
+    if req.yanitlanan_cevap_id is not None:
+        ust_cevap = db.get(Reply, req.yanitlanan_cevap_id)
+        if (ust_cevap is None or ust_cevap.thread_id != thread_id
+                or ust_cevap.status != "published"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail="Yanıtlanan cevap bulunamadı")
     limited, retry = moderation.check_rate(user.id, "reply")   # B4: cevap sayacı (15 sn, ayrı)
     if limited:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -348,7 +441,8 @@ def create_reply(thread_id: uuid.UUID, req: ReplyCreateReq, background: Backgrou
         raise _content_blocked(reason)
 
     r = Reply(thread_id=thread_id, user_id=user.id, body=req.body.strip(),
-              status="published")
+              status="published", anonim=_anonim_izni(prof, req.anonim),
+              yanitlanan_id=ust_cevap.id if ust_cevap is not None else None)
     db.add(r)
     t.reply_count += 1
     t.last_activity_at = datetime.now(timezone.utc)
@@ -359,17 +453,51 @@ def create_reply(thread_id: uuid.UUID, req: ReplyCreateReq, background: Backgrou
     db.refresh(r)
     _run_moderation_create(db, prof, req.body, background, "reply", r.id, req.body)  # K1+K2
 
-    # T4: konu sahibine bildirim (kendi cevabına DEĞİL).
-    if t.user_id is not None and t.user_id != user.id:
-        try:
-            notifier.notify_community_reply(db, t.user_id, t.id, bool(prof.is_expert))
-        except Exception:
-            logger.exception("Topluluk cevap bildirimi gönderilemedi")
+    # Topluluk bildirimleri (konu sahibi + yanıtlanan cevabın sahibi). Kendi
+    # eylemine bildirim yok; cevap verenin kimliği bildirimde yazmaz.
+    try:
+        topluluk_bildirim.cevap_olayi(db, t, r, bool(prof.is_expert), ust_cevap)
+    except Exception:
+        logger.exception("Topluluk cevap bildirimi gönderilemedi")
 
-    return ReplyItem(id=r.id, author_id=user.id, nickname=prof.nickname,
-                     is_expert=bool(prof.is_expert), **_rozet(prof, user.id),
-                     body=r.body, like_count=0,
-                     liked_by_me=False, status="visible", created_at=r.created_at)
+    return _cevap(r, prof, user.avatar, user, set())
+
+
+# ===========================================================================
+# Kaydetme (v2)
+# ===========================================================================
+@router.post("/threads/{thread_id}/bookmark", response_model=BookmarkResp)
+def bookmark_ekle(thread_id: uuid.UUID, db: Session = Depends(get_db),
+                  user: User = Depends(get_current_user)):
+    t = db.get(Thread, thread_id)
+    if t is None or t.status != "published":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konu bulunamadı")
+    if db.query(Bookmark).filter(Bookmark.user_id == user.id,
+                                 Bookmark.thread_id == thread_id).first() is None:
+        db.add(Bookmark(user_id=user.id, thread_id=thread_id))
+        try:
+            db.commit()
+        except IntegrityError:               # yarış: aynı anda iki kaydet — sonuç aynı
+            db.rollback()
+    return BookmarkResp(kaydedildi=True)
+
+
+@router.delete("/threads/{thread_id}/bookmark", response_model=BookmarkResp)
+def bookmark_sil(thread_id: uuid.UUID, db: Session = Depends(get_db),
+                 user: User = Depends(get_current_user)):
+    db.query(Bookmark).filter(Bookmark.user_id == user.id,
+                              Bookmark.thread_id == thread_id).delete()
+    db.commit()
+    return BookmarkResp(kaydedildi=False)
+
+
+@router.get("/bookmarks", response_model=ThreadListResp)
+def bookmark_listesi(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Kaydedilen konular, en son kaydedilen önce (en fazla 100)."""
+    rows = (_thread_q(db, user).join(Bookmark, and_(Bookmark.thread_id == Thread.id,
+                                                    Bookmark.user_id == user.id))
+            .order_by(Bookmark.created_at.desc()).limit(100).all())
+    return ThreadListResp(items=_maddeler(db, user, rows), next_cursor=None)
 
 
 @router.delete("/threads/{thread_id}", response_model=MessageResp)
@@ -501,7 +629,7 @@ def list_blocks(db: Session = Depends(get_db), user: User = Depends(get_current_
             .filter(Block.user_id == user.id)
             .order_by(Block.created_at.desc()).all())
     return [BlockItem(blocked_user_id=b.blocked_user_id,
-                      nickname=(p.nickname if p is not None else DELETED_NICKNAME),
+                      nickname=topluluk.eski_takma_ad(p, b.blocked_user_id, False),
                       created_at=b.created_at) for b, p in rows]
 
 
@@ -559,6 +687,23 @@ def mod_action(req: ModActionReq, db: Session = Depends(get_db),
         {"resolved": True})
     db.commit()
     return MessageResp(detail=f"Uygulandı: {req.action}")
+
+
+@router.post("/mod/pin", response_model=MessageResp)
+def mod_pin(req: PinReq, db: Session = Depends(get_db),
+            user: User = Depends(get_current_user)):
+    """"Haftanın konusu"nu sabitle/kaldır. Aynı anda TEK sabit konu olur."""
+    _require_moderator(db, user)
+    t = db.get(Thread, req.thread_id)
+    if t is None or t.status != "published":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konu bulunamadı")
+    if req.sabit:
+        db.query(Thread).filter(Thread.sabit.is_(True), Thread.id != t.id).update(
+            {"sabit": False})
+    t.sabit = bool(req.sabit)
+    db.commit()
+    return MessageResp(detail="Haftanın konusu güncellendi" if req.sabit
+                       else "Sabitleme kaldırıldı")
 
 
 @router.post("/mod/user", response_model=MessageResp)

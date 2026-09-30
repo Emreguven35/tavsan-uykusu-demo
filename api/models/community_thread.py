@@ -32,6 +32,21 @@ class Thread(Base):
     like_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     expert_replied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # --- Topluluk v2 (2026-10-01) -------------------------------------------
+    # Tasarım v2 kategorisi: gece_uyanmasi | gunduz_uykulari | egitim | beslenme |
+    # diger. `category` (eski 5 anahtar) DOKUNULMADAN durur: build <= 23 onu okuyup
+    # yazıyor. Eski anahtarla açılan konuda bu alan başlık/metinden türetilir.
+    kategori: Mapped[str] = mapped_column(String(20), nullable=False,
+                                          default="diger", index=True)
+    # Anonim paylaşım: yanıtta "Anonim anne"; GERÇEK yazar (user_id) moderasyon
+    # için DB'de kalır.
+    anonim: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # "Haftanın konusu" — liste yanıtında ayrı alanda döner (moderatör sabitler).
+    sabit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Son "faydalı" toplu bildiriminin zamanı (3 saatte en fazla bir).
+    faydali_bildirim_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
     last_activity_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(

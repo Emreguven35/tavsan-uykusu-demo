@@ -7,7 +7,7 @@ user_id ondelete=SET NULL (hesap silinince cevap kalır → "Silinmiş kullanıc
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.db.base import GUID, Base
@@ -26,6 +26,10 @@ class Reply(Base):
     body: Mapped[str] = mapped_column(String(1000), nullable=False)
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="published", index=True)
     like_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Topluluk v2: anonim cevap + cevaba cevap ("Cevabınıza yanıt geldi").
+    anonim: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    yanitlanan_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("replies.id", ondelete="SET NULL"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)

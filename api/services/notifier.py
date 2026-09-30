@@ -166,28 +166,9 @@ def push_to_user(db: Session, user_id: Any, title: str, body: str,
 # =============================================================================
 # Topluluk cevap bildirimi (Faz T4)
 # =============================================================================
-def notify_community_reply(db: Session, thread_owner_id, thread_id,
-                           replier_is_expert: bool) -> int:
-    """Konu sahibine 'yeni cevap' bildirimi. Uzman (İlayda) cevabında özel metin.
-
-    Kendi cevabına bildirim GÖNDERME kararı çağırana aittir (owner==replier ise
-    bu fonksiyon çağrılmaz). notification_prefs.community_replies kapalıysa gönderilmez."""
-    user = db.get(User, thread_owner_id)
-    if user is None:
-        return 0
-    prefs = dict(DEFAULT_NOTIFICATION_PREFS)
-    if isinstance(getattr(user, "notification_prefs", None), dict):
-        prefs.update(user.notification_prefs)
-    if not prefs.get("community_replies", True):
-        return 0
-    if replier_is_expert:
-        title = "🐰 İlayda konuna cevap verdi"
-        body = "İlayda konuna cevap verdi 🐰"
-    else:
-        title = "💬 Konuna yeni bir cevap var"
-        body = "Konuna yeni bir cevap var"
-    return push_to_user(db, thread_owner_id, title, body,
-                        data={"type": "community_reply", "thread_id": str(thread_id)})
+# Eski notify_community_reply (Faz T4) KALDIRILDI (2026-10-01): metni kişi adı
+# içeriyordu ve tekrar/sessiz saat/günlük tavan yoktu. Yerine
+# api.services.topluluk_bildirim.cevap_olayi.
 
 
 # =============================================================================
@@ -470,6 +451,15 @@ def _job() -> None:
             logger.info("Hatırlatma turu: %s", stats)
     except Exception:
         logger.exception("Hatırlatma turu başarısız")
+    # Topluluk v2: gece özeti + faydalı toplu bildirimi. Ayrı try: biri
+    # patlarsa diğeri yine koşar.
+    try:
+        from api.services import topluluk_bildirim
+        t_stats = topluluk_bildirim.tur_calistir(db)
+        if any(t_stats.values()):
+            logger.info("Topluluk bildirim turu: %s", t_stats)
+    except Exception:
+        logger.exception("Topluluk bildirim turu başarısız")
     finally:
         db.close()
 

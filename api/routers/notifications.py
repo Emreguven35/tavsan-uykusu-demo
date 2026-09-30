@@ -95,6 +95,12 @@ def update_preferences(req: NotificationPrefsUpdate, db: Session = Depends(get_d
     if not changes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Güncellenecek alan verilmedi")
+    # Eski ve yeni cevap anahtarı AYNI tercihtir: biri değişince diğeri eşlenir
+    # (build <= 23 community_replies, v2 topluluk_cevap_bildirimi gönderir).
+    if "topluluk_cevap_bildirimi" in changes:
+        changes["community_replies"] = changes["topluluk_cevap_bildirimi"]
+    elif "community_replies" in changes:
+        changes["topluluk_cevap_bildirimi"] = changes["community_replies"]
     prefs.update(changes)
     # JSONB değişikliğinin görülmesi için YENİ sözlük ata (in-place mutasyon değil).
     user.notification_prefs = dict(prefs)

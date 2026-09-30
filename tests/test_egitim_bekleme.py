@@ -136,8 +136,11 @@ _param["egitim_baslangic"] = _eb
 _prompt = plan_generator._build_user_prompt(_param)
 check("2a) Prompt'ta motorun tarihi AYNEN geçiyor",
       _eb["tahmini_tarih"] in _prompt, "")
-check("2b) Prompt'ta kalan gün sayısı geçiyor",
-      str(_eb["kalan_gun"]) in _prompt, "")
+# v2.5.1 (2026-09-30): kalan gün METNE yazılmaz — metin saklanır, sayı ertesi
+# gün eskir ("55 gün kaldı" donması). Uygulama geri sayımı egitim_baslangic'tan
+# her yanıtta taze gösterir; istem modele sayıyı yazmamasını söyler.
+check("2b) Prompt'ta 'Kalan gün:' satırı YOK, sayıyı yazmama talimatı VAR",
+      "Kalan gün:" not in _prompt and "KALAN GÜN SAYISI YAZMA" in _prompt, "")
 check("2c) Prompt modele TARİH HESAPLAMAYI açıkça yasaklıyor",
       "TARİH KURALI" in _prompt and "Kendin TARİH HESAPLAMA" in _prompt, "")
 check("2d) Prompt prematüre uyarısını taşıyor (takvim yaşından hesap YANLIŞ)",

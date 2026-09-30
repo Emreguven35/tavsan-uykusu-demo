@@ -14,6 +14,10 @@ DEFAULT_NOTIFICATION_PREFS: dict[str, bool] = {
     "plan_reminders": True,
     "daily_summary": True,
     "community_replies": True,        # Faz T: kendi konuna cevap gelince bildir
+    # Topluluk v2 (2026-10-01). `community_replies` eski istemci için kalır;
+    # ikisinden biri kapalıysa cevap bildirimi gitmez.
+    "topluluk_cevap_bildirimi": True,
+    "topluluk_faydali_bildirimi": True,
 }
 
 
@@ -38,6 +42,9 @@ class User(Base, TimestampMixin):
     # B5 — son veri dışa aktarma (GET /account/export 24 saatte bir).
     son_export_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # Topluluk v2 — tavsan | ayi | kedi | civciv | tilki. NULL → kimlikten sabit
+    # seçim (api.services.topluluk.avatar_of); PATCH /users/me ile değişir.
+    avatar: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
     # KVKK silme hakkı: kullanıcı silinince ilişkili tüm veriler cascade ile gider.
     babies = relationship("Baby", back_populates="user",

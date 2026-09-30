@@ -328,9 +328,21 @@ def test_moderator():
 
 
 # ===========================================================================
-# Bildirim: İlayda(uzman) cevabı + pref kapalı + kendi cevabına yok
+# Bildirim: uzman cevabı ("Tavşan Uykusu") + pref kapalı + kendi cevabına yok
 # ===========================================================================
 def test_notifications():
+    # Topluluk v2: 23:00-07:00 bildirim KUYRUĞA girer — test gündüz saatinde koşar.
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from api.zaman import saat_sabitle
+    _saat = saat_sabitle(_dt(2026, 9, 30, 14, 0, tzinfo=_tz(_td(hours=3))))
+    _saat.__enter__()
+    try:
+        _test_notifications()
+    finally:
+        _saat.__exit__(None, None, None)
+
+
+def _test_notifications():
     _PUSH["calls"].clear()
     owner = reg("t_nt_owner@example.com"); mkprofile(owner, "KonuSahibi"); set_profile(uid_of(owner), post_count=5)
     # owner için push token
@@ -344,8 +356,23 @@ def test_notifications():
     moderation.rate_reset()
     client.post(f"/api/v1/community/threads/{tid}/replies", headers=H(expert),
                 json={"body": "İlayda cevabı buraya geliyor kısa metin"})
-    ilayda_push = [m for m in _PUSH["calls"] if "İlayda" in m.get("body", "")]
-    check("uzman cevabı → 'İlayda' bildirimi", len(ilayda_push) >= 1, str(_PUSH["calls"][-1:]))
+    uzman_push = [m for m in _PUSH["calls"]
+                  if m.get("title") == "Tavşan Uykusu sorunuzu cevapladı"]
+    check("uzman cevabı → 'Tavşan Uykusu sorunuzu cevapladı' bildirimi",
+          len(uzman_push) >= 1, str(_PUSH["calls"][-1:]))
+    check("bildirimde kişi adı YOK (uzmanın takma adı 'İlayda' olsa bile)",
+          not any("İlayda" in (m.get("title", "") + m.get("body", "")) for m in _PUSH["calls"]),
+          str(_PUSH["calls"][-1:]))
+    check("push verisi {type: topluluk, thread_id, reply_id}",
+          bool(uzman_push) and uzman_push[0].get("data", {}).get("type") == "topluluk"
+          and uzman_push[0]["data"].get("thread_id") == tid
+          and bool(uzman_push[0]["data"].get("reply_id")), str(uzman_push[:1]))
+    _d = client.get(f"/api/v1/community/threads/{tid}", headers=H(owner)).json()
+    _uz = [r for r in _d.get("replies", []) if r.get("is_expert")]
+    check("uzman cevabı toplulukta 'Tavşan Uykusu' / rozet 'Uzman' (takma ad gizli)",
+          bool(_uz) and _uz[0]["nickname"] == "Tavşan Uykusu"
+          and _uz[0]["yazar"] == {"gorunen_ad": "Tavşan Uykusu", "avatar": "tavsan",
+                                  "rozet": "Uzman"}, str(_uz[:1]))
 
     # thread.expert_replied true olmalı
     db = SessionLocal(); th = db.get(Thread, _uuid.UUID(tid)); er = th.expert_replied; db.close()

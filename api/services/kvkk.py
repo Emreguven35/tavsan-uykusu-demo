@@ -109,6 +109,7 @@ def export_bekleme(user: User) -> int:
 
 
 def disa_aktar(db: Session, user: User) -> dict:
+    from api.models import Bookmark, ToplulukBildirimi
     from api.models import (Baby, Block, ChatMessage, CommunityProfile, Like,
                             PlanFeedback, PremiumHak, PushToken, Reply, Report,
                             SentNotification, SilinenSleepLog, SleepLog,
@@ -136,6 +137,10 @@ def disa_aktar(db: Session, user: User) -> dict:
             "konular": hepsi(Thread, Thread.user_id == user.id),
             "cevaplar": hepsi(Reply, Reply.user_id == user.id),
             "begeniler": hepsi(Like, Like.user_id == user.id),
+            # Topluluk v2 (2026-10-01)
+            "kaydedilen_konular": hepsi(Bookmark, Bookmark.user_id == user.id),
+            "topluluk_bildirimleri": hepsi(ToplulukBildirimi,
+                                           ToplulukBildirimi.user_id == user.id),
             "sikayetler": hepsi(Report, Report.reporter_id == user.id),
             "engellenenler": hepsi(Block, Block.user_id == user.id),
         },

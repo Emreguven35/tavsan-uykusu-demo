@@ -28,6 +28,7 @@ from api.models.sleep_sound import SleepSound
 from api.models.plan_feedback import PlanFeedback
 from api.models.plan_uretim_isi import PlanUretimIsi
 from api.models.consent import Consent
+from api.models.community_v2 import Bookmark, ToplulukBildirimi
 
 __all__ = [
     "User", "Baby", "SleepLog", "SilinenSleepLog", "SleepPlan",
@@ -48,4 +49,5 @@ __all__ = [
     "RevenueCatOlayi", "PremiumHak",
     # B5 — KVKK
     "Consent",
+    "Bookmark", "ToplulukBildirimi",
 ]

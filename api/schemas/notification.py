@@ -28,6 +28,10 @@ class NotificationPrefs(BaseModel):
     plan_reminders: bool = True      # "uyku vakti yaklaşıyor" hatırlatmaları
     daily_summary: bool = True       # günlük özet
     community_replies: bool = True   # Faz T: kendi konuna cevap gelince
+    # Topluluk v2 — cevap / uzman / cevabına yanıt bildirimleri.
+    topluluk_cevap_bildirimi: bool = True
+    # Topluluk v2 — "Sorunuz N anneye faydalı geldi" (3 saatte bir, toplu).
+    topluluk_faydali_bildirimi: bool = True
 
 
 class NotificationPrefsUpdate(BaseModel):
@@ -35,3 +39,5 @@ class NotificationPrefsUpdate(BaseModel):
     plan_reminders: bool | None = None
     daily_summary: bool | None = None
     community_replies: bool | None = None
+    topluluk_cevap_bildirimi: bool | None = None
+    topluluk_faydali_bildirimi: bool | None = None
