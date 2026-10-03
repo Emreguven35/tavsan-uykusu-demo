@@ -181,6 +181,8 @@ check("5b) Metin birebir: Günaydın! Emir uyandı mı? ☀️ + gövde + katego
       and (_msg.get("data") or {}).get("type") == "sabah_uyanis"
       and (_msg.get("data") or {}).get("kategori") == "sabah_uyanis",
       f"msg={_msg}")
+check("5d) Expo mesajında categoryId = sabah_uyanis (iOS düğmeleri)",
+      _msg.get("categoryId") == "sabah_uyanis", f"msg={_msg}")
 SENT.clear()
 for _hh, _mm in ((9, 30), (10, 0), (10, 30)):
     notifier.run_reminder_cycle(db, now=utc_at(_hh, _mm))
@@ -520,6 +522,8 @@ check("15h) Metin birebir sözleşmedeki gibi",
       and _m15.get("body") == ("Bir sonraki uykuyu hesaplayabilmemiz için "
                                "uyanma saatini girin."),
       f"title={_m15.get('title')!r} body={_m15.get('body')!r}")
+check("15i0) Kategorisiz bildirime (uyandi_mi) categoryId EKLENMEZ",
+      "categoryId" not in _m15, str(_m15))
 check("15i) data.type='uyandi_mi' (mobil kayıt ekranına yönlendirir)",
       (_m15.get("data") or {}).get("type") == "uyandi_mi",
       str(_m15.get("data")))
@@ -644,6 +648,8 @@ check("16d) 30 dk sonra hâlâ uyumadı: 'Emre biraz daha uyanık kalmak istiyor
       [x["title"] for x in _m] == ["Emre biraz daha uyanık kalmak istiyor 🐣"]
       and _m[0]["body"] == "Sorun değil, hazır olduğunuzda buradayız."
       and _m[0]["data"]["type"] == "uyku_hatirlatma", str(_m))
+check("16d2) categoryId her kategoride data.type ile aynı",
+      _m[0].get("categoryId") == "uyku_hatirlatma", str(_m))
 
 # Uyku 30 dk önce başladı (açık kayıt) → bloğun kalan adımları düşer.
 db.add(SleepLog(user_id=u16.id, baby_id=b16.id, type="nap",

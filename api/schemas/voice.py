@@ -16,6 +16,12 @@ class Progress(BaseModel):
     total: int = 0
 
 
+class KayitHakki(BaseModel):
+    """Aylık yeniden kayıt (klonlama) hakkı — CLONE_COOLDOWN_DAYS penceresinde."""
+    kalan: int = 1
+    toplam: int = 1
+
+
 class VoiceStatusResp(BaseModel):
     # v2.3 "üret ve bırak": recording | cloning | generating | ready | released
     #                      | failed | none  (eski: pending | replaced)
@@ -41,6 +47,8 @@ class VoiceStatusResp(BaseModel):
     can_clone: bool = True
     next_clone_available_at: datetime | None = None
     retry_after_days: int = 0
+    # v2.7.2 — aynı sınırın sayı hâli (mobil "1/1 hak" gösterir).
+    kayit_hakki: KayitHakki = KayitHakki()
 
 
 class StoryItem(BaseModel):

@@ -161,11 +161,18 @@ def _is_device_not_registered(ticket: dict) -> bool:
     return details.get("error") == "DeviceNotRegistered"
 
 
+# iOS bildirim düğmeleri Expo `categoryId`'ye bağlı (v2.7.2). Bu kategorilerde
+# categoryId = data.type; data.type da korunur.
+KATEGORILI_TIPLER = frozenset({"sabah_uyanis", "uyku_oncesi", "uyku_zamani",
+                               "uyku_hatirlatma"})
+
+
 def push_to_user(db: Session, user_id: Any, title: str, body: str,
                  data: dict | None = None) -> int:
     """Kullanıcının TÜM cihazlarına bildirim gönder. Dönen: başarılı gönderim sayısı.
 
     DeviceNotRegistered dönen token'lar silinir."""
+    kategori = (data or {}).get("type")
     tokens = db.query(PushToken).filter(PushToken.user_id == user_id).all()
     if not tokens:
         return 0
@@ -176,6 +183,7 @@ def push_to_user(db: Session, user_id: Any, title: str, body: str,
         "body": body,
         "sound": "default",
         **({"data": data} if data else {}),
+        **({"categoryId": kategori} if kategori in KATEGORILI_TIPLER else {}),
     } for t in tokens]
 
     tickets = send_expo_push(messages)

@@ -62,6 +62,14 @@ SES_SERVIS_MESAJ = ("Ses servisi şu an kullanılamıyor. Lütfen daha sonra tek
 # ElevenLabs'te slot + ücret tutuyor ve gereksiz biyometrik veri birikiyordu.
 # Politika ile davranış ayrışmıştı; sınır burada zorlanıyor.
 CLONE_COOLDOWN_DAYS = 30
+# Pencere başına klonlama hakkı. Sınır "30 günde bir" olduğu için 1; kalan,
+# _klon_durumu'nun can_clone'undan türetilir (tek hesap yeri korunur).
+CLONE_HAKKI_TOPLAM = 1
+
+
+def _kayit_hakki(durum: dict) -> dict:
+    return {"kalan": CLONE_HAKKI_TOPLAM if durum["can_clone"] else 0,
+            "toplam": CLONE_HAKKI_TOPLAM}
 
 
 def _son_klonlama(profile: VoiceProfile | None):
@@ -289,7 +297,8 @@ def voice_status(db: Session = Depends(get_db), user: User = Depends(get_current
     durum = _klon_durumu(profile)
     if profile is None:
         return VoiceStatusResp(status="none", can_clone=True,
-                               progress=Progress(done=0, total=0))
+                               progress=Progress(done=0, total=0),
+                               kayit_hakki=_kayit_hakki(durum))
     hazir = (db.query(VoiceAudio)
              .filter(VoiceAudio.voice_profile_id == profile.id).count())
     return VoiceStatusResp(
@@ -299,6 +308,7 @@ def voice_status(db: Session = Depends(get_db), user: User = Depends(get_current
         can_clone=durum["can_clone"],
         next_clone_available_at=durum["next_clone_available_at"],
         retry_after_days=durum["retry_after_days"],
+        kayit_hakki=_kayit_hakki(durum),
         progress=Progress(done=profile.progress_done or 0,
                           total=profile.progress_total or 0),
         hazir_icerik=hazir,

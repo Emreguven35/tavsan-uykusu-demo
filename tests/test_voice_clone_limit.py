@@ -288,6 +288,11 @@ t_yeni = reg("voice_yeni@test.com")
 rs3 = client.get("/api/v1/voice/voice-status", headers=H(t_yeni)).json()
 check("4i) Hiç klonlamamış kullanıcı: status=none, can_clone=true",
       rs3.get("status") == "none" and rs3.get("can_clone") is True, str(rs3))
+check("4j) kayit_hakki: az önce klonladı 0/1, 31 gün sonra 1/1, hiç yok 1/1",
+      rs.get("kayit_hakki") == {"kalan": 0, "toplam": 1}
+      and rs2.get("kayit_hakki") == {"kalan": 1, "toplam": 1}
+      and rs3.get("kayit_hakki") == {"kalan": 1, "toplam": 1},
+      f'{rs.get("kayit_hakki")} {rs2.get("kayit_hakki")} {rs3.get("kayit_hakki")}')
 
 
 # =============================================================================
