@@ -233,6 +233,7 @@ def rapor_verisi(db: Session, gun: date) -> list[dict]:
                 "type": r.type,
                 "bas": _dk(r.started_at, gun),
                 "bit": _dk(r.ended_at, gun) if r.ended_at else None,
+                "asiri": _asiri_mi(r),
             } for r in kayitlar],
             "uyarilar": uyarilar,
             "asiri_uzun": asiri_uzun,
@@ -250,18 +251,31 @@ def rapor_verisi(db: Session, gun: date) -> list[dict]:
     return bolumler
 
 
+def _asiri_mi(r) -> bool:
+    """Kapalı, 16 saati aşan uyku kaydı (açık kalmış sayaç) mı?"""
+    if r.type not in UYKU_TIPLERI or r.ended_at is None:
+        return False
+    k = plan_adapter._log_alanlari(r, TZ)
+    return k is not None and (k["sure_dk"] or 0) > plan_adapter.GECE_KAYIT_MAKS_DK
+
+
 def _asiri_uzun_kayitlar(kayitlar: list, gun: date) -> list[str]:
-    """K21/K21.2 — o gün BİTEN, 16 saati aşan uyku kayıtları (açık kalmış
-    sayaç). Sabah bitenin bitişi uyanış sayılır ama süresi sayılmaz; sabah
-    dışında biten hiç sayılmaz. Rapor ikisini de ayrı satırda gösterir."""
+    """K21/K21.2 — o gün BAŞLAYAN ya da BİTEN, 16 saati aşan uyku kayıtları
+    (açık kalmış sayaç). Sabah bitenin bitişi uyanış sayılır ama süresi
+    sayılmaz; sabah dışında biten hiç sayılmaz. Başladığı gün de listelenir:
+    yoksa o günün şeridinde başlangıçtan gece yarısına normal uyku gibi
+    görünüyor ve kutu boş kalıyordu (prod 02.10, 27 sa 55 dk'lık kayıt)."""
     out = []
     for r in kayitlar:
-        if r.type not in UYKU_TIPLERI or r.ended_at is None:
+        if not _asiri_mi(r):
             continue
         k = plan_adapter._log_alanlari(r, TZ)
-        if k is None or k["bit_gun"] != gun:
+        if gun not in (k["bas_gun"], k["bit_gun"]):
             continue
-        if plan_adapter.asiri_uzun_sabah_mi(k):
+        if k["bit_gun"] != gun:
+            sonuc = (f'bu gün başladı, {k["bit_gun"].strftime("%d.%m")} günü bitti — '
+                     "bu günün hiçbir toplamına girmedi")
+        elif plan_adapter.asiri_uzun_sabah_mi(k):
             sonuc = "bitişi sabah uyanışı sayıldı, süresi gece uykusuna girmedi"
         elif plan_adapter.asiri_uzun_gece_mi(k):
             sonuc = "sabah dışında bitti, hesaba alınmadı"
@@ -327,19 +341,23 @@ def _kayit_ogeleri(kayitlar: list[dict]):
     for k in kayitlar:
         sinif = {"night_wake": "k-uyanma", "feed": "k-besleme",
                  "nap_skipped": "k-atlandi"}.get(k["type"], "k-uyku")
+        if k.get("asiri"):
+            sinif = "k-asiri"
         bit = k["bit"]
         if k["type"] in ("sleep", "nap", "sekerleme") and bit is None:
             sinif += " acik"
             bit = min(k["bas"] + 60, 1440)             # açık kayıt: 1 sa göster
         baslik = (f'{TIP_ADI.get(k["type"], k["type"])} {_saat(k["bas"])}'
-                  + (f'–{_saat(k["bit"])}' if k["bit"] is not None else " (açık)"))
+                  + (f'–{_saat(k["bit"])}' if k["bit"] is not None else " (açık)")
+                  + (" — 16 saati aşan kayıt, hesaba girmedi" if k.get("asiri") else ""))
         out.append((k["bas"], bit, sinif, baslik))
     return out
 
 
 def _karsilastirma(b: dict) -> str:
     """Plan blokları ile gerçek uykuların tablo hâli."""
-    uykular = [k for k in b["kayitlar"] if k["type"] in ("sleep", "nap", "sekerleme")]
+    uykular = [k for k in b["kayitlar"]
+               if k["type"] in ("sleep", "nap", "sekerleme") and not k.get("asiri")]
     satirlar = []
     for blok in b["cizelge"]:
         bas = blok.get("start_minute")
@@ -390,6 +408,7 @@ h2{font-size:18px;margin:0 0 2px}.etiket{color:var(--soluk);font-size:13px;margi
 .sablon{background:var(--sablon)}.plan{background:var(--plan)}
 .t-wake{background:transparent;border-left:3px solid currentColor}
 .k-uyku{background:var(--uyku)}.k-uyku.acik{opacity:.45;background:repeating-linear-gradient(45deg,var(--uyku),var(--uyku) 4px,transparent 4px,transparent 8px)}
+.k-asiri{opacity:.5;background:repeating-linear-gradient(45deg,var(--soluk),var(--soluk) 3px,transparent 3px,transparent 7px)}
 .k-uyanma{background:var(--uyanma)}.k-besleme{background:var(--besleme)}.k-atlandi{background:var(--soluk)}
 .olcek{display:grid;grid-template-columns:92px 1fr;gap:8px;font-size:11px;color:var(--soluk)}
 .olcek div{display:flex;justify-content:space-between}
@@ -482,7 +501,8 @@ def html_uret(gun: date, veri: dict) -> str:
 <span style="background:var(--plan)"></span>gün sonu plan
 <span style="background:var(--uyku)"></span>uyku
 <span style="background:var(--uyanma)"></span>gece uyanması
-<span style="background:var(--besleme)"></span>beslenme</div>
+<span style="background:var(--besleme)"></span>beslenme
+<span style="background:var(--soluk)"></span>16 saati aşan kayıt</div>
 {govde}</main></body></html>"""
 
 

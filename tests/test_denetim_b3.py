@@ -9,6 +9,8 @@ DENETİM B3 — rapor bulgularının düzeltmeleri. LLM YOK (mühürlü), ağ YO
   4  Doğum tarihi: gelecek / 36 aydan eski → Türkçe 422; eski kayda plan uyarısı
   5  X-App-Version: kullanıcıya yazılır, biçimsiz değer yazılmaz
   6  Denetim raporu: özet, "Kayıt girilmemiş" satırı, sürüm, e-posta
+  8  16 saati aşan kayıt BAŞLADIĞI günün raporunda da kutuda; şeritte normal
+     uyku gibi çizilmez, karşılaştırmada gerçek uyku sayılmaz (prod 02.10)
 
 Çalıştırma: python tests/test_denetim_b3.py
 """
@@ -365,6 +367,39 @@ check("7e) Tohum uzmanın cevabı artık resmi hesapta; gerçek annenin cevabı 
 check("7f) Sayaçlar gerçek veriden: beğeni 1 (tohumunki silindi), uzman cevapladı False",
       _dt.get("like_count") == 1 and _dt.get("expert_replied") is False,
       f'{_dt.get("like_count")} {_dt.get("expert_replied")}')
+
+# =============================================================================
+# 8) 16 saati aşan kayıt — başladığı gün de görünür (prod 02.10 03:42 → 03.10 07:37)
+# =============================================================================
+from api.models import SleepLog  # noqa: E402
+H16, B16_, _ = hesap("onalti-saat@gercek.com", 330)
+_db = SessionLocal()
+try:
+    _b = _db.get(Baby, uuid.UUID(B16_))
+    _db.add(SleepLog(user_id=_b.user_id, baby_id=_b.id, type="sleep",
+                     client_id="asiri16", started_at=utc(DUN, hm("03:43")),
+                     ended_at=utc(BUGUN, hm("07:38"))))
+    _db.commit()
+    _dun = {b["no"]: b for b in denetim.rapor(_db, DUN)["bolumler"]}
+    _bug = denetim.rapor(_db, BUGUN)
+    _no16 = denetim.bebek_numaralari(_db)[_b.id]
+    _y16, _, _ = denetim.rapor_yaz(_db, DUN)
+finally:
+    _db.close()
+_d16 = _dun.get(_no16) or {}
+_h16 = _y16.read_text("utf-8")
+check("8a) Başladığı günün kutusunda: 'bu gün başladı'",
+      any("bu gün başladı" in x and "27 sa 55 dk" in x for x in _d16.get("asiri_uzun", [])),
+      str(_d16.get("asiri_uzun")))
+check("8b) Bittiği günün kutusunda: 'sabah uyanışı sayıldı'",
+      any("sabah uyanışı sayıldı" in x
+          for b in _bug["bolumler"] if b["no"] == _no16 for x in b["asiri_uzun"])
+      and _bug["ozet"]["asiri_uzun"] >= 1, str(_bug["ozet"]))
+check("8c) Kayıt 'asiri' işaretli, şeritte k-asiri (normal uyku değil)",
+      any(k.get("asiri") for k in _d16.get("kayitlar", []))
+      and "k-asiri" in _h16 and "16 saati aşan kayıt, hesaba girmedi" in _h16, "")
+check("8d) Karşılaştırmada gerçek uyku sayılmaz",
+      "03:43–07:38" not in denetim._karsilastirma(_d16), "")
 
 # =============================================================================
 print("=" * 78)
