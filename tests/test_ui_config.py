@@ -10,6 +10,8 @@ LLM YOK, ağ YOK, prod DB YOK: geçici sqlite + FastAPI TestClient.
   E  UI_YENI_TASARIM=true                      → herkese true
   F  Cache-Control private, max-age=300 + Vary: Authorization
   G  Yanıt şekli tam olarak {"ui": {"yeni_tasarim": bool}}
+  H  UI_YENI_TASARIM_MIN_BUILD=26: build 25 → false, 26 → true, sürüm yok →
+     false, listedeki kullanıcı → true; başlık yoksa users.app_version
 
 Çalıştırma: python tests/test_ui_config.py
 """
@@ -78,15 +80,44 @@ check("D2) Bozuk token → genel bayrak (false)", rb.json()["ui"]["yeni_tasarim"
 h = r.headers
 check("F1) Cache-Control: private, max-age=300",
       h.get("cache-control") == "private, max-age=300", h.get("cache-control"))
-check("F2) Vary: Authorization", "authorization" in (h.get("vary") or "").lower(), h.get("vary"))
+check("F2) Vary: Authorization, X-App-Version",
+      "authorization" in (h.get("vary") or "").lower()
+      and "x-app-version" in (h.get("vary") or "").lower(), h.get("vary"))
 check("G1) Yanıt şekli tam {'ui': {'yeni_tasarim': bool}}",
       r.json() == {"ui": {"yeni_tasarim": False}}, r.text)
 
-# E — genel bayrak açılınca herkese true (Settings süreç başına önbellekli).
+# E — genel bayrak açılınca build ≥ 26 herkese true (Settings süreç başına önbellekli).
+V26 = {"X-App-Version": "1.0.0+26"}
 os.environ["UI_YENI_TASARIM"] = "true"
 get_settings.cache_clear()
-check("E1) UI_YENI_TASARIM=true → anonim true", acik() is True)
-check("E2) UI_YENI_TASARIM=true → listede olmayan kullanıcı true", acik(H_DIGER) is True)
+check("E1) UI_YENI_TASARIM=true → anonim (build 26) true", acik(V26) is True)
+check("E2) UI_YENI_TASARIM=true → listede olmayan kullanıcı (build 26) true",
+      acik({**H_DIGER, **V26}) is True)
+
+# H — en düşük build koşulu.
+check("H1) build 25 → false", acik({**H_DIGER, "X-App-Version": "1.0.0+25"}) is False)
+check("H2) build 26 → true", acik({**H_DIGER, "X-App-Version": "1.0.0+26"}) is True)
+check("H3) build 30 → true", acik({**H_DIGER, "X-App-Version": "1.1.0+30"}) is True)
+H_SURUMSUZ = kayit("surumsuz@example.com")
+check("H4) sürüm yok (başlık yok, app_version yok) → false", acik(H_SURUMSUZ) is False)
+check("H5) build numarasız sürüm ('1.0.0') → false",
+      acik({**H_SURUMSUZ, "X-App-Version": "1.0.0"}) is False)
+check("H6) anonim, başlıksız → false", acik() is False)
+check("H7) listedeki kullanıcı sürümsüz / build 25 → true",
+      acik(H_SECILI) is True and acik({**H_SECILI, "X-App-Version": "1.0.0+25"}) is True)
+# Başlık yoksa son görülen sürüm (users.app_version) kullanılır: kimlikli bir
+# uca X-App-Version ile gidince kaydedilir.
+client.get("/api/v1/users/me", headers={**H_SURUMSUZ, "X-App-Version": "1.0.0+27"})
+check("H8) başlıksız istek users.app_version (build 27) ile → true", acik(H_SURUMSUZ) is True)
+client.get("/api/v1/users/me", headers={**H_DIGER, "X-App-Version": "1.0.0+24"})
+check("H9) başlıksız istek users.app_version (build 24) ile → false", acik(H_DIGER) is False)
+check("H10) başlık kayıtlı sürümden önce gelir (kayıt 24, başlık 26 → true)",
+      acik({**H_DIGER, **V26}) is True)
+os.environ["UI_YENI_TASARIM_MIN_BUILD"] = "28"
+get_settings.cache_clear()
+check("H11) eşik env'den: MIN_BUILD=28 iken build 27 → false", acik(H_SURUMSUZ) is False)
+os.environ["UI_YENI_TASARIM_MIN_BUILD"] = "26"
+get_settings.cache_clear()
 os.environ["UI_YENI_TASARIM"] = "false"
 get_settings.cache_clear()
 check("E3) Tekrar kapatınca listedeki hâlâ true, diğeri false",

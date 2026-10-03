@@ -203,6 +203,14 @@ class Settings:
             e.strip().lower()
             for e in (os.getenv("UI_YENI_TASARIM_KULLANICILAR") or "").split(",")
             if e.strip())
+        # En düşük build (2026-10-03): bundan küçük ya da sürümü bilinmeyen
+        # istemciye yeni tasarım açılmaz (eski build'ler yeni ekranları
+        # taşımıyor). Listedeki kullanıcılar muaf.
+        try:
+            self.ui_yeni_tasarim_min_build = int(
+                os.getenv("UI_YENI_TASARIM_MIN_BUILD") or 26)
+        except ValueError:
+            self.ui_yeni_tasarim_min_build = 26
 
         # --- Abonelik / beta (Faz G5 → Faz V) --------------------------------
         # Gerçek Apple/Google IAP doğrulaması ayrı sprint. Beta süresince premium'u
