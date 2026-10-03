@@ -115,6 +115,11 @@ def utc(gun, yerel_dk: int) -> datetime:
             + timedelta(minutes=yerel_dk - TZ))
 
 
+def hm(s: str) -> int:
+    h, m = s.split(":")
+    return int(h) * 60 + int(m)
+
+
 def hhmm(dk) -> str:
     return pa._fmt(dk)
 
@@ -822,6 +827,51 @@ check("Y7) Gece yarısını AŞAN kayıt her koşulda gece",
       pa.uyku_sinifi_ham(utc(TODAY, 16 * 60),
                          utc(TODAY + timedelta(days=1), 2 * 60), TZ)
       == pa.GECE_UYKUSU, "")
+
+# --- K19 hizalama (2026-10-03): mobil lib/sleep-class.ts ile BİREBİR --------
+YARIN = TODAY + timedelta(days=1)
+
+
+def sinif2(bas_dk, bit_gun, bit_dk, bant=None):
+    return pa.uyku_sinifi_ham(utc(TODAY, bas_dk), utc(bit_gun, bit_dk), TZ, bant)
+
+
+check("Y10a) 18:30 → 05:30 (gece yarısını aşan) → gece",
+      sinif2(hm("18:30"), YARIN, hm("05:30")) == pa.GECE_UYKUSU, "")
+check("Y10b) 18:25 → 20:55 → gündüz (19:00 öncesi başladı, gece yarısını aşmadı)",
+      sinif2(hm("18:25"), TODAY, hm("20:55")) == pa.GUNDUZ_UYKUSU, "")
+check("Y10c) 19:10 → 19:50 (40 dk) → gündüz (akşam şekerlemesi)",
+      sinif2(hm("19:10"), TODAY, hm("19:50")) == pa.GUNDUZ_UYKUSU, "")
+check("Y10d) 19:30 → 06:30 → gece",
+      sinif2(hm("19:30"), YARIN, hm("06:30")) == pa.GECE_UYKUSU, "")
+check("Y10e) 23:30 → 00:15 (45 dk, gece yarısını aşan kısa akşam uykusu) → gündüz",
+      sinif2(hm("23:30"), YARIN, hm("00:15")) == pa.GUNDUZ_UYKUSU,
+      sinif2(hm("23:30"), YARIN, hm("00:15")))
+check("Y10f) 23:30 → 00:15, 4 aylıkta (eşik 45) → gece",
+      sinif2(hm("23:30"), YARIN, hm("00:15"), _b4ay) == pa.GECE_UYKUSU, "")
+check("Y10g) 23:30 → 00:45 (75 dk) → gece",
+      sinif2(hm("23:30"), YARIN, hm("00:45")) == pa.GECE_UYKUSU, "")
+
+# Plan / timeline / haftalık / denetim aynı motordan (gun_kayitlari) geçer.
+# (Çakışan kayıtlar K13 ile birleşir — her senaryo kendi gününde.)
+def _gk(kayit, gun):
+    return pa.gun_kayitlari([kayit], gun, pa.DEFAULT_WAKE_MIN, tz_offset_min=TZ)
+
+
+_g1830 = L("sleep", TODAY, hm("18:30"), YARIN, hm("05:30"))
+_g1825 = L("sleep", TODAY, hm("18:25"), TODAY, hm("20:55"))
+_g1910 = L("sleep", TODAY, hm("19:10"), TODAY, hm("19:50"))
+check("Y10h) Motor: 18:30→05:30 yarının gecesi (bugün gündüz değil); "
+      "18:25→20:55 ve 19:10→19:50 bugünün gündüzü",
+      [k["bas_dk"] for k in _gk(_g1830, YARIN)["gece_uykulari"]] == [hm("18:30")]
+      and not _gk(_g1830, TODAY)["gunduz_uykulari"]
+      and [k["sure_dk"] for k in _gk(_g1825, TODAY)["gunduz_uykulari"]] == [150]
+      and [k["sure_dk"] for k in _gk(_g1910, TODAY)["gunduz_uykulari"]] == [40]
+      and not _gk(_g1910, YARIN)["gece_uykulari"], "")
+_gk_kisa = pa.gun_kayitlari([L("sleep", TODAY, hm("23:30"), YARIN, hm("00:15"))],
+                            TODAY, pa.DEFAULT_WAKE_MIN, tz_offset_min=TZ)
+check("Y10i) Motor: 23:30→00:15 başladığı günün gündüz uykusu (45 dk)",
+      [k["sure_dk"] for k in _gk_kisa["gunduz_uykulari"]] == [45], str(_gk_kisa["gunduz_uykulari"]))
 
 # `sekerleme` tipi motor içinde de normal gündüz uykusu gibi işlenir
 y5 = S8.hesapla([L("sleep", DUN, 21 * 60 + 50, TODAY, S8.wake),

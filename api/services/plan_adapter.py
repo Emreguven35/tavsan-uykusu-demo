@@ -702,12 +702,13 @@ def kisa_uyku_esigi(bant: dict | None) -> int:
 def uyku_tipi_belirle(kayit: dict, bant: dict | None = None) -> str:
     """K19.1 — bir uyku kaydının SINIFI: gündüz mü gece mi.
 
-    TEK KURAL, BAŞLANGIÇ SAATİ:
-      • 06:00–19:00 arası başlayan → gündüz uykusu,
-      • 19:00–06:00 arası başlayan → gece uykusu,
-      • İSTİSNA: 19:00–24:00 arası başlayan, KAPALI ve bandın kısa uyku
-        eşiğinden (6 ay altı 45 dk / 6 ay+ 60 dk) kısa kayıt gündüz sayılır —
-        bu gece yatışı değil, başarısız bir yatış denemesidir.
+    TEK KURAL, BAŞLANGIÇ SAATİ (mobil lib/sleep-class.ts ile BİREBİR, 2026-10-03):
+      • 06:00 öncesi başlayan → gece uykusu,
+      • 19:00 ve sonrası başlayan → gece uykusu; İSTİSNA: KAPALI ve bandın
+        kısa uyku eşiğinden (6 ay altı 45 dk / 6 ay+ 60 dk) kısa kayıt gündüz
+        sayılır (akşam şekerlemesi) — gece yarısını aşsa bile,
+      • 06:00–19:00 arası başlayıp gece yarısını aşan → gece uykusu,
+      • diğerleri → gündüz uykusu.
 
     DB'deki `type` sınıfı BELİRLEMEZ: `nap` tipiyle gelen 21:00 kaydı gece
     uykusudur, `sleep` tipiyle gelen 09:50 kaydı gündüz uykusudur. Eski
@@ -715,21 +716,23 @@ def uyku_tipi_belirle(kayit: dict, bant: dict | None = None) -> str:
 
     `bant` artık KULLANILIYOR: kısa uyku eşiği yaşa bağlı (v1.4). Bant
     verilmezse 6 ay+ eşiğine düşülür."""
-    # Gece yarısını AŞAN kayıt her koşulda gece uykusudur: 16:00'da başlayıp
-    # ertesi gün 02:00'de biten bir kayıt takvimsel olarak gündüz uykusu olamaz.
-    # Bu, saat kuralının tek fiziksel istisnasıdır.
+    bas = kayit["bas_dk"]
+    if bas < GUNDUZ_PENCERE_BAS:
+        return GECE_UYKUSU
+    if bas >= GUNDUZ_PENCERE_BIT:
+        # Akşam şekerlemesi istisnası gece yarısı kontrolünden ÖNCE gelir:
+        # 23:30 → 00:15 (45 dk) mobilde gündüz; eskiden burada geceydi.
+        sure = kayit.get("sure_dk")
+        if (bas < AKSAM_ISTISNA_BIT and kayit.get("bit_dk") is not None
+                and sure is not None and sure < kisa_uyku_esigi(bant)):
+            return GUNDUZ_UYKUSU
+        return GECE_UYKUSU
+    # 06–19 arası başlayıp gece yarısını AŞAN kayıt gecedir (18:30 → 05:30):
+    # takvimsel olarak gündüz uykusu olamaz.
     if (kayit.get("bit_gun") is not None and kayit.get("bas_gun") is not None
             and kayit["bit_gun"] > kayit["bas_gun"]):
         return GECE_UYKUSU
-    bas = kayit["bas_dk"]
-    if GUNDUZ_PENCERE_BAS <= bas < GUNDUZ_PENCERE_BIT:
-        return GUNDUZ_UYKUSU
-    sure = kayit.get("sure_dk")
-    if (GUNDUZ_PENCERE_BIT <= bas < AKSAM_ISTISNA_BIT
-            and kayit.get("bit_dk") is not None
-            and sure is not None and sure < kisa_uyku_esigi(bant)):
-        return GUNDUZ_UYKUSU
-    return GECE_UYKUSU
+    return GUNDUZ_UYKUSU
 
 
 def uyku_sinifi_ham(started_at: datetime, ended_at: datetime | None = None,
