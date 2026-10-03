@@ -16,7 +16,8 @@ Kapsam:
  15.   "Bebeğiniz uyandı mı?" (v2.4.3): gecikmiş AÇIK uyku kaydı için hatırlatma
        — 20 dk kuralı, gece sessizliği, günlük 3 kota, uygulama açıksa susma
  16.   UYKU DİZİSİ (v2.7): 30 dk önce / zamanında / 30 dk sonra; uyku başlayınca
-       kalan adımlar düşer; gece metni ayrı; günlük 10 tavanı
+       kalan adımlar düşer; gece metni ayrı; günlük 10 tavanı; gece "Rutin
+       zamanı" yalnız build ≥ 26 (v2.7.1)
 
 Çalıştırma: python tests/test_notifier.py
 """
@@ -675,6 +676,8 @@ check("16f) Açık kayıt bloktan önce geldiyse 30 dk önce / zamanında / sonr
 
 # Gece bloğu: 30 dk önce metni rutin.
 u16c = new_user("n16c@tavsansmoke.com")
+u16c.app_version = "1.0.0+26"
+db.commit()
 b16c, _ = new_plan(u16c, "Can", datetime(2026, 8, 27).date())
 add_token(u16c, "ExponentPushToken[GECE16]")
 db.add(SleepLog(user_id=u16c.id, baby_id=b16c.id, type="wake",
@@ -690,6 +693,41 @@ check("16g) Gece 30 dk önce: 'Rutin zamanı 🛁' / banyo, pijama, kitap",
       [(x["title"], x["body"]) for x in _m]
       == [("Rutin zamanı 🛁", "Banyo, pijama, kitap; yatışa 30 dakika var.")]
       and _m[0]["data"]["sinif"] == "gece", str(mesajlar("ExponentPushToken[GECE16]")))
+
+# Build < 26 ve sürümü bilinmeyen: gece "Rutin zamanı" GİTMEZ (mobil kendi
+# 15 dk'lık yerel hatırlatmasını gösteriyor); gündüz dizisi ve gece "Uyku
+# zamanı" normal gider.
+check("16g2) Sürüm eşiği: 26+ evet; 25, bilinmeyen, build'siz hayır",
+      [notifier.gece_rutini_gonderilir(User(email="x", app_version=v))
+       for v in ("1.0.0+26", "1.1.0+30", "1.0.0+25", None, "1.0.0")]
+      == [True, True, False, False, False], "")
+for _eposta, _surum, _tok in (("n16e@tavsansmoke.com", "1.0.0+25", "ExponentPushToken[ESKI25]"),
+                              ("n16f@tavsansmoke.com", None, "ExponentPushToken[BILINMEZ]")):
+    _u = new_user(_eposta)
+    _u.app_version = _surum
+    db.commit()
+    _b, _ = new_plan(_u, "Can", datetime(2026, 8, 27).date())
+    add_token(_u, _tok)
+    db.add(SleepLog(user_id=_u.id, baby_id=_b.id, type="wake",
+                    started_at=utc_at(7, 0, day=27)))
+    db.commit()
+    tur(27, 7 * 60 + 30)
+    _y = blok_saati(_u, _b, 27, "bedtime")
+    SENT.clear()
+    _st = tur(27, _y - 30)
+    _once = [m for m in mesajlar(_tok)
+             if (m.get("data") or {}).get("block_key") == "bedtime"]
+    SENT.clear()
+    tur(27, _y)
+    _zaman = [m["title"] for m in mesajlar(_tok)
+              if (m.get("data") or {}).get("block_key") == "bedtime"]
+    check(f"16g3) app_version={_surum!r}: gece 'Rutin zamanı' YOK, 'Uyku zamanı' VAR",
+          _once == [] and _st.get("gece_rutini_eski_surum", 0) >= 1
+          and _zaman == ["Uyku zamanı ✨"], f"once={_once} zaman={_zaman} st={_st}")
+
+# Gündüz 30 dk önce eski sürümde de gider (16b'deki u16'nın sürümü yok).
+check("16g4) Gündüz 'yorulmaya başladı' sürümden bağımsız (16b sürümsüz kullanıcıda geçti)",
+      u16.app_version is None, "")
 
 # Günlük tavan: bugün 10 uyku bildirimi gittiyse 11.'si gitmez.
 u16d = new_user("n16d@tavsansmoke.com")

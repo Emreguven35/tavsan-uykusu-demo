@@ -92,6 +92,10 @@ DIZI_METIN = {
     ("sonra", None): ("{ad} biraz daha uyanık kalmak istiyor 🐣",
                       "Sorun değil, hazır olduğunuzda buradayız."),
 }
+# Build < 26 mobil, gece yatışından 15 dk önce KENDİ yerel rutin hatırlatmasını
+# gösteriyor; backend'in "Rutin zamanı 🛁"u ona ikinci bildirim olurdu. Sürüm
+# bilinmiyorsa da gönderilmez (eski istemci olma ihtimali yüksek).
+GECE_RUTINI_MIN_BUILD = 26
 DIZI_KATEGORI = {"once": KAT_UYKU_ONCESI, "zaman": KAT_UYKU_ZAMANI,
                  "sonra": KAT_UYKU_HATIRLATMA}
 
@@ -416,6 +420,13 @@ def belirtme_hali(ad: str) -> str:
     return f"{ad}'{kaynastirma}{ek}"
 
 
+def gece_rutini_gonderilir(user: User) -> bool:
+    """Gece "Rutin zamanı 🛁" yalnız build ≥ 26 kullanıcılara (users.app_version)."""
+    from api.services.denetim import surum_build
+    build = surum_build(getattr(user, "app_version", None))
+    return build is not None and build >= GECE_RUTINI_MIN_BUILD
+
+
 def _hhmm(deger: Any) -> int | None:
     try:
         sa, dk = str(deger).split(":")[:2]
@@ -527,6 +538,11 @@ def _uyku_dizisi(db: Session, user: User, baby: Baby, plan: SleepPlan,
         for adim, dk in (("once", bas - UYKU_ONCE_DK), ("zaman", bas),
                          ("sonra", bas + UYKU_SONRA_DK)):
             if not _vakti_geldi(dk, now_minute, kayma) or sessiz_saat(dk % 1440):
+                continue
+            if adim == "once" and sinif == "gece" and not gece_rutini_gonderilir(user):
+                # Mobil kendi yerel rutin hatırlatmasını gösteriyor; deftere
+                # yazılmaz, bloğun sonraki adımları normal devam eder.
+                stats["gece_rutini_eski_surum"] = stats.get("gece_rutini_eski_surum", 0) + 1
                 continue
             key = (f"{today_local.isoformat()}:uyku:{_bebek_kisa(baby)}:"
                    f"{blok.get('key')}:{adim}")
