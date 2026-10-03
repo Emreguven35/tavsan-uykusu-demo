@@ -101,6 +101,11 @@ def update_preferences(req: NotificationPrefsUpdate, db: Session = Depends(get_d
         changes["community_replies"] = changes["topluluk_cevap_bildirimi"]
     elif "community_replies" in changes:
         changes["topluluk_cevap_bildirimi"] = changes["community_replies"]
+    # Aynı şekilde eski plan_reminders ↔ v2.7 uyku_hatirlatma_bildirimi.
+    if "uyku_hatirlatma_bildirimi" in changes:
+        changes["plan_reminders"] = changes["uyku_hatirlatma_bildirimi"]
+    elif "plan_reminders" in changes:
+        changes["uyku_hatirlatma_bildirimi"] = changes["plan_reminders"]
     prefs.update(changes)
     # JSONB değişikliğinin görülmesi için YENİ sözlük ata (in-place mutasyon değil).
     user.notification_prefs = dict(prefs)

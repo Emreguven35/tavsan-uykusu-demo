@@ -18,6 +18,9 @@ DEFAULT_NOTIFICATION_PREFS: dict[str, bool] = {
     # ikisinden biri kapalıysa cevap bildirimi gitmez.
     "topluluk_cevap_bildirimi": True,
     "topluluk_faydali_bildirimi": True,
+    # v2.7 (2026-10-03) — sabah sorusu + uyku dizisi. `plan_reminders` eski
+    # istemci için kalır; PATCH ikisini eşler, ikisinden biri kapalıysa gitmez.
+    "uyku_hatirlatma_bildirimi": True,
 }
 
 

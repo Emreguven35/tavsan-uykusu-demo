@@ -17,6 +17,7 @@ SAATLERİDİR — kişisel veri yok. Saat 2026-09-30 09:00 TR'ye sabitlenir.
      açık gece uykusu bugünün altında
   I  K20 parçalar tek oturum + parcalar; "otomatik kapatıldı" notu işaretli
   J  Sahiplik 404, days sınırı 422
+  K  K21.2: sabah biten 16 sa üstü kayıt asiri_uzun, süre/gece_dk yok
 
 Çalıştırma: python tests/test_timeline.py
 """
@@ -113,7 +114,9 @@ try:
             ("nap", ("09-29", "14:36"), ("09-29", "15:46"), None, "p2"),
             ("nap", ("09-29", "10:00"), ("09-29", "11:05"),
              "otomatik kapatıldı: yeni kayıt açıldı", "oto"),
-            ("nap", ("09-30", "08:30"), None, None, "acik")]:
+            ("nap", ("09-30", "08:30"), None, None, "acik"),
+            # K21.2 — sabah biten 27 sa 55 dk'lık sayaç (prod 10-02 → 10-03)
+            ("sleep", ("09-26", "03:42"), ("09-27", "07:37"), None, "uzun")]:
         _db.add(SleepLog(user_id=uid, baby_id=uuid.UUID(B2), type=tip,
                          started_at=tr(*b), ended_at=tr(*e) if e else None,
                          notes=n, client_id=cid))
@@ -234,6 +237,24 @@ check("I2) 'otomatik kapatıldı' notlu kayıt otomatik_kapatildi=true",
       len(_oto) == 1 and _oto[0]["otomatik_kapatildi"] is True, str(_oto))
 check("I3) Diğer oturumlar otomatik_kapatildi=false",
       all(not o["otomatik_kapatildi"] for o in g29["oturumlar"]))
+
+# --- K21.2 ------------------------------------------------------------------
+h27 = gun(y2, "2026-09-27")
+_uz = [o for o in h27["oturumlar"] if o["client_id"] == "uzun"]
+check("K1) Sabah biten 27 sa'lik kayıt: asiri_uzun=true, sure_dk=null, gece_dk=0",
+      len(_uz) == 1 and _uz[0]["asiri_uzun"] is True and _uz[0]["sure_dk"] is None
+      and h27["gece_dk"] == 0, str(h27))
+check("K2) Bitişi sabah uyanışı (07:37)",
+      h27["sabah_uyanisi"] == {"saat": "07:37", "kaynak": "kayit"}, str(h27["sabah_uyanisi"]))
+check("K3) Başladığı gün (09-26) oturum olarak görünmüyor",
+      not [o for o in gun(y2, "2026-09-26")["oturumlar"] if o["client_id"] == "uzun"])
+with saat_sabitle(SAAT):
+    ws2 = client.get(f"/api/v1/logs/weekly-summary?baby_id={B2}", headers=H).json()
+check("K4) weekly-summary 09-27: 0 saat",
+      next(d for d in ws2["days"] if d["date"] == "2026-09-27")["sleep_hours"] == 0,
+      str(ws2["days"]))
+check("K5) Diğer oturumlar asiri_uzun=false",
+      all(not o["asiri_uzun"] for g in y["gunler"] for o in g["oturumlar"]))
 
 # Bu akşam başlayan AÇIK gece uykusu bugünün altında (saat 22:00'ye alınır).
 _db = SessionLocal()

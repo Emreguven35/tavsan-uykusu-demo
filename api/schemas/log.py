@@ -149,6 +149,9 @@ class TimelineOturum(BaseModel):
     sure_dk: int | None
     devam: bool = False                # açık kayıt (bitis=null)
     otomatik_kapatildi: bool = False   # sunucu kapattı (not) ya da motor tahmini
+    # K21.2 — sabah biten 16 saat üstü kayıt: bitişi sabah uyanışı, süresi
+    # gösterilmez (sure_dk=null) ve gece_dk'ya girmez.
+    asiri_uzun: bool = False
     parcalar: list[uuid.UUID] = []
 
 

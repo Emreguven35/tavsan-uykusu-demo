@@ -6,16 +6,18 @@ yeterli ve operasyonel yükü sıfır. Ölçek büyürse (çok instance) bu zama
 bir servise taşınmalı — aksi halde her instance aynı bildirimi göndermeye çalışır.
 Şimdilik mükerrerliği sent_notifications tablosundaki UNIQUE kısıt engeller.
 
-Akış (her 15 dakikada bir):
+Akış (her 5 dakikada bir, v2.7):
     planı olan her bebek için →
       1. plan_service.ensure_today_plan() ile BUGÜNÜN planını hazırla/adapte et
          (GET /plans/today ile AYNI kod yolu; bugün zaten adapte edildiyse yazmaz),
-      2. çizelgedeki uyku bloklarından önümüzdeki 25-40 dk penceresinde
-         BAŞLAYANLARI bul,
-      3. sahibinin tüm cihaz token'larına "🌙 {ad} için uyku vakti yaklaşıyor
-         (19:47)" gönder → deftere yaz.
-    Böylece kullanıcı uygulamayı hiç açmasa da bildirim güncel kaydırılmış saate
-    göre gider.
+      2. SABAH KURALI (İlayda, 2026-10-03): bugün sabah uyanışı girilmemişse
+         HİÇBİR uyku bildirimi gitmez; yerine yaşa göre hedef uyanış + 30 dk'da
+         "Günaydın! {ad} uyandı mı? ☀️", girilmezse 1 saat sonra bir kez daha,
+      3. sabah uyanışı girildiyse her uyku bloğu için UYKU DİZİSİ: 30 dk önce
+         (gündüz: yorulmaya başladı / gece: rutin zamanı), zamanında (uyku
+         zamanı), 30 dk sonra hâlâ uyumadıysa (biraz daha uyanık kalmak
+         istiyor). Uyku başlayınca o bloğun kalan adımları düşer.
+    Saatler güncel (adapte edilmiş) plandan gelir: plan kayınca dizi de kayar.
 
 Hata politikası:
     DeviceNotRegistered → token SİLİNİR (cihaz uygulamayı kaldırmış).
@@ -35,7 +37,7 @@ from sqlalchemy.orm import Session
 
 from api.config import get_settings
 from api.models import (
-    Baby, PushToken, SentNotification, SleepPlan, User,
+    Baby, PushToken, SentNotification, SleepLog, SleepPlan, User,
 )
 from api.models.user import DEFAULT_NOTIFICATION_PREFS
 from api.services import plan_adapter, plan_service
@@ -45,22 +47,53 @@ logger = logging.getLogger("tavsan.notifier")
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 EXPO_TIMEOUT = 15
 
-# Bildirim penceresi: blok başlangıcı "şimdi + 25dk" ile "şimdi + 40dk" arasındaysa.
-# 25-40dk, ebeveyne uyku rutinini başlatma payı bırakır (Faz 6.6; önceden 15-30dk).
-# Pencere genişliği (15dk) tarama aralığına EŞİT olmalı — böylece her blok pencereye
-# tam bir kez girer, ne kaçar ne mükerrer olur. Defter yine de garantiye alır.
 # GÖNDERİM YAYMA (v2.4.1) — sabit saatli bildirim binlerce anneyi aynı anda
 # uygulamaya sokuyor ve /plans/today kuyruğa giriyordu (yayın öncesi ölçüm:
-# 50 eşzamanlıda p95 15 sn). Her kullanıcı bildirim penceresini kendi
-# DETERMİNİSTİK kaymasıyla görür: aynı anne her gün aynı dakikada alır
-# (rastgele oynamaz), anneler arasında ise gönderim 0-10 dk'ya yayılır.
-# Zamanlayıcı turu 15 dk'da bir koştuğu için kayma, kullanıcıları turlar
-# arasında dağıtır; tur sıklığı artırılırsa dağılım incelir.
+# 50 eşzamanlıda p95 15 sn). Her kullanıcı kendi DETERMİNİSTİK kaymasını alır:
+# aynı anne her gün aynı dakikada alır, anneler arasında gönderim yayılır.
+# v2.7: uyku dizisi ±5 dk istediği için kayma `% 5` ile 0-4 dk'ya daraltılır.
 BILDIRIM_YAYMA_DK = 10
 
-WINDOW_MIN_AHEAD = 25
-WINDOW_MAX_AHEAD = 40
-SCHEDULER_INTERVAL_MIN = 15
+# v2.7 — uyku dizisi ±5 dk hassasiyet istiyor; 15 dk'lık tur bunu veremez.
+SCHEDULER_INTERVAL_MIN = 5
+
+# --- SABAH KURALI + UYKU DİZİSİ (v2.7, 2026-10-03) ---------------------------
+# Kategori adları mobil sözleşmesidir (data.type == data.kategori).
+KAT_SABAH = "sabah_uyanis"
+KAT_UYKU_ONCESI = "uyku_oncesi"          # 30 dk önce (gündüz/gece metni ayrı)
+KAT_UYKU_ZAMANI = "uyku_zamani"          # tam zamanında
+KAT_UYKU_HATIRLATMA = "uyku_hatirlatma"  # 30 dk sonra hâlâ uyumadıysa
+TERCIH_UYKU = "uyku_hatirlatma_bildirimi"
+
+SABAH_ILK_DK = 30                 # hedef uyanış + 30 dk
+SABAH_TEKRAR_DK = 60              # girilmezse 1 saat sonra bir kez daha
+SABAH_GUNLUK_LIMIT = 2
+UYKU_ONCE_DK = 30
+UYKU_SONRA_DK = 30
+UYKU_GUNLUK_LIMIT = int(os.getenv("UYKU_BILDIRIM_GUNLUK_LIMIT") or 10)
+# Adım zamanı geldikten sonra bu kadar dakika içinde gönderilebilir. Tur 5 dk;
+# bir tur kaçsa (deploy, yavaş tur) bildirim yine gider ama bayatlamaz.
+DIZI_GEC_TOLERANS_DK = 10
+# Bu kadar önce başlamış uyku kaydı o bloğun uykusudur (biraz erken yatırılmış).
+UYKU_BASLADI_ERKEN_DK = 45
+
+SABAH_BASLIK = "Günaydın! {ad} uyandı mı? ☀️"
+SABAH_GOVDE = ("Uyanış saatini girdiğinde günün uyku programını ona göre "
+               "hazırlıyoruz.")
+DIZI_METIN = {
+    ("once", "gunduz"): ("{ad} yorulmaya başladı 🧸",
+                         "Uykuya 30 dakika var; sakin oyunlara geç, uyku "
+                         "işaretlerine bak."),
+    ("once", "gece"): ("Rutin zamanı 🛁",
+                       "Banyo, pijama, kitap; yatışa 30 dakika var."),
+    ("zaman", None): ("Uyku zamanı ✨",
+                      "Hazır olduğunuzda {ad_i} yatırabilirsin; Uyudu'ya "
+                      "basmayı unutma."),
+    ("sonra", None): ("{ad} biraz daha uyanık kalmak istiyor 🐣",
+                      "Sorun değil, hazır olduğunuzda buradayız."),
+}
+DIZI_KATEGORI = {"once": KAT_UYKU_ONCESI, "zaman": KAT_UYKU_ZAMANI,
+                 "sonra": KAT_UYKU_HATIRLATMA}
 
 # --- "BEBEĞİNİZ UYANDI MI?" (v2.4.3) ----------------------------------------
 # Açık kalan uyku kaydı yalnız o kaydı bozmaz: çizelge bir zincir olduğu için
@@ -189,28 +222,6 @@ def yayma_dakikasi(user_id: Any) -> int:
     her gün başka dakikaya düşerdi. md5 süreçten bağımsızdır."""
     h = hashlib.md5(str(user_id).encode("utf-8")).digest()
     return h[0] % (BILDIRIM_YAYMA_DK + 1)
-
-
-def upcoming_blocks(schedule: list[dict], now_local_minute: int,
-                    min_ahead: int = WINDOW_MIN_AHEAD,
-                    max_ahead: int = WINDOW_MAX_AHEAD) -> list[dict]:
-    """Çizelgeden, [şimdi+min_ahead, şimdi+max_ahead] penceresinde BAŞLAYAN uyku
-    bloklarını döndür. Yalnız uyku blokları ('nap'/'sleep') — 'wake' bildirilmez."""
-    lo, hi = now_local_minute + min_ahead, now_local_minute + max_ahead
-    out = []
-    # Eski şema (type="night") normalize edilmezse gece bloğu HİÇ bildirilmez.
-    for b in plan_adapter.normalize_schedule(schedule):
-        if b.get("type") not in ("nap", "sleep"):
-            continue
-        start = b.get("start_minute")
-        if start is None:
-            continue
-        # Gece bloğu ertesi güne sarabilir; hem kendisini hem +24s halini dene.
-        for candidate in (start, start + 24 * 60):
-            if lo <= candidate <= hi:
-                out.append(b)
-                break
-    return out
 
 
 def geciken_acik_bloklar(schedule: list[dict], now_local_minute: int,
@@ -366,36 +377,175 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
         _uyandi_mi_sor(db, user, baby, plan, content, now_minute,
                        today_local, now, stats)
 
-        kayma = yayma_dakikasi(user.id)
-        blocks = upcoming_blocks(content.get("schedule") or [], now_minute,
-                                 min_ahead=WINDOW_MIN_AHEAD - kayma,
-                                 max_ahead=WINDOW_MAX_AHEAD - kayma)
-        if not blocks:
+        if not _uyku_bildirimi_acik(user):
             continue
-        baby_name = baby.name
-
-        for block in blocks:
-            key = _block_key(plan.plan_date, block)
-            if _already_sent(db, user.id, plan.id, key):
-                stats["skipped_duplicate"] += 1
-                continue
-            # ÖNCE deftere yaz, SONRA gönder: çift gönderim, hiç göndermemekten
-            # daha kötüdür (kullanıcıyı rahatsız eder ve geri alınamaz).
-            if not _mark_sent(db, user.id, plan.id, key):
-                stats["skipped_duplicate"] += 1
-                continue
-
-            # Saat, ADAPTE EDİLMİŞ plandan gelir (yukarıda ensure_today_plan koştu).
-            title = "🌙 Uyku vakti yaklaşıyor"
-            body = f"🌙 {baby_name} için uyku vakti yaklaşıyor ({block.get('time')})"
-            sent = push_to_user(db, user.id, title, body,
-                                data={"type": "plan_reminder",
-                                      "plan_id": str(plan.id),
-                                      "block_key": block.get("key")})
-            stats["sent"] += sent
-            logger.info("Hatırlatma: user=%s baby=%s blok=%s cihaz=%d",
-                        user.id, plan.baby_id, block.get("key"), sent)
+        adapt = content.get("adaptation")
+        if not isinstance(adapt, dict):
+            # Yenidoğan rehberi / eğitim geçişi: sabit saatli program yok.
+            continue
+        if sessiz_saat(now_minute):
+            continue
+        # SABAH KURALI — uyanış girilmeden çizelge tahmindir; o tahmine göre
+        # "uyku zamanı" demek anneyi yanlış saate yönlendirir.
+        if adapt.get("sabah_uyanis_kaynak") in (None, "varsayilan"):
+            _sabah_sor(db, user, baby, plan, adapt, now_minute, today_local, stats)
+            continue
+        _uyku_dizisi(db, user, baby, plan, content, now_minute, today_local,
+                     stats, tz_offset_min)
     return stats
+
+
+def _uyku_bildirimi_acik(user: User) -> bool:
+    """Uyku dizisi + sabah sorusu tercihi. Eski anahtar (plan_reminders) da
+    kapalıysa gönderilmez — PATCH ikisini eşliyor."""
+    p = _prefs(user)
+    return bool(p.get(TERCIH_UYKU, True)) and bool(p.get("plan_reminders", True))
+
+
+def belirtme_hali(ad: str) -> str:
+    """Türkçe belirtme hâli: Emre → Emre'yi, Ali → Ali'yi, Can → Can'ı,
+    Umut → Umut'u, Gül → Gül'ü. Son ünlüye göre (dört yönlü uyum)."""
+    ad = (ad or "").strip()
+    unluler = "aıoueiöüAIOUEİÖÜâîû"
+    son = next((c for c in reversed(ad) if c in unluler), "e")
+    ek = {"a": "ı", "ı": "ı", "A": "ı", "I": "ı", "â": "ı",
+          "o": "u", "u": "u", "O": "u", "U": "u", "û": "u",
+          "e": "i", "i": "i", "E": "i", "İ": "i", "î": "i",
+          "ö": "ü", "ü": "ü", "Ö": "ü", "Ü": "ü"}.get(son, "i")
+    kaynastirma = "y" if ad and ad[-1] in unluler else ""
+    return f"{ad}'{kaynastirma}{ek}"
+
+
+def _hhmm(deger: Any) -> int | None:
+    try:
+        sa, dk = str(deger).split(":")[:2]
+        return int(sa) * 60 + int(dk)
+    except Exception:
+        return None
+
+
+def _vakti_geldi(hedef_dk: int, now_minute: int, kayma: int) -> bool:
+    """Adım zamanı [hedef − kayma, hedef − kayma + tolerans) içinde mi?
+
+    `kayma` 0-4 dk ERKENE: aynı dakikaya düşen anneler turlara yayılır ve
+    sapma ±5 dk'yı aşmaz."""
+    bas = hedef_dk - kayma
+    return bas <= now_minute < bas + DIZI_GEC_TOLERANS_DK
+
+
+def _gunun_anahtar_sayisi(db: Session, user_id: Any, gun: date, tur: str) -> int:
+    return (db.query(SentNotification)
+            .filter(SentNotification.user_id == user_id,
+                    SentNotification.block_key.like(f"{gun.isoformat()}:{tur}:%"))
+            .count())
+
+
+def _defterde_var(db: Session, user_id: Any, key: str) -> bool:
+    """Plan kimliğinden BAĞIMSIZ: gün içinde plan yeniden üretilse de aynı
+    adım ikinci kez gitmez."""
+    return db.query(SentNotification.id).filter(
+        SentNotification.user_id == user_id,
+        SentNotification.block_key == key).first() is not None
+
+
+def _bebek_kisa(baby: Baby) -> str:
+    return str(baby.id).replace("-", "")[:8]
+
+
+def _gonder(db: Session, user: User, baby: Baby, plan: SleepPlan, key: str,
+            kategori: str, baslik: str, govde: str, stats: dict,
+            ek: dict | None = None) -> bool:
+    """Deftere yaz → gönder. Defter yazılamazsa (yarış) gönderilmez."""
+    if _defterde_var(db, user.id, key) or not _mark_sent(db, user.id, plan.id, key):
+        stats["skipped_duplicate"] += 1
+        return False
+    data = {"type": kategori, "kategori": kategori, "plan_id": str(plan.id),
+            "baby_id": str(baby.id), **(ek or {})}
+    n = push_to_user(db, user.id, baslik, govde, data=data)
+    stats["sent"] += n
+    stats[kategori] = stats.get(kategori, 0) + 1
+    logger.info("Bildirim %s: user=%s baby=%s key=%s cihaz=%d",
+                kategori, user.id, baby.id, key, n)
+    return True
+
+
+def sabah_hedef_dk(adapt: dict) -> int:
+    """Yaşa göre hedef uyanış (adaptation.sabah_hedefi), yoksa şablonunki."""
+    return (_hhmm((adapt.get("sabah_hedefi") or {}).get("hedef"))
+            or _hhmm(adapt.get("sabah_uyanis_hedef"))
+            or plan_adapter.DEFAULT_WAKE_MIN)
+
+
+def _sabah_sor(db: Session, user: User, baby: Baby, plan: SleepPlan,
+               adapt: dict, now_minute: int, today_local: date,
+               stats: dict) -> None:
+    """Sabah uyanışı girilmemiş gün: hedef + 30 dk ve + 90 dk (günde en çok 2)."""
+    hedef = sabah_hedef_dk(adapt)
+    kayma = yayma_dakikasi(user.id) % 5
+    for sira, dk in ((1, hedef + SABAH_ILK_DK),
+                     (2, hedef + SABAH_ILK_DK + SABAH_TEKRAR_DK)):
+        if not _vakti_geldi(dk, now_minute, kayma):
+            continue
+        if _gunun_anahtar_sayisi(db, user.id, today_local, "sabah") >= SABAH_GUNLUK_LIMIT:
+            stats["sabah_kota"] = stats.get("sabah_kota", 0) + 1
+            return
+        key = f"{today_local.isoformat()}:sabah:{_bebek_kisa(baby)}:{sira}"
+        _gonder(db, user, baby, plan, key, KAT_SABAH,
+                SABAH_BASLIK.format(ad=baby.name), SABAH_GOVDE, stats,
+                ek={"sira": sira})
+        return
+
+
+def _uyku_basladi_mi(db: Session, baby: Baby, blok: dict, today_local: date,
+                     tz_offset_min: int) -> bool:
+    """Bu bloğun uykusu başladı mı? Motor bloğu kayda bağladıysa (kaynak
+    'kayit' / devam) ya da bloktan en fazla 45 dk önce başlamış bir uyku
+    kaydı varsa (açık ya da kapalı)."""
+    if blok.get("kaynak") == "kayit" or blok.get("devam"):
+        return True
+    gun_bas = datetime(today_local.year, today_local.month, today_local.day,
+                       tzinfo=timezone.utc) - timedelta(minutes=tz_offset_min)
+    esik = gun_bas + timedelta(minutes=int(blok["start_minute"])
+                               - UYKU_BASLADI_ERKEN_DK)
+    return db.query(SleepLog.id).filter(
+        SleepLog.baby_id == baby.id,
+        SleepLog.type.in_(plan_adapter.UYKU_TIPLERI),
+        SleepLog.started_at >= esik).first() is not None
+
+
+def _uyku_dizisi(db: Session, user: User, baby: Baby, plan: SleepPlan,
+                 content: dict, now_minute: int, today_local: date,
+                 stats: dict, tz_offset_min: int) -> None:
+    """Her uyku bloğu için 30 dk önce / zamanında / 30 dk sonra (uyumadıysa)."""
+    kayma = yayma_dakikasi(user.id) % 5
+    ad = baby.name
+    for blok in plan_adapter.normalize_schedule(content.get("schedule") or []):
+        if blok.get("type") not in ("nap", "sleep") or blok.get("start_minute") is None:
+            continue
+        bas = int(blok["start_minute"])
+        sinif = "gece" if blok.get("type") == "sleep" else "gunduz"
+        for adim, dk in (("once", bas - UYKU_ONCE_DK), ("zaman", bas),
+                         ("sonra", bas + UYKU_SONRA_DK)):
+            if not _vakti_geldi(dk, now_minute, kayma) or sessiz_saat(dk % 1440):
+                continue
+            key = (f"{today_local.isoformat()}:uyku:{_bebek_kisa(baby)}:"
+                   f"{blok.get('key')}:{adim}")
+            if _defterde_var(db, user.id, key):
+                stats["skipped_duplicate"] += 1
+                continue
+            if _uyku_basladi_mi(db, baby, blok, today_local, tz_offset_min):
+                stats["uyku_basladi_iptal"] = stats.get("uyku_basladi_iptal", 0) + 1
+                break                      # bloğun kalan adımları da düşer
+            if _gunun_anahtar_sayisi(db, user.id, today_local, "uyku") >= UYKU_GUNLUK_LIMIT:
+                stats["uyku_kota"] = stats.get("uyku_kota", 0) + 1
+                return
+            baslik, govde = DIZI_METIN.get((adim, sinif)) or DIZI_METIN[(adim, None)]
+            _gonder(db, user, baby, plan, key, DIZI_KATEGORI[adim],
+                    baslik.format(ad=ad), govde.format(ad=ad, ad_i=belirtme_hali(ad)),
+                    stats,
+                    ek={"block_key": blok.get("key"), "adim": adim,
+                        "sinif": sinif, "saat": blok.get("time")
+                        or plan_adapter._fmt(bas)})
 
 
 def _uyandi_mi_sor(db: Session, user: User, baby: Baby, plan: SleepPlan,

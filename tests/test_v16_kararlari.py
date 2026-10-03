@@ -296,6 +296,50 @@ check("G7) summarize_logs: 2 günlük sayaç ne sabah uyanışı ne gündüz uyk
       _oz_dev["gunun_uyanisi"] is None and _oz_dev["avg_nap_count"] is None, str(_oz_dev))
 
 # =============================================================================
+# H) K21.2 — SABAH biten 16 saat üstü kayıt (prod 2026-10-03: 03:42 → ertesi 07:37)
+# =============================================================================
+_b, _e = _gun_gece(1, 3, 42, 7, 37)                          # 27 sa 55 dk
+_uzun = [FakeLog("sleep", _b, _e)]
+r_uz = pa.adapt(plan(type="egitim_plani"), BUCKET_8AY, _uzun, today=TODAY,
+                now_minute=9 * 60)
+_ad = r_uz["adaptation"]
+check("H1) Bitiş (07:37) sabah uyanışı olarak kullanılıyor",
+      _ad["sabah_uyanis_gercek"] == "07:37" and _ad["sabah_uyanis_kaynak"] == "kayit",
+      str(_ad["sabah_uyanis_gercek"]))
+check("H2) Gece uykusu süresi hesaplanmıyor (brüt/net yok)",
+      not _ad["gece_uykusu"] or _ad["gece_uykusu"].get("brut_dk") is None,
+      str(_ad["gece_uykusu"]))
+check("H3) adaptation.asiri_uzun_kayitlar dolu (27 sa 55 dk) + uyarı",
+      [x["sure_dk"] for x in _ad["asiri_uzun_kayitlar"]] == [27 * 60 + 55]
+      and any("saymadık" in u for u in (r_uz.get("uyarilar") or []) + list(_ad.get("uyarilar") or [])),
+      f'{_ad["asiri_uzun_kayitlar"]} / {r_uz.get("uyarilar")}')
+_gk = pa.gun_kayitlari(_uzun, TODAY, pa.DEFAULT_WAKE_MIN)
+_gk_dun = pa.gun_kayitlari(_uzun, TODAY - timedelta(days=1), pa.DEFAULT_WAKE_MIN)
+check("H4) gun_kayitlari: bugüne _asiri_uzun işaretli, başladığı güne hiç bağlanmıyor",
+      [bool(g.get("_asiri_uzun")) for g in _gk["gece_uykulari"]] == [True]
+      and not _gk_dun["gece_uykulari"] and not _gk_dun["gunduz_uykulari"],
+      f'{_gk["gece_uykulari"]} / {_gk_dun}')
+# Gündüz saatinde başlayıp ertesi sabah biten sayaç başladığı güne 18 saatlik
+# "şekerleme" olarak da yazılmamalı.
+_b, _e = _gun_gece(1, 14, 20, 8, 25)
+_gk2 = pa.gun_kayitlari([FakeLog("nap", _b, _e)], TODAY - timedelta(days=1),
+                        pa.DEFAULT_WAKE_MIN)
+check("H5) 14:20 → ertesi 08:25 başladığı güne gündüz uykusu olarak girmiyor",
+      not _gk2["gunduz_uykulari"], str(_gk2["gunduz_uykulari"]))
+# Aynı gece için doğru kayıt da varsa aşırı uzun kayıt ATILIR (K13 onu tutardı).
+_b2, _e2 = _gun_gece(1, 20, 0, 7, 0)
+r_iki = pa.adapt(plan(type="egitim_plani"), BUCKET_8AY,
+                 _uzun + [FakeLog("sleep", _b2, _e2)], today=TODAY, now_minute=9 * 60)
+check("H6) Doğru gece kaydı varken aşırı uzun kayıt yok sayılır, gece 11 sa",
+      r_iki["adaptation"]["gece_uykusu"]["brut_dk"] == 11 * 60
+      and any(y["kod"] == "asiri_uzun" for y in r_iki["adaptation"]["yok_sayilan_kayitlar"]),
+      str(r_iki["adaptation"]["gece_uykusu"]))
+_oz_uz = pa.summarize_logs(_uzun, today=TODAY)
+check("H7) summarize_logs: yalnız uyanış (07:37), gündüz uykusu yok",
+      _oz_uz["gunun_uyanisi"] == 7 * 60 + 37 and _oz_uz["avg_nap_count"] is None,
+      str(_oz_uz))
+
+# =============================================================================
 print("=" * 78)
 print("v1.6 KARARLARI")
 print("=" * 78)

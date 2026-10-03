@@ -725,6 +725,8 @@ def weekly_summary(
         b = buckets[gun]
         dakika = 0
         for k in kayit["gece_uykulari"] + kayit["gunduz_uykulari"]:
+            if k.get("_asiri_uzun"):
+                continue                       # K21.2 — süresi sayılmaz
             dakika += max(0, int(k.get("sure_dk") or 0))
         b["naps"] = len(kayit["gunduz_uykulari"])
         b["night_wakes"] = len(kayit["gece_uyanmalari"])
@@ -785,8 +787,9 @@ def _oturum(k: dict, sinif: str, satirlar: dict) -> TimelineOturum:
         baslangic=_tr_an(k["bas_gun"], k["bas_dk"]),
         bitis=None if devam else _tr_an(k["bas_gun"], bit_lin),
         sinif="gece" if sinif == plan_adapter.GECE_UYKUSU else "gunduz",
-        sure_dk=None if devam else k.get("sure_dk"),
+        sure_dk=None if (devam or k.get("_asiri_uzun")) else k.get("sure_dk"),
         devam=devam,
+        asiri_uzun=bool(k.get("_asiri_uzun")),
         otomatik_kapatildi=(bool(k.get("_otomatik_kapandi"))
                             or any(_OTOMATIK_NOT in (r.notes or "") for r in ham)),
         parcalar=[uuid.UUID(p) for p in parcalar] if len(parcalar) > 1 else [],
@@ -807,7 +810,8 @@ def timeline(
     AYNI çağrı: sıfır süreli ve sabah cevabı kayıtları oturum değildir (sabah
     uyanışı `sabah_uyanisi`nda), çakışanlar tekil (K13), parçalar birleşik
     (K20), sabah dışında biten 16 saat üstü kayıt (K21) oturum değil ve
-    `yok_sayilan`da. Gece uykusu BİTTİĞİ günün altında BİR KEZ döner.
+    `yok_sayilan`da; SABAH biten 16 saat üstü kayıt (K21.2) oturumdur ama
+    `asiri_uzun=true`, `sure_dk=null` ve gece_dk'ya girmez. Gece uykusu BİTTİĞİ günün altında BİR KEZ döner.
     `gece_dk + gunduz_dk` = weekly-summary `sleep_hours × 60` (24 sa kırpması
     hariç). Açık kayıt: bitis=null, devam=true, süresi toplama girmez."""
     baby = get_owned_baby(baby_id, db, user)
@@ -849,7 +853,8 @@ def timeline(
             sabah = TimelineSabah(saat=plan_adapter._fmt(dk), kaynak=s["kaynak"])
         gunler.append(TimelineGun(
             tarih=g, oturumlar=oturumlar,
-            gece_dk=sum(int(x.get("sure_dk") or 0) for x in k["gece_uykulari"]),
+            gece_dk=sum(int(x.get("sure_dk") or 0) for x in k["gece_uykulari"]
+                        if not x.get("_asiri_uzun")),
             gunduz_dk=sum(int(x.get("sure_dk") or 0) for x in k["gunduz_uykulari"]),
             gece_uyanma=len(k["gece_uyanmalari"]),
             sabah_uyanisi=sabah,

@@ -32,6 +32,9 @@ class NotificationPrefs(BaseModel):
     topluluk_cevap_bildirimi: bool = True
     # Topluluk v2 — "Sorunuz N anneye faydalı geldi" (3 saatte bir, toplu).
     topluluk_faydali_bildirimi: bool = True
+    # v2.7 — sabah uyanış sorusu + uyku dizisi (30 dk önce / zamanında /
+    # 30 dk sonra). plan_reminders ile eşlenir.
+    uyku_hatirlatma_bildirimi: bool = True
 
 
 class NotificationPrefsUpdate(BaseModel):
@@ -41,3 +44,4 @@ class NotificationPrefsUpdate(BaseModel):
     community_replies: bool | None = None
     topluluk_cevap_bildirimi: bool | None = None
     topluluk_faydali_bildirimi: bool | None = None
+    uyku_hatirlatma_bildirimi: bool | None = None

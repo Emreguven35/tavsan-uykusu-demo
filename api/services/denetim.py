@@ -150,6 +150,7 @@ def rapor(db: Session, gun: date) -> dict:
         "sabah_uyanisi_girilen": sum(1 for b in bolumler if b["sabah_girildi"]),
         "cakisan_sifir_sureli": sum(b["cakisan_sifir"] for b in bolumler),
         "geri_bildirim": sum(len(b["geri_bildirim"]) for b in bolumler),
+        "asiri_uzun": sum(len(b.get("asiri_uzun") or []) for b in bolumler),
         "anne": len(anneler),
         "eski_surum": sum(1 for x in buildler if x is not None and x < ESKI_SURUM_BUILD),
         "surum_bilinmiyor": sum(1 for x in buildler if x is None),
@@ -208,6 +209,7 @@ def rapor_verisi(db: Session, gun: date) -> list[dict]:
                 uyarilar.append(_metni_temizle(metin, baby))
 
         o_gunun_plani = plan is not None and plan.plan_date == gun
+        asiri_uzun = _asiri_uzun_kayitlar(kayitlar, gun)
         anne = db.get(User, baby.user_id)
         bolumler.append({
             "no": numara[baby.id],
@@ -233,6 +235,7 @@ def rapor_verisi(db: Session, gun: date) -> list[dict]:
                 "bit": _dk(r.ended_at, gun) if r.ended_at else None,
             } for r in kayitlar],
             "uyarilar": uyarilar,
+            "asiri_uzun": asiri_uzun,
             "yok_sayilan": [_metni_temizle(
                 (y.get("sebep") if isinstance(y, dict) else str(y)), baby)
                 for y in (adapt.get("yok_sayilan_kayitlar") or [])][:10],
@@ -245,6 +248,30 @@ def rapor_verisi(db: Session, gun: date) -> list[dict]:
         })
     bolumler.sort(key=lambda b: b["no"])
     return bolumler
+
+
+def _asiri_uzun_kayitlar(kayitlar: list, gun: date) -> list[str]:
+    """K21/K21.2 — o gün BİTEN, 16 saati aşan uyku kayıtları (açık kalmış
+    sayaç). Sabah bitenin bitişi uyanış sayılır ama süresi sayılmaz; sabah
+    dışında biten hiç sayılmaz. Rapor ikisini de ayrı satırda gösterir."""
+    out = []
+    for r in kayitlar:
+        if r.type not in UYKU_TIPLERI or r.ended_at is None:
+            continue
+        k = plan_adapter._log_alanlari(r, TZ)
+        if k is None or k["bit_gun"] != gun:
+            continue
+        if plan_adapter.asiri_uzun_sabah_mi(k):
+            sonuc = "bitişi sabah uyanışı sayıldı, süresi gece uykusuna girmedi"
+        elif plan_adapter.asiri_uzun_gece_mi(k):
+            sonuc = "sabah dışında bitti, hesaba alınmadı"
+        else:
+            continue
+        sure = k["sure_dk"]
+        out.append(f'{k["bas_gun"].strftime("%d.%m")} {plan_adapter._fmt(k["bas_dk"])}'
+                   f' → {k["bit_gun"].strftime("%d.%m")} {plan_adapter._fmt(k["bit_dk"])}'
+                   f' ({sure // 60} sa {sure % 60} dk) — {sonuc}')
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +428,10 @@ def html_uret(gun: date, veri: dict) -> str:
             kutular.append('<div class="kutu"><b>Uygulamanın uyarıları</b><ul>'
                            + "".join(f"<li>{html.escape(u)}</li>" for u in b["uyarilar"])
                            + "</ul></div>")
+        if b.get("asiri_uzun"):
+            kutular.append('<div class="kutu"><b>16 saati aşan kayıtlar (açık kalmış sayaç)</b><ul>'
+                           + "".join(f"<li>{html.escape(u)}</li>" for u in b["asiri_uzun"])
+                           + "</ul></div>")
         if b["yok_sayilan"]:
             kutular.append('<div class="kutu"><b>Hesapta yok sayılan kayıtlar</b><ul>'
                            + "".join(f"<li>{html.escape(u)}</li>" for u in b["yok_sayilan"])
@@ -436,6 +467,7 @@ def html_uret(gun: date, veri: dict) -> str:
         f'<div><b>{ozet["sabah_uyanisi_girilen"]}</b><span>sabah uyanışı girilmiş</span></div>'
         f'<div><b>{ozet["cakisan_sifir_sureli"]}</b><span>çakışan / sıfır süreli kayıt</span></div>'
         f'<div><b>{ozet["geri_bildirim"]}</b><span>anne geri bildirimi</span></div>'
+        f'<div><b>{ozet.get("asiri_uzun", 0)}</b><span>16 saati aşan kayıt</span></div>'
         f'<div><b>{ozet["eski_surum"]}</b><span>eski sürümde anne '
         f'(build &lt; {ESKI_SURUM_BUILD}){bilinmiyor}</span></div>'
         '</div>')

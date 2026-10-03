@@ -175,6 +175,18 @@ def asiri_uzun_gece_mi(k: dict) -> bool:
             and k.get("bit_dk") is not None
             and not (SABAH_CEVABI_PENCERE[0] <= k["bit_dk"] < SABAH_CEVABI_PENCERE[1]))
 
+
+# K21.2 (2026-10-03) — SABAH biten ama 16 saati aşan kayıt. Bitişi güvenilir bir
+# sabah uyanışıdır (Z4), ama SÜRESİ değildir: prod'da 2 Ekim 03:42 → 3 Ekim
+# 07:37 kaydı 27 sa 55 dk'lık gece uykusu olarak raporlandı. Bu kayıt gece
+# uykusu listesinde `_asiri_uzun` işaretiyle kalır (sabah uyanışı adayı), ama
+# hiçbir süre toplamına (gece özeti, timeline gece_dk, haftalık) girmez.
+def asiri_uzun_sabah_mi(k: dict) -> bool:
+    """K21.2 — 16 saati aşan, sabah penceresinde biten kapalı kayıt mı?"""
+    return ((k.get("sure_dk") or 0) > GECE_KAYIT_MAKS_DK
+            and k.get("bit_dk") is not None
+            and SABAH_CEVABI_PENCERE[0] <= k["bit_dk"] < SABAH_CEVABI_PENCERE[1])
+
 # K12.3 — kapalı gece uykusundan SONRA gelen uyanma kaydı ne zaman "gereksiz"?
 # Gece bitişine bu kadar yakınsa aynı anın ikinci kaydıdır (sayaç durduruldu +
 # "Uyandı"ya basıldı). Daha geç ve ilk gündüz uykusundan önceyse bebek tekrar
@@ -929,6 +941,15 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
             out["atlananlar"].append(k)
             continue
 
+        # --- K21.2 — sabah biten 16 saat üstü kayıt (sınıfından BAĞIMSIZ) ----
+        # Dün 14:20'de başlayan kayıt saat kuralına göre "gündüz" sınıfına
+        # düşer ve başladığı güne 18 saatlik şekerleme olarak yazılırdı. Bu
+        # kayıt yalnız BİTTİĞİ güne, sabah uyanışı adayı olarak bağlanır.
+        if asiri_uzun_sabah_mi(k):
+            if k["bit_gun"] == gun:
+                out["gece_uykulari"].append(dict(k, _asiri_uzun=True))
+            continue
+
         # --- K19.1 — SINIF SAATTEN gelir, type'tan DEĞİL --------------------
         if uyku_tipi_belirle(k, bant) == GECE_UYKUSU:
             # Gece uykusu BUGÜNE, bittiği güne göre bağlanır (dün 20:30 → bugün 07:00).
@@ -975,6 +996,16 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
 
     # --- K19.4 — `wake` kayıtlarının rolü -----------------------------------
     _wake_kayitlarini_coz(out, wake_adaylari)
+
+    # --- K21.2 — gerçek bir gece kaydı varsa aşırı uzun kayıt gereksizdir ---
+    # K13 uzun olanı tutardı: 28 saatlik kayıt annenin doğru girdiği
+    # 20:00-07:00 gecesini "kısa olan" diye atardı.
+    if any(not g.get("_asiri_uzun") for g in out["gece_uykulari"]):
+        for g in [g for g in out["gece_uykulari"] if g.get("_asiri_uzun")]:
+            out["gece_uykulari"].remove(g)
+            _yok_say(out, g, "asiri_uzun",
+                     f"{g['sure_dk'] // 60} saat sürmüş görünüyor; sayaç açık "
+                     f"kalmış olabilir, aynı gecenin diğer kaydı kullanıldı")
 
     # --- K13 — çakışanları tekilleştir (yuvalara girmeden ÖNCE) -------------
     out["gunduz_uykulari"] = _gunduz_cakismalarini_birlestir(
@@ -1109,7 +1140,12 @@ def _gece_icindekileri_ayikla(out: dict, gun: date) -> list[dict]:
         kaydir = 0
         if g.get("bas_gun") is not None and g["bas_gun"] < gun:
             kaydir = 1440 * (gun - g["bas_gun"]).days
-        geceler.append((g["bas_dk"] - kaydir, bit - kaydir))
+        bas = g["bas_dk"] - kaydir
+        if g.get("_asiri_uzun"):
+            # K21.2 — başlangıç güvenilmez, bitiş (uyanış) güvenilir: yalnız
+            # bugünün gece yarısından uyanışa kadarki aralık gecedir.
+            bas = max(bas, 0)
+        geceler.append((bas, bit - kaydir))
     if not geceler:
         return out["gunduz_uykulari"]
 
@@ -1409,6 +1445,8 @@ def _gece_uykusu_ozeti(kayitlar: dict, kapanis_dk: int | None) -> dict | None:
     brut = 0
     acik = False
     for g in geceler:
+        if g.get("_asiri_uzun"):
+            continue                      # K21.2 — süresi gece uykusu sayılmaz
         bit = g.get("bit_dk_lin")
         if bit is not None:
             brut += max(0, bit - g["bas_dk"])
@@ -1572,6 +1610,11 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
                 f"{_fmt(_k['bas_dk'])} uykusunun bitişi girilmemişti; uyanma "
                 f"kaydınıza göre {_fmt(_k['bit_dk_lin'])}'da bitmiş sayıldı")
     for _g in kayitlar["gece_uykulari"]:
+        if _g.get("_asiri_uzun"):
+            uyarilar.append(
+                f"{saatli(_g['bas_dk'])} başlayan kayıt {_g['sure_dk'] // 60} "
+                f"saat sürmüş görünüyor; sayaç açık kalmış olabilir. Bitişini "
+                f"sabah uyanışı olarak aldık, süresini gece uykusuna saymadık")
         if _g.get("_bayat"):
             uyarilar.append(
                 f"{saatli(_g['bas_dk'])} başlayan gece uykusunun bitişi "
@@ -1815,6 +1858,12 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
         "yeniden_hesaplanan_bloklar": yeniden,
         "atlanan_bloklar": atlanan,
         "yok_sayilan_kayitlar": kayitlar["yok_sayilan"],
+        # K21.2 — bitişi sabah uyanışı sayılan, süresi sayılmayan kayıtlar.
+        "asiri_uzun_kayitlar": [
+            {"id": g.get("id"), "baslangic_gun": g["bas_gun"].isoformat(),
+             "baslangic": _fmt(g["bas_dk"]), "bitis": _fmt(g["bit_dk"]),
+             "sure_dk": g["sure_dk"]}
+            for g in kayitlar["gece_uykulari"] if g.get("_asiri_uzun")],
         "gece_bolunmeleri": sabah["gece_bolunmeleri"],
         "uyaniklik_penceresi_dk": ww,
         # K15 — çizelgenin uyduğu mutlak alt sınır (mobil "neden bu saat?"
@@ -2277,6 +2326,13 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
         # K21 — sabah dışında durdurulmuş günlük sayaç: ne gece uykusu (bitişi
         # sabah uyanışı olurdu) ne gündüz uykusu (20 saatlik "şekerleme").
         if typ in UYKU_TIPLERI and asiri_uzun_gece_mi(k):
+            continue
+        # K21.2 — sabah biten 16 saat üstü kayıt: yalnız bitişi (uyanış) sayılır.
+        if typ in UYKU_TIPLERI and asiri_uzun_sabah_mi(k):
+            if start <= k["bit_gun"] <= today:
+                days_seen.add(k["bit_gun"])
+                wake_by_day[k["bit_gun"]] = max(
+                    wake_by_day.get(k["bit_gun"], k["bit_dk"]), k["bit_dk"])
             continue
 
         # --- Regresyon sinyali: gece uyanması (pencere: son 3 gece) -------------
