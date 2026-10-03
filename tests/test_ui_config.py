@@ -11,7 +11,8 @@ LLM YOK, ağ YOK, prod DB YOK: geçici sqlite + FastAPI TestClient.
   F  Cache-Control private, max-age=300 + Vary: Authorization
   G  Yanıt şekli tam olarak {"ui": {"yeni_tasarim": bool}}
   H  UI_YENI_TASARIM_MIN_BUILD=26: build 25 → false, 26 → true, sürüm yok →
-     false, listedeki kullanıcı → true; başlık yoksa users.app_version
+     false, listedeki kullanıcı → true; başlık yoksa users.app_version;
+     başlık kayıttan önce gelir (iki yönde de), oturumsuz istekte de geçerli
 
 Çalıştırma: python tests/test_ui_config.py
 """
@@ -113,6 +114,10 @@ client.get("/api/v1/users/me", headers={**H_DIGER, "X-App-Version": "1.0.0+24"})
 check("H9) başlıksız istek users.app_version (build 24) ile → false", acik(H_DIGER) is False)
 check("H10) başlık kayıtlı sürümden önce gelir (kayıt 24, başlık 26 → true)",
       acik({**H_DIGER, **V26}) is True)
+check("H12) başlık kayıtlı sürümden önce gelir (kayıt 27, başlık 25 → false)",
+      acik({**H_SURUMSUZ, "X-App-Version": "1.0.0+25"}) is False)
+check("H13) oturumsuz istekte başlık geçerli (build 25 → false, 26 → true)",
+      acik({"X-App-Version": "1.0.0+25"}) is False and acik(V26) is True)
 os.environ["UI_YENI_TASARIM_MIN_BUILD"] = "28"
 get_settings.cache_clear()
 check("H11) eşik env'den: MIN_BUILD=28 iken build 27 → false", acik(H_SURUMSUZ) is False)
