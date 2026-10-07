@@ -228,6 +228,9 @@ def delete_account(db: Session = Depends(get_db),
     # Süren plan üretimi iptal: sonucu silinmiş bebeğe yazmaya çalışmasın.
     from api.services import plan_jobs
     plan_jobs.kullanici_islerini_iptal(user_id)
+    # Onaylar ispat tablosuna (kimliksiz), plan işleri + ödeme olayları silinir.
+    from api.services import saklama
+    saklama.hesap_silme_oncesi(db, user)
 
     db.delete(user)                      # relationship cascade + FK ON DELETE CASCADE
     db.commit()

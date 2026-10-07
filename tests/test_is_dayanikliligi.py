@@ -193,17 +193,22 @@ plan_service.generate_content = _yavas_uret
 js = client.post("/api/v1/plans/generate", headers=HS, json={"baby_id": BS}).json()["job_id"]
 _icerde.wait(10)
 rd = client.delete("/api/v1/auth/account", headers=HS)
-check("S1) Hesap silme süren işi iptal etti", rd.status_code == 200
-      and satir(js).status == "failed" and "iptal" in (satir(js).error or ""),
-      f"{rd.status_code} {satir(js).status} {satir(js).error}")
+# 2026-10-07 saklama kuralı: hesap silinince iş SATIRI da silinir; süren iş
+# bellekte iptal edilir (yoklayan istemci "iptal" görür).
+_bellek = lambda: plan_jobs._JOBS.get(js) or {}
+check("S1) Hesap silme süren işi iptal etti, iş satırı silindi", rd.status_code == 200
+      and satir(js) is None and _bellek().get("status") == "failed"
+      and "iptal" in (_bellek().get("error") or ""),
+      f"{rd.status_code} satir={satir(js)} bellek={_bellek()}")
 _devam.set()
-bekle(lambda: satir(js).error == plan_jobs.IPTAL_MESAJ, 3)
+bekle(lambda: _bellek().get("error") == plan_jobs.IPTAL_MESAJ, 3)
 time.sleep(1.0)                                              # iş bitsin
 db = SessionLocal()
 try:
     check("S2) Silinen bebeğe plan YAZILMADI, iş temiz iptal (hata/FK yok)",
           db.query(SleepPlan).filter(SleepPlan.baby_id == uuid.UUID(BS)).count() == 0
-          and satir(js).error == plan_jobs.IPTAL_MESAJ, satir(js).error)
+          and satir(js) is None and _bellek().get("error") == plan_jobs.IPTAL_MESAJ,
+          f"satir={satir(js)} bellek={_bellek()}")
 finally:
     db.close()
 plan_service.generate_content = _gercek_gen

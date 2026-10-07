@@ -113,6 +113,9 @@ class ThreadListItem(BaseModel):
     kaydedildi_mi: bool = False
     anonim: bool = False
     benim: bool = False          # konu bu kullanıcının mı (anonim olsa da)
+    # `benim` ile aynı değer, İngilizce ad (2026-10-07). author_id'nin yerini
+    # alacak: sahiplik için kullanıcı kimliğini istemciye vermek gerekmiyor.
+    is_mine: bool = False
     yazar: Yazar | None = None
 
 
@@ -141,6 +144,7 @@ class ReplyItem(BaseModel):
     faydali_sayisi: int = 0
     anonim: bool = False
     benim: bool = False
+    is_mine: bool = False   # = benim
     yanitlanan_cevap_id: uuid.UUID | None = None
     yazar: Yazar | None = None
 
@@ -174,6 +178,7 @@ class ThreadDetailResp(BaseModel):
     kaydedildi_mi: bool = False
     anonim: bool = False
     benim: bool = False
+    is_mine: bool = False   # = benim
     yazar: Yazar | None = None
 
 

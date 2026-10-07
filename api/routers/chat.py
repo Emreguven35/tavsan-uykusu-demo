@@ -22,6 +22,7 @@ from api.deps import PremiumGerekli, get_current_user, get_owned_baby
 from api.models import ChatMessage, User
 from api.schemas.chat import ChatReq, ChatResp, ChatSource
 from api.services import baby_context as baby_ctx
+from api.services import takma_ad
 from api.services import usage
 from engine import chatbot
 
@@ -87,13 +88,18 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     # birth_date'ten hesaplanabiliyor, bunun için log beklemek yeni kayıt olan
     # anneye ilk soruda "adını ve kaç aylık olduğunu yazın" dedirtiyordu.
     ctx = None
+    gercek_ad = takma = None
     if req.baby_id is not None:
         baby = get_owned_baby(req.baby_id, db, user)      # sahiplik 404'ü korunur
+        # TAKMA AD (2026-10-07): gerçek ad Anthropic'e gitmez. Bağlamda ve
+        # sorunun içinde ses uyumlu takma ad gider; cevapta gerçek ada döner.
+        gercek_ad = (baby.name or "").strip() or None
+        takma = takma_ad.takma_ad_sec(gercek_ad)
         # Bağlam bir EKTİR: kurulamazsa soru bağlamsız cevaplanır, hata loglanır.
         # 2026-09-25: tek bir kayıt çiftindeki TypeError bir annenin bütün
         # sorularını gün boyu 500'e düşürdü ("şu an yanıt veremedi").
         try:
-            ctx = baby_ctx.build_baby_context(db, baby)
+            ctx = baby_ctx.build_baby_context(db, baby, ad=takma)
         except Exception:
             logger.exception("Sohbet bağlamı kurulamadı, bağlamsız devam "
                              "(baby=%s)", baby.id)
@@ -104,7 +110,9 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     # Mevcut RAG + cache motoru (yeniden yazılmadı — import edildi).
     # NOT: ctx doluysa motor cevap cache'ini BYPASS eder (kişisel veri paylaşılmaz).
     _t0 = time.perf_counter()
-    r = chatbot._cevap_uret(req.message, req.yas_bandi, baby_context=ctx)
+    soru = takma_ad.adi_gizle(req.message, gercek_ad, takma)
+    r = chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx)
+    r["cevap"] = takma_ad.adi_geri_koy(r["cevap"], takma, gercek_ad)
     _sure_ms = int((time.perf_counter() - _t0) * 1000)
 
     # Maliyet takibi: YALNIZCA gerçekten LLM'e gidildiyse kayıt açılır. Cevap

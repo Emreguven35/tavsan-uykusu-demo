@@ -32,6 +32,16 @@ EXPORT_ARALIGI = timedelta(hours=24)
 # ---------------------------------------------------------------------------
 # Onay
 # ---------------------------------------------------------------------------
+def eposta_ozeti(eposta: str | None) -> str:
+    """E-postanın tuzlu özeti (onay ispatı — onay_kanitlari). Aynı e-posta her
+    zaman aynı özeti verir; özetten e-posta geri çıkarılamaz. Anahtar JWT_SECRET'tan
+    türetilir: JWT_SECRET değişirse eski özetler eşlenemez."""
+    anahtar = hmac.new(get_settings().jwt_secret.encode("utf-8"),
+                       b"tavsan-kvkk-eposta-v1", hashlib.sha256).digest()
+    return hmac.new(anahtar, (eposta or "").strip().lower().encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
 def ip_ozeti(ip: str | None) -> str | None:
     if not ip or ip == "unknown":
         return None

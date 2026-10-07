@@ -194,7 +194,8 @@ def _plan_ozeti(plan: SleepPlan | None) -> str | None:
 
 
 def build_baby_context(db: Session, baby: Baby, today: date | None = None,
-                       tz: int = plan_adapter.TZ_OFFSET_MIN) -> str | None:
+                       tz: int = plan_adapter.TZ_OFFSET_MIN,
+                       ad: str | None = None) -> str | None:
     """Bebek profili + son 3 gün log özeti + bugünün planı → düz metin blok.
 
     PROFİL SATIRI (ad, yaş, yaş bandı) KOŞULSUZDUR: bebek kaydı varsa blok kurulur.
@@ -204,6 +205,10 @@ def build_baby_context(db: Session, baby: Baby, today: date | None = None,
 
     Log ve plan bölümleri opsiyoneldir: veri yoksa o satırlar yazılmaz (ama uyku
     kaydının YOKLUĞU yazılır — model olmayan saati uydurmasın).
+
+    `ad`: bağlamda gerçek ad YERİNE yazılacak ad (takma ad — gerçek ad yapay
+    zekâ sağlayıcısına gitmez, bkz. api/services/takma_ad.py). Verilmezse
+    bebeğin kayıtlı adı.
 
     Dönen None yalnız profil bile kurulamadığında (adsız, doğum tarihsiz kayıt)
     gelir; o durumda çağıran mevcut genel metodoloji davranışını sürdürür.
@@ -227,7 +232,7 @@ def build_baby_context(db: Session, baby: Baby, today: date | None = None,
     # --- Profil satırı (KOŞULSUZ) ---
     # Bebek kaydının kendisi kişiselleştirilecek veridir; log/plan aranmaz.
     ay = _ay_hesapla(baby.birth_date, today)
-    kimlik = [(baby.name or "").strip()]
+    kimlik = [(ad if ad is not None else (baby.name or "")).strip()]
     if ay is not None:
         kimlik.append(f"{ay} aylık")
         bant = _bant_adi(ay)

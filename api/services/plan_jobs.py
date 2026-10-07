@@ -84,6 +84,11 @@ def _db_yaz(job_id: str, **alanlar) -> None:
         try:
             satir = db.get(PlanUretimIsi, job_id)
             if satir is None:
+                # Satırı yalnız İLK yazım (create_job: user_id taşır) açar. Silinmiş
+                # bir işin (hesap silme, saklama temizliği) durum güncellemesi onu
+                # kimliksiz olarak geri DİRİLTMEZ.
+                if "user_id" not in alanlar:
+                    return
                 satir = PlanUretimIsi(id=job_id, **alanlar)
                 db.add(satir)
             else:

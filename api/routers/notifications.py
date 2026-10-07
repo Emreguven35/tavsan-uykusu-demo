@@ -40,8 +40,10 @@ def register_token(req: RegisterTokenReq, db: Session = Depends(get_db),
            .one_or_none())
 
     if row is None:
+        # device_name SAKLANMAZ (2026-10-07): iPhone'da çoğu zaman sahibinin
+        # adını taşıyor ("Ayşe'nin iPhone'u"). Gelirse yok sayılır.
         row = PushToken(user_id=user.id, expo_token=req.expo_token,
-                        platform=req.platform, device_name=req.device_name,
+                        platform=req.platform, device_name=None,
                         last_seen_at=now)
         db.add(row)
     else:
@@ -49,7 +51,7 @@ def register_token(req: RegisterTokenReq, db: Session = Depends(get_db),
             logger.info("Push token sahibi değişti: %s → %s", row.user_id, user.id)
         row.user_id = user.id
         row.platform = req.platform or row.platform
-        row.device_name = req.device_name or row.device_name
+        row.device_name = None
         row.last_seen_at = now
 
     db.commit()

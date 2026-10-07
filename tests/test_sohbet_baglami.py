@@ -117,7 +117,9 @@ for tip, govde in BEBEKLER.items():
                         json={"message": "Bebeğim neden uyumuyor?", "baby_id": bid})
         check(f"M) {tip} × {kayit_ad} → 200 + bağlam kuruldu",
               r.status_code == 200 and _GELEN_CTX and _GELEN_CTX[0]
-              and ("Musa" in _GELEN_CTX[0]),
+              # 2026-10-07: gerçek ad yapay zekâya gitmez — bağlamda ses uyumlu
+              # takma ad ("Musa" → "Zalva") olmalı, gerçek ad olmamalı.
+              and ("Zalva" in _GELEN_CTX[0]) and ("Musa" not in _GELEN_CTX[0]),
               f"{r.status_code} {r.text[:150]} ctx={str(_GELEN_CTX[:1])[:80]}")
 
 # Olaydaki çiftin bağlamda nasıl özetlendiği (açık kayıt bitişsiz yazılır)

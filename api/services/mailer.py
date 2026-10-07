@@ -31,11 +31,21 @@ RESEND_URL = "https://api.resend.com/emails"
 RESEND_TIMEOUT = 15
 
 
+def maskele(eposta: str | None) -> str:
+    """Log için alıcı maskesi: "anne@ornek.com" → "a***@o***.com"."""
+    if not eposta or "@" not in eposta:
+        return "***"
+    yerel, _, alan = eposta.partition("@")
+    ad, nokta, uzanti = alan.rpartition(".")
+    return f"{yerel[:1]}***@{(ad or alan)[:1]}***{nokta}{uzanti if nokta else ''}"
+
+
 def _console_send(to: str, subject: str, text: str) -> dict:
-    """Gönderim yok — içeriği logla. Geliştirme/doğrulama öncesi mod."""
-    logger.warning(
-        "MAIL_PROVIDER=console — e-posta GÖNDERİLMEDİ, içerik aşağıda:\n"
-        "  Alıcı : %s\n  Konu  : %s\n  Gövde :\n%s", to, subject, text)
+    """Gönderim yok. KVKK (2026-10-07): içerik ve bağlantı LOGLANMAZ — parola
+    sıfırlama bağlantısı log okuyan herkese hesabı açardı. Yalnız maskeli alıcı
+    ve konu."""
+    logger.warning("MAIL_PROVIDER=console — e-posta GÖNDERİLMEDİ (alıcı=%s, konu=%r; "
+                   "içerik loglanmaz)", maskele(to), subject)
     return {"ok": True, "provider": "console", "id": None}
 
 
@@ -74,19 +84,20 @@ def send_email(to: str, subject: str, text: str, html: str | None = None) -> dic
                      "Content-Type": "application/json"})
     except Exception as e:
         # Ağ hatası → akış kırılmaz, yalnız raporlanır. API KEY loglanmaz.
-        logger.warning("Resend isteği başarısız (alıcı=%s): %s", to, e)
+        logger.warning("Resend isteği başarısız (alıcı=%s): %s", maskele(to), e)
         return {"ok": False, "provider": "resend", "error": str(e)}
 
     if not r.ok:
         # Yanıt gövdesi domain doğrulama hatalarını içerebilir — kısaltarak logla.
-        logger.warning("Resend HTTP %s (alıcı=%s): %s", r.status_code, to, r.text[:300])
+        logger.warning("Resend HTTP %s (alıcı=%s): %s", r.status_code, maskele(to),
+                       r.text[:300])
         return {"ok": False, "provider": "resend", "error": f"HTTP {r.status_code}"}
 
     try:
         msg_id = r.json().get("id")
     except Exception:
         msg_id = None
-    logger.info("E-posta gönderildi (Resend): alıcı=%s id=%s", to, msg_id)
+    logger.info("E-posta gönderildi (Resend): alıcı=%s id=%s", maskele(to), msg_id)
     return {"ok": True, "provider": "resend", "id": msg_id}
 
 

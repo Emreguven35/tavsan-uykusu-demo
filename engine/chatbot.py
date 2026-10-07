@@ -1495,7 +1495,8 @@ def _cache_lookup_entry(soru: str, yas_bandi: str | None) -> dict | None:
     h = _cache_hash(norm, yas_bandi)
     for e in _cache_state["entries"]:
         if e["h"] == h:
-            logger.info("Cache HIT (exact) [bant=%s]: %r", yas_bandi, soru[:60])
+            # KVKK: soru metni loglanmaz (annenin yazdığı serbest metin).
+            logger.info("Cache HIT (exact) [bant=%s]", yas_bandi)
             return e
 
     # Katman 2 — semantik (yaş bandı yoksa atla)
@@ -1512,8 +1513,8 @@ def _cache_lookup_entry(soru: str, yas_bandi: str | None) -> dict | None:
     if sims[best] >= SEM_CACHE_THRESHOLD:
         entry = _cache_state["entries"][_cache_state["emb_idx"][best]]
         if entry.get("band") == yas_bandi:            # aynı bant şartı
-            logger.info("Cache HIT (semantik, cos=%.3f) [bant=%s]: %r",
-                        float(sims[best]), yas_bandi, soru[:60])
+            logger.info("Cache HIT (semantik, cos=%.3f) [bant=%s]",
+                        float(sims[best]), yas_bandi)
             return entry
     return None
 

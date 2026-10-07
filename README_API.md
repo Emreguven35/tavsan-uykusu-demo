@@ -740,6 +740,30 @@ ondalık (yuvarlama ROUND_HALF_UP).
 - `GET /babies/{id}/olcumler` → ölçüm geçmişi, yeniden eskiye.
 - KVKK dışa aktarımı (`GET /account/export`) `bebek_olcumleri` içerir.
 
+### Yapay zekâya giden veri — takma ad (v2.8.0)
+
+Bebeğin gerçek adı Anthropic'e gitmez (`api/services/takma_ad.py`). Sohbet
+bağlamında, annenin sorusunda ve plan isteminde aynı ses uyumuna sahip uydurma
+bir takma ad gider (son ünlü grubu a/ı·e/i·o/u·ö/ü ve ad sonu ünlü/yumuşak/sert
+aynı: "Ada"→"Zalva", "Elif"→"Zelvit", "Umut"→"Zolvut"); cevapta gerçek ad geri
+konur, ekler doğru kalır. Plan isteminde tam doğum tarihi yerine yaş ("7 ay 18
+gün", prematürede düzeltilmiş yaş) gider; sağlık notu bir kez geçer.
+`profile_overrides` yalnız izinli anahtarları kabul eder (`api/schemas/plan.py`).
+Topluluk yanıtlarında `is_mine` (= `benim`) var; `author_id` yeni build sonrası
+kaldırılacak.
+
+### Saklama ve silme — iç kayıtlar (v2.8.0)
+
+`api/services/saklama.py`; gece işi 03:30 UTC. Annelerin kendi verisine dokunmaz.
+- Hesap silmede: onaylar `onay_kanitlari`'na taşınır (kimliksiz, e-postanın tuzlu
+  özeti; hesap silindikten 10 yıl sonra silinir), plan işleri ve RevenueCat
+  olayları silinir.
+- Her gece: sahipsiz ve 30 günden eski bitmiş plan işleri (her bebeğin en son
+  başarılı işi hariç), 30 günden eski `/data/denetim` ve `/data/arsiv`
+  dosyaları, sahibi silinmiş Anne Sesi klasörleri.
+- `push_tokens.device_name` saklanmaz; mailer alıcıyı maskeler, console modu
+  içerik loglamaz; önbellek isabetinde soru loglanmaz.
+
 ### Kayıtta KVKK onayları (v2.7.8)
 
 Mobil `POST /auth/register` gövdesindeki mevcut `consents` dizisini kullanır;

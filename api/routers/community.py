@@ -232,6 +232,7 @@ def _madde(t: Thread, prof, avatar_secimi, user: User, liked: set,
         kategori=t.kategori, uzman_cevapladi=t.expert_replied,
         faydali_sayisi=t.like_count, cevap_sayisi=t.reply_count,
         kaydedildi_mi=t.id in kayitli, anonim=anonim, benim=t.user_id == user.id,
+        is_mine=t.user_id == user.id,
         yazar=Yazar(**topluluk.yazar(prof, t.user_id, avatar_secimi, anonim)))
 
 
@@ -312,6 +313,7 @@ def _cevap(r: Reply, rp, avatar_secimi, user: User, rliked: set) -> ReplyItem:
         body=r.body, like_count=r.like_count, liked_by_me=r.id in rliked,
         status=_resp_status(r.status), created_at=r.created_at,
         faydali_sayisi=r.like_count, anonim=anonim, benim=r.user_id == user.id,
+        is_mine=r.user_id == user.id,
         yanitlanan_cevap_id=r.yanitlanan_id,
         yazar=Yazar(**topluluk.yazar(rp, r.user_id, avatar_secimi, anonim)))
 

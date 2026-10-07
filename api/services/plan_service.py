@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from api.db import upsert
 from api.models import Baby, SleepLog, SleepPlan, User
 from api.services import plan_adapter
+from api.services import takma_ad
 from api.services import usage
 from api.zaman import bugun_tr
 from engine import plan_generator, plan_gunleri, yas_bantlari, yenidogan
@@ -546,6 +547,45 @@ def days_backfill(content: dict) -> bool:
 # =============================================================================
 # Üretim + adaptasyon
 # =============================================================================
+def _yas_metni(dogum: date, bugun: date) -> str:
+    """"7 ay 12 gün" — takvim ayı + kalan gün (doğum günü ayın sonundaysa kırpılır)."""
+    import calendar
+    ay = (bugun.year - dogum.year) * 12 + (bugun.month - dogum.month)
+    if bugun.day < dogum.day:
+        ay -= 1
+    ay = max(0, ay)
+    y, m = dogum.year + (dogum.month - 1 + ay) // 12, (dogum.month - 1 + ay) % 12 + 1
+    dolum = date(y, m, min(dogum.day, calendar.monthrange(y, m)[1]))
+    return f"{ay} ay {max(0, (bugun - dolum).days)} gün"
+
+
+def istem_profili(profile: dict, param: dict, takma: str | None,
+                  bugun: date | None = None) -> dict:
+    """Plan isteminin PROFIL bölümü — yapay zekâya giden profil (2026-10-07).
+
+    • Gerçek ad yerine ses uyumlu TAKMA AD (api/services/takma_ad.py); üretilen
+      metinde gerçek ada geri çevrilir.
+    • Tam doğum tarihi GİTMEZ; yerine yaş (ay + gün), prematürede düzeltilmiş yaş.
+    • saglik_problemi istemde YALNIZ BİR KEZ geçer: uyarı metninde ("Sağlık
+      notu: «…»") zaten varsa profilden çıkarılır."""
+    bugun = bugun or bugun_tr()
+    out = dict(profile)
+    out.pop("dogum_tarihi", None)
+    out["bebek_ad"] = takma or "Bebeğiniz"
+    try:
+        dogum = date.fromisoformat(str(profile.get("dogum_tarihi")))
+        out["yas"] = _yas_metni(dogum, bugun)
+        hafta = int(profile.get("dogum_haftasi") or 40)
+        if (param.get("yas") or {}).get("prematüre_mi") and hafta < 40:
+            out["duzeltilmis_yas"] = _yas_metni(dogum + timedelta(weeks=40 - hafta), bugun)
+    except (TypeError, ValueError):
+        pass
+    saglik = str(profile.get("saglik_problemi") or "").strip()
+    if saglik and any(saglik in u for u in param.get("uyarilar") or []):
+        out.pop("saglik_problemi", None)
+    return out
+
+
 def generate_content(baby: Baby, req_overrides: dict | None,
                      dogum_haftasi: int | None,
                      operation: str = usage.OP_PLAN_GENERATE) -> dict:
@@ -561,6 +601,10 @@ def generate_content(baby: Baby, req_overrides: dict | None,
         param = parametre_uret(profile)                 # deterministik parametreler
     except Exception as e:
         raise PlanError(str(e)) from e
+    # Yapay zekâya giden profil: takma ad, doğum tarihi yerine yaş, sağlık notu
+    # bir kez. Hesaplar (yaş bandı, uyarılar) gerçek profilden yapıldı.
+    takma = takma_ad.takma_ad_sec(baby.name)
+    param["profile_summary"] = istem_profili(profile, param, takma)
 
     # --- 0-3 AY: EĞİTİM PLANI DEĞİL, YENİDOĞAN RİTİM REHBERİ -----------------
     # İlayda kuralı: bu yaşta katı program ve yapılandırılmış eğitim UYGULANMAZ.
@@ -604,6 +648,8 @@ def generate_content(baby: Baby, req_overrides: dict | None,
             markdown = plan_generator.plan_uret(param, usage_sink=_kullanim)
         except Exception as e:
             raise PlanError(str(e)) from e
+        # Takma ad → gerçek ad (gün başlıkları ayrıştırılmadan ÖNCE).
+        markdown = takma_ad.adi_geri_koy(markdown, takma, baby.name)
         # _kullanim yalnız GERÇEK Claude çağrısında dolar; fallback yolunda boş kalır.
         # HER denemenin maliyeti ayrı yazılır — yeniden üretim bedava değil.
         if _kullanim.get("usage"):

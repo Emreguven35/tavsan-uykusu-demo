@@ -90,6 +90,12 @@ def _ses_temizligi_baslat() -> bool:
     _ses_scheduler.add_job(denetim.gunluk_is, "cron", hour=8, minute=0,
                            timezone="Europe/Istanbul", id="gunluk_denetim",
                            max_instances=1, coalesce=True)
+    # 03:30 UTC — saklama kuralları: eski plan işleri, 30 günlük denetim/arşiv
+    # dosyaları, 10 yıllık onay kanıtları, sahipsiz Anne Sesi klasörleri.
+    from api.services import saklama
+    _ses_scheduler.add_job(saklama.gece_temizligi, "cron", hour=SES_TEMIZLIK_SAAT,
+                           minute=30, id="gece_temizligi", max_instances=1,
+                           coalesce=True)
     # 08:05 — raporun bağlantısı DENETIM_ALICILARI'na e-postayla.
     _ses_scheduler.add_job(denetim.eposta_isi, "cron", hour=8, minute=5,
                            timezone="Europe/Istanbul", id="denetim_eposta",
@@ -116,7 +122,7 @@ def _ses_temizligi_durdur() -> None:
 # sürüm etiketi görünür; tam SHA X-API-Key ile /health?detail=1'de döner.
 #
 # Sentry'den ÖNCE tanımlı olmak zorunda: release etiketi olarak oraya geçiyor.
-APP_VERSION = os.getenv("APP_VERSION", "v2.7.9")
+APP_VERSION = os.getenv("APP_VERSION", "v2.8.0")
 
 # Hata izleme — YALNIZ production + SENTRY_DSN. Uygulama nesnesi kurulmadan ÖNCE
 # başlatılır ki Starlette/FastAPI entegrasyonları middleware zincirini sarabilsin.

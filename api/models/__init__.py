@@ -29,6 +29,7 @@ from api.models.sleep_sound import SleepSound
 from api.models.plan_feedback import PlanFeedback
 from api.models.plan_uretim_isi import PlanUretimIsi
 from api.models.consent import Consent
+from api.models.onay_kaniti import OnayKaniti
 from api.models.community_v2 import Bookmark, ToplulukBildirimi
 
 __all__ = [
@@ -49,6 +50,6 @@ __all__ = [
     # B4 — ödeme altyapısı
     "RevenueCatOlayi", "PremiumHak",
     # B5 — KVKK
-    "Consent",
+    "Consent", "OnayKaniti",
     "Bookmark", "ToplulukBildirimi",
 ]

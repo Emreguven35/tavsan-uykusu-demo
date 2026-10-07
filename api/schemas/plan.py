@@ -3,7 +3,43 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# profile_overrides İZİN LİSTESİ (2026-10-07). Yalnız motorun okuduğu anahtarlar
+# kabul edilir; kalanı SESSİZCE atılır (eski istemci 422 almasın). Bu sözlük
+# yapay zekâ istemine gittiği için kimlik alanları (bebek_ad, dogum_tarihi)
+# BİLİNÇLİ OLARAK listede yok — takma ad / yaş korumasını delmesinler. kilo_durumu
+# da yok: kilo hiçbir motor girdisine bağlanmaz (karar 2026-10-07).
+OVERRIDE_METIN = {
+    "beslenme", "destek", "oda", "dayanma_siniri", "deneyim", "gece_uyanma",
+    "karartma_perdesi", "oda_sicakligi", "emzik", "son_beslenme_zaman",
+    "beyaz_gurultu", "yaklasim_tercihi", "mizac",
+}
+OVERRIDE_SAYI = {"ogle_yatis_dk", "tek_ogun_uyku_dk", "uyaniklik_penceresi_dk"}
+OVERRIDE_BOOL = {"tek_uyku"}
+OVERRIDE_SAGLIK = "saglik_problemi"
+OVERRIDE_METIN_MAKS = 200
+OVERRIDE_SAGLIK_MAKS = 500
+
+
+def override_suz(ham: dict | None) -> dict | None:
+    """İzinli anahtarlar, tip ve uzunluk sınırıyla; kalanı atılır."""
+    if not isinstance(ham, dict):
+        return None
+    out: dict[str, Any] = {}
+    for k, v in ham.items():
+        if k in OVERRIDE_METIN or k == OVERRIDE_SAGLIK:
+            if isinstance(v, bool) or not isinstance(v, (str, int, float)):
+                continue
+            maks = OVERRIDE_SAGLIK_MAKS if k == OVERRIDE_SAGLIK else OVERRIDE_METIN_MAKS
+            out[k] = str(v).strip()[:maks]
+        elif k in OVERRIDE_SAYI:
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[k] = v
+        elif k in OVERRIDE_BOOL:
+            if isinstance(v, bool):
+                out[k] = v
+    return out or None
 
 
 class PlanGenerateReq(BaseModel):
@@ -11,6 +47,11 @@ class PlanGenerateReq(BaseModel):
     # Bebekte saklanmayan ama motorun kullanabileceği ek profil alanları (opsiyonel).
     dogum_haftasi: int | None = Field(default=None, ge=24, le=42)
     profile_overrides: dict[str, Any] | None = None
+
+    @field_validator("profile_overrides", mode="after")
+    @classmethod
+    def _izinli_anahtarlar(cls, v):
+        return override_suz(v)
 
 
 class PlanResp(BaseModel):
