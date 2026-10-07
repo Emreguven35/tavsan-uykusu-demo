@@ -96,6 +96,14 @@ class SkippedEntry(BaseModel):
     detail: str
 
 
+class KapatilanEntry(BaseModel):
+    """Sunucuda otomatik kapalı kayıt (bkz. BatchResult.kapatilanlar)."""
+    id: uuid.UUID
+    client_id: str | None = None
+    ended_at: datetime
+    kaynak: str                       # k16_1 | k13_3
+
+
 class BatchResult(BaseModel):
     created: int
     updated: int
@@ -115,6 +123,12 @@ class BatchResult(BaseModel):
     # otomatik kapatıldı mı. true ise mobil elindeki "sürüyor" durumunu
     # tazelemelidir — aksi hâlde ekranda hâlâ dönen bir sayaç görünür.
     timer_closed: bool = False
+    # v2.7.6: sunucunun KAPALI bildiği, istemcinin açık sandığı kayıtlar —
+    # bu batch'te otomatik kapatılanlar (K16.1/K13.3) ve bitişi boş gönderilip
+    # sunucudaki otomatik kapanışı korunanlar. Mobil yerel kaydını bu bitişle
+    # kapatmalı; aksi hâlde her senkronda aynı açık kaydı yeniden gönderir.
+    # Yeni alan: eski build'ler okumaz, mevcut alanlar aynen duruyor.
+    kapatilanlar: list[KapatilanEntry] = []
 
 
 class DaySummary(BaseModel):

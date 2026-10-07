@@ -13,6 +13,9 @@ logs router — /api/v1/logs
   gönderim her seferinde yeni client_id ürettiği için tek başına client_id
   yetmiyordu (prod'da 41 kopya çiftinin tamamında client_id'ler farklıydı).
   Ayrıca bir bebekte aynı anda EN FAZLA BİR açık kayıt bırakılır (K16.1).
+  Sunucunun otomatik kapattığı kayıt (`kapanis_kaynagi` dolu) bitişi boş bir
+  yeniden gönderimle YENİDEN AÇILMAZ; yanıtın `kapatilanlar` listesi istemciye
+  bu kayıtların bitişini bildirir. Notlar ezilmez, birleştirilir.
 - GET /logs?from=&to=&baby_id=: tarih aralığı sorgusu (started_at'e göre).
 - GET /logs?date=YYYY-MM-DD: K14.1/K14.3 "o günün kayıtları" — gece yarısını
   aşanlar ve dün akşamdan süren (16 saatten taze) açık uyku da döner (bkz.
@@ -43,9 +46,9 @@ from api.db import get_db
 from api.deps import get_current_user, get_owned_baby
 from api.models import Baby, SilinenSleepLog, SleepLog, User
 from api.schemas.log import (
-    BatchReq, BatchResult, DaySummary, SkippedEntry, SleepLogIn, SleepLogPatch,
-    SleepLogResp, SyncedEntry, TimelineGun, TimelineOturum, TimelineResp,
-    TimelineSabah, TimelineYokSayilan, WeeklySummaryResp,
+    BatchReq, BatchResult, DaySummary, KapatilanEntry, SkippedEntry, SleepLogIn,
+    SleepLogPatch, SleepLogResp, SyncedEntry, TimelineGun, TimelineOturum,
+    TimelineResp, TimelineSabah, TimelineYokSayilan, WeeklySummaryResp,
 )
 from api.services import plan_adapter
 from api.services.plan_adapter import (
@@ -138,6 +141,7 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
     out: list[SleepLog] = []
     skipped: list[SkippedEntry] = []
     synced: list[SyncedEntry] = []
+    korunanlar: list[SleepLog] = []              # açık gönderildi, kapalı kaldı
     ret_izleri: list[tuple[str, str]] = []       # (sebep, kayıt özeti) — log için
     _onceki_ret = 0
     _son_ozet = ""
@@ -202,6 +206,7 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
 
         row = None
         kopya = False
+        korundu = False                          # otomatik kapanış korundu mu
         geri = None                              # "Geri al": arşivdeki silinmiş kayıt
         if item.client_id is not None:
             # Birincil idempotency anahtarı. Bebek de süzülüyor: tekillik
@@ -246,7 +251,7 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
                     db.add(row)
                     created += 1
                 else:                            # mevcut → güncelle (idempotent)
-                    _kaydi_guncelle(row, item)
+                    korundu = _kaydi_guncelle(row, item)
                     updated += 1
                 db.flush()                       # aynı batch'te sonraki aramalar görsün
         except IntegrityError:
@@ -270,7 +275,7 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
                     detail="Kayıt veritabanına yazılamadı, tekrar denenecek"))
                 continue
             with db.begin_nested():
-                _kaydi_guncelle(row, item)
+                korundu = _kaydi_guncelle(row, item)
                 db.flush()
             updated += 1
             kopya = True
@@ -283,6 +288,8 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
             continue
 
         out.append(row)
+        if korundu:
+            korunanlar.append(row)
         synced.append(SyncedEntry(client_id=row.client_id, id=row.id))
         if kopya:
             # Spec: kopya HEM synced'de mevcut id ile döner HEM skipped'de
@@ -311,16 +318,23 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
     # günü 5 gündüz uykusuna çıkarıyordu.
     # İkisi de YAN ETKİDİR ve kendi savepoint'inde koşar: burada bir hata
     # yazılmış kayıtları 500 ile birlikte geri almamalı (mobil kuyruğu tıkanır).
-    timer_closed = False
+    kapatilan: list[SleepLog] = []
     try:
         with db.begin_nested():
-            timer_closed = _acik_sayaclari_kapat(db, user, out)
-            if _tek_acik_kayit_birak(db, user, out):
-                timer_closed = True
+            kapatilan = (_acik_sayaclari_kapat(db, user, out)
+                         + _tek_acik_kayit_birak(db, user, out))
     except SQLAlchemyError:
-        timer_closed = False
+        kapatilan = []
         logging.getLogger("tavsan.logs").exception(
             "Açık sayaç kapatılamadı (user=%s) — kayıtlar yine yazılıyor", user.id)
+    # timer_closed eski anlamıyla kalır (bu istekte bir kayıt KAPATILDI);
+    # korunan yeniden gönderimler yalnız `kapatilanlar`a girer — eski build'ler
+    # timer_closed'a göre davranıyor, onların akışı değişmesin.
+    timer_closed = bool(kapatilan)
+    kapatilanlar = [KapatilanEntry(id=r.id, client_id=r.client_id,
+                                   ended_at=r.ended_at, kaynak=r.kapanis_kaynagi)
+                    for r in kapatilan + [k for k in korunanlar if k not in kapatilan]
+                    if r.ended_at is not None and r.kapanis_kaynagi]
 
     db.commit()
 
@@ -342,7 +356,7 @@ def batch_upsert(req: BatchReq, db: Session = Depends(get_db),
     plan_updated = _plani_tazele(db, user, {r.baby_id for r in out})
     return BatchResult(created=created, updated=updated, skipped=skipped,
                        synced=synced, logs=out, plan_updated=plan_updated,
-                       timer_closed=timer_closed)
+                       timer_closed=timer_closed, kapatilanlar=kapatilanlar)
 
 
 UYKU_TIPLERI = ("sleep", "nap")
@@ -358,13 +372,62 @@ UYKU_TIPLERI_TUM = ("sleep", "nap", "sekerleme")
 SABAH_UYANISI = "sabah_uyanisi"
 
 
-def _kaydi_guncelle(row: SleepLog, item) -> None:
-    """Mevcut satırı gelen kayda eşitle (idempotent senkron)."""
+K16_1 = "k16_1"                # kapanis_kaynagi: yeni açık kayıt geldi
+K13_3 = "k13_3"                # kapanis_kaynagi: kapsayan manuel kayıt geldi
+
+
+def _kaydi_guncelle(row: SleepLog, item) -> bool:
+    """Mevcut satırı gelen kayda eşitle (idempotent senkron).
+
+    İSTİSNA — sunucunun otomatik kapattığı kayıt (`kapanis_kaynagi` dolu):
+    bitişi boş gelen güncelleme onu YENİDEN AÇMAZ. Mobil, sunucunun kapattığı
+    kaydı yerelde açık tutup her senkronda yeniden gönderiyordu; eskiden bu,
+    kaydı geri açıyordu (prod: 2 haftadır "sürüyor" görünen nap). Gelen
+    başlangıç korunan bitişi aşıyorsa koruma düşer: o artık bir düzeltmedir.
+
+    Kullanıcı BİTİŞ gönderirse (sunucudakinden farklı) o kazanır ve kaynak
+    silinir. Aynı bitişin geri gelmesi (istemci `kapatilanlar`ı uyguladı)
+    kullanıcı kapanışı değildir, kaynak kalır. Kaynağı boş kayıtta davranış
+    eskisi gibi: bitişi boş gönderim kaydı yeniden açar.
+
+    Notlar EZİLMEZ, birleştirilir (bkz. _not_birlestir).
+
+    Dönen: otomatik kapanış korundu mu (yanıtta `kapatilanlar`a girer)."""
     row.baby_id = item.baby_id
     row.type = item.type
     row.started_at = item.started_at
-    row.ended_at = item.ended_at
-    row.notes = item.notes
+    korundu = (item.ended_at is None and row.kapanis_kaynagi is not None
+               and row.ended_at is not None
+               and _as_utc(row.ended_at) >= _as_utc(item.started_at))
+    if not korundu:
+        if (row.ended_at is None or item.ended_at is None
+                or _as_utc(item.ended_at) != _as_utc(row.ended_at)):
+            row.kapanis_kaynagi = None
+        row.ended_at = item.ended_at
+    row.notes = _not_birlestir(row.notes, item.notes)
+    return korundu
+
+
+def _not_birlestir(mevcut: str | None, gelen: str | None) -> str | None:
+    """Sunucudaki notla gelen notu birleştir — ikisi de kaybolmasın.
+
+    Sunucu nota kendi satırını ekliyor ("otomatik kapatıldı: …"); istemcinin
+    yeniden gönderdiği not bunu bilmiyor ve eskiden ezip siliyordu. Birini
+    kapsayan not tek başına yeter; aksi hâlde " | " ile ayrılmış parçaların
+    birleşimi (mevcut sıra önce)."""
+    m = (mevcut or "").strip()
+    g = (gelen or "").strip()
+    if not g:
+        return mevcut
+    if not m or g == m or m in g:
+        return gelen
+    if g in m:
+        return mevcut
+    parcalar = [p.strip() for p in m.split(" | ") if p.strip()]
+    for p in (x.strip() for x in g.split(" | ")):
+        if p and p not in parcalar:
+            parcalar.append(p)
+    return " | ".join(parcalar)
 
 
 def _client_id_ile_bul(db: Session, user: User, item) -> SleepLog | None:
@@ -408,7 +471,7 @@ def _kopya_bul(db: Session, user: User, item) -> SleepLog | None:
 
 
 def _tek_acik_kayit_birak(db: Session, user: User,
-                          gelenler: list[SleepLog]) -> bool:
+                          gelenler: list[SleepLog]) -> list[SleepLog]:
     """K16.1 — bir bebekte aynı anda EN FAZLA BİR açık sleep/nap kaydı kalsın.
 
     Bu batch'te AÇIK bir kayıt geldiyse, aynı bebeğin daha ESKİ açık kayıtları
@@ -420,14 +483,14 @@ def _tek_acik_kayit_birak(db: Session, user: User,
     Bu batch'te gelen kayıtlar BİRBİRİNİ de kapatır — zayıf ağda üç açık kayıt
     tek istekte gelebiliyor.
 
-    Dönen: en az bir kayıt kapatıldı mı."""
+    Dönen: kapatılan kayıtlar (kapanis_kaynagi='k16_1')."""
     from api.services.plan_service import uyku_sureleri     # döngüsel import önleme
 
     yeni_acik = [r for r in gelenler
                  if r.type in UYKU_TIPLERI and r.ended_at is None]
     if not yeni_acik:
-        return False
-    kapatildi = False
+        return []
+    kapatilan: list[SleepLog] = []
 
     for bebek_id in {r.baby_id for r in yeni_acik}:
         baby = db.get(Baby, bebek_id)
@@ -449,12 +512,13 @@ def _tek_acik_kayit_birak(db: Session, user: User,
             if kapanis < bas:
                 kapanis = bas
             eski.ended_at = kapanis
+            eski.kapanis_kaynagi = K16_1
             _not_ekle(eski, "otomatik kapatıldı: yeni kayıt açıldı")
-            kapatildi = True
+            kapatilan.append(eski)
             logging.getLogger("tavsan.logs").info(
                 "K16.1 açık kayıt kapatıldı: log=%s baby=%s ended_at=%s",
                 eski.id, bebek_id, kapanis.isoformat())
-    return kapatildi
+    return kapatilan
 
 
 def _not_ekle(row: SleepLog, metin: str) -> None:
@@ -466,7 +530,7 @@ def _not_ekle(row: SleepLog, metin: str) -> None:
 
 
 def _acik_sayaclari_kapat(db: Session, user: User,
-                          gelenler: list[SleepLog]) -> bool:
+                          gelenler: list[SleepLog]) -> list[SleepLog]:
     """K13.3 — bu batch'teki manuel kayıtla ÖRTÜŞEN açık sayacı kapat.
 
     Ölçüt: manuel kayıt (kapalı, sleep/nap) açık sayacın BAŞLANGICINI kapsıyor
@@ -483,13 +547,13 @@ def _acik_sayaclari_kapat(db: Session, user: User,
     Sayacın KENDİSİ bu batch'te geldiyse dokunulmaz — anne şu an uyku
     başlatıyordur.
 
-    Dönen: en az bir sayaç kapatıldı mı."""
+    Dönen: kapatılan sayaçlar (kapanis_kaynagi='k13_3', notlu)."""
     manuel = [r for r in gelenler
               if r.type in UYKU_TIPLERI and r.ended_at is not None]
     if not manuel:
-        return False
+        return []
     gelen_idler = {r.id for r in gelenler}
-    kapatildi = False
+    kapatilan: list[SleepLog] = []
 
     for bebek_id in {r.baby_id for r in manuel}:
         acik = (db.query(SleepLog)
@@ -510,11 +574,13 @@ def _acik_sayaclari_kapat(db: Session, user: User,
             # Birden çok aday varsa EN ERKEN biten: sayaç en geç o an bitmiştir.
             kapanis = min(_as_utc(m.ended_at) for m in ortusen)
             sayac.ended_at = kapanis
-            kapatildi = True
+            sayac.kapanis_kaynagi = K13_3
+            _not_ekle(sayac, "otomatik kapatıldı: manuel kayıt girildi")
+            kapatilan.append(sayac)
             logging.getLogger("tavsan.logs").info(
                 "K13.3 açık sayaç kapatıldı: log=%s baby=%s ended_at=%s",
                 sayac.id, bebek_id, kapanis.isoformat())
-    return kapatildi
+    return kapatilan
 
 
 def _plani_tazele(db: Session, user: User, baby_ids: set) -> bool:
@@ -791,7 +857,8 @@ def _oturum(k: dict, sinif: str, satirlar: dict) -> TimelineOturum:
         devam=devam,
         asiri_uzun=bool(k.get("_asiri_uzun")),
         otomatik_kapatildi=(bool(k.get("_otomatik_kapandi"))
-                            or any(_OTOMATIK_NOT in (r.notes or "") for r in ham)),
+                            or any(r.kapanis_kaynagi or _OTOMATIK_NOT in (r.notes or "")
+                                   for r in ham)),
         parcalar=[uuid.UUID(p) for p in parcalar] if len(parcalar) > 1 else [],
     )
 
@@ -992,6 +1059,10 @@ def patch_log(log_id: uuid.UUID, req: SleepLogPatch,
         raise _gecersiz("Kaydın bitişi başlangıcından önce; saatleri kontrol edin")
 
     row.started_at = bas
+    if "ended_at" in gelen:
+        # Kullanıcının açık bitiş kararı (kapatma ya da silip yeniden açma)
+        # otomatik kapanışı ezer.
+        row.kapanis_kaynagi = None
     row.ended_at = bit
     if "notes" in gelen:
         row.notes = req.notes

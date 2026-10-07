@@ -43,5 +43,11 @@ class SleepLog(Base, TimestampMixin):
     # (ör. backend'te doğrudan oluşturulan kayıt); NULL'lar unique kısıtta çakışmaz.
     client_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Kaydı SUNUCU kapattıysa hangi kuralın kapattığı: 'k16_1' (yeni açık kayıt
+    # geldi) | 'k13_3' (kapsayan manuel kayıt geldi) | NULL (kullanıcı kapattı ya
+    # da açık). Doluyken bitişi boş bir yeniden gönderim kaydı YENİDEN AÇMAZ
+    # (logs._kaydi_guncelle). Not metni insan içindir; karar bu alandan okunur.
+    kapanis_kaynagi: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
     user = relationship("User", back_populates="sleep_logs")
     baby = relationship("Baby")
