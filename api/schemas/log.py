@@ -101,7 +101,7 @@ class KapatilanEntry(BaseModel):
     id: uuid.UUID
     client_id: str | None = None
     ended_at: datetime
-    kaynak: str                       # k16_1 | k13_3
+    kaynak: str                       # k16_1 | k13_3 | bakim
 
 
 class BatchResult(BaseModel):
@@ -125,7 +125,7 @@ class BatchResult(BaseModel):
     timer_closed: bool = False
     # v2.7.6: sunucunun KAPALI bildiği, istemcinin açık sandığı kayıtlar —
     # bu batch'te otomatik kapatılanlar (K16.1/K13.3) ve bitişi boş gönderilip
-    # sunucudaki otomatik kapanışı korunanlar. Mobil yerel kaydını bu bitişle
+    # sunucudaki otomatik kapanışı (K16.1/K13.3/bakım betiği) korunanlar. Mobil yerel kaydını bu bitişle
     # kapatmalı; aksi hâlde her senkronda aynı açık kaydı yeniden gönderir.
     # Yeni alan: eski build'ler okumaz, mevcut alanlar aynen duruyor.
     kapatilanlar: list[KapatilanEntry] = []

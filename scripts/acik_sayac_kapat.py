@@ -73,6 +73,10 @@ from api.services.plan_service import uyku_sureleri         # noqa: E402
 
 UYKU_TIPLERI = ("sleep", "nap")
 KAPATMA_NOTU = "otomatik kapatıldı"
+# v1.7 (2026-10-07): kapatılan/onarılan kayda sleep_logs.kapanis_kaynagi yazılır.
+# Dolu kaynak, mobilin bitişi boş yeniden gönderiminin kaydı AÇMASINI engeller
+# (logs._kaydi_guncelle) ve batch yanıtında `kapatilanlar`a girer.
+KAPANIS_KAYNAGI = "bakim"
 TERK_SAAT = 16                 # mutlak tavan: bundan uzun açık kayıt "terk edilmiş"
 ASGARI_DK = 60                 # kapanış başlangıcın gerisine düşerse
 TZ_OFFSET_MIN = 180            # UTC+3 — motorla aynı
@@ -237,6 +241,7 @@ def main():
         print(f"\narşiv (eski hâl): {yol}")
         for r, kapanis, _g in adaylar:
             r.ended_at = kapanis
+            r.kapanis_kaynagi = KAPANIS_KAYNAGI
             _not_ekle(r, KAPATMA_NOTU)
         db.commit()
         print(f"{len(adaylar)} açık sayaç kaydı kapatıldı.")
@@ -319,6 +324,7 @@ def _duzelt_gunduz_uzun(db, uygula: bool) -> None:
         return
     for r, yeni, _s, _n in plan:
         r.ended_at = yeni
+        r.kapanis_kaynagi = KAPANIS_KAYNAGI
     db.commit()
     print(f"\n{len(plan)} kayıt onarıldı.")
 
@@ -363,6 +369,7 @@ def _duzelt_16saat(db, gun: int, uygula: bool) -> None:
         return
     for r, kapanis, _g in plan:
         r.ended_at = kapanis
+        r.kapanis_kaynagi = KAPANIS_KAYNAGI
     db.commit()
     print(f"\n{len(plan)} kayıt onarıldı.")
 

@@ -374,6 +374,7 @@ SABAH_UYANISI = "sabah_uyanisi"
 
 K16_1 = "k16_1"                # kapanis_kaynagi: yeni açık kayıt geldi
 K13_3 = "k13_3"                # kapanis_kaynagi: kapsayan manuel kayıt geldi
+BAKIM = "bakim"                # kapanis_kaynagi: scripts/acik_sayac_kapat.py
 
 
 def _kaydi_guncelle(row: SleepLog, item) -> bool:
@@ -547,7 +548,7 @@ def _acik_sayaclari_kapat(db: Session, user: User,
     Sayacın KENDİSİ bu batch'te geldiyse dokunulmaz — anne şu an uyku
     başlatıyordur.
 
-    Dönen: kapatılan sayaçlar (kapanis_kaynagi='k13_3', notlu)."""
+    Dönen: kapatılan sayaçlar (kapanis_kaynagi='k13_3', notsuz)."""
     manuel = [r for r in gelenler
               if r.type in UYKU_TIPLERI and r.ended_at is not None]
     if not manuel:
@@ -574,8 +575,10 @@ def _acik_sayaclari_kapat(db: Session, user: User,
             # Birden çok aday varsa EN ERKEN biten: sayaç en geç o an bitmiştir.
             kapanis = min(_as_utc(m.ended_at) for m in ortusen)
             sayac.ended_at = kapanis
+            # NOT YAZILMAZ: bitiş annenin girdiği gerçek saattir, tahmin değil.
+            # Timeline "otomatik kapatıldı" bayrağı mobilde ucu kesik çizip
+            # "bitiş kontrol edilmeli" yazdırıyor ve öneri hesabından düşürüyor.
             sayac.kapanis_kaynagi = K13_3
-            _not_ekle(sayac, "otomatik kapatıldı: manuel kayıt girildi")
             kapatilan.append(sayac)
             logging.getLogger("tavsan.logs").info(
                 "K13.3 açık sayaç kapatıldı: log=%s baby=%s ended_at=%s",
@@ -832,6 +835,10 @@ def weekly_summary(
 TIMELINE_EN_FAZLA_GUN = 14
 TIMELINE_ONBELLEK_SN = 60
 _OTOMATIK_NOT = "otomatik kapat"          # sunucunun kapattığı kayıtların notu
+# Bitişi TAHMİN olan kaynaklar → otomatik_kapatildi. K13.3 HARİÇ: bitişi
+# annenin girdiği manuel kaydın bitişidir; işaretlemek mobilde gerçek bir
+# uykuyu "bitiş kontrol edilmeli" diye gösterirdi.
+_TAHMINI_BITIS = (K16_1, BAKIM)
 
 
 def _tr_an(gun: date, dakika: int) -> datetime:
@@ -857,8 +864,8 @@ def _oturum(k: dict, sinif: str, satirlar: dict) -> TimelineOturum:
         devam=devam,
         asiri_uzun=bool(k.get("_asiri_uzun")),
         otomatik_kapatildi=(bool(k.get("_otomatik_kapandi"))
-                            or any(r.kapanis_kaynagi or _OTOMATIK_NOT in (r.notes or "")
-                                   for r in ham)),
+                            or any(r.kapanis_kaynagi in _TAHMINI_BITIS
+                                   or _OTOMATIK_NOT in (r.notes or "") for r in ham)),
         parcalar=[uuid.UUID(p) for p in parcalar] if len(parcalar) > 1 else [],
     )
 

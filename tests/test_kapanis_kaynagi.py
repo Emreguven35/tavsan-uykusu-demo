@@ -14,10 +14,15 @@ Kapsam:
   K3  Kullanıcının kapattığı kayıt düzenlemeyle yeniden açılabiliyor (batch +
       PATCH); PATCH otomatik kapanmış kaydı da açabiliyor
   K4  Notlar ezilmiyor, birleşiyor (birim + batch)
-  K5  K13.3 kapanışı işaretleniyor (kaynak + not), yeniden gönderimde korunur
+  K5  K13.3 kapanışı işaretleniyor (yalnız kaynak, NOT YOK), yeniden
+      gönderimde korunur; timeline otomatik_kapatildi K13.3'te false
   K6  Eski istemci: mevcut alanlar aynen, kapatilanlar kapanış yokken []
-  K7  Migration 0023: kolon eklenir, K16.1 notlu kapalı kayıt 'k16_1' olur
+  K7  Migration 0023/0024: K16.1 notlu kapalı → 'k16_1', bakım notlu kapalı →
+      'bakim', K13.3 notu silinir
   K8  Kolon uzunluğu tüm kaynak değerlerine yetiyor (Postgres VARCHAR)
+  K9  Bakım betiği (acik_sayac_kapat --uygula) 'bakim' yazar; koruma ve
+      kapatilanlar bu kaynakta da çalışır
+  K10 Timeline: K16.1 kapanışı otomatik_kapatildi=true
 
 Çalıştırma: python tests/test_kapanis_kaynagi.py
 """
@@ -47,6 +52,7 @@ os.environ["JWT_SECRET"] = "test-secret-en-az-otuz-iki-karakter-uzunlugunda"
 os.environ["ENVIRONMENT"] = "development"
 os.environ["MAIL_PROVIDER"] = "disabled"
 os.environ["MEDIA_ROOT"] = str(Path(tempfile.gettempdir()) / "kapanis_medya")
+os.environ["DENETIM_ROOT"] = str(Path(tempfile.gettempdir()) / "kapanis_denetim" / "denetim")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy")
 
 from fastapi.testclient import TestClient                   # noqa: E402
@@ -54,7 +60,7 @@ from api.db import Base, SessionLocal, engine               # noqa: E402
 import api.models                                           # noqa: E402,F401
 from api.models import Baby, SleepLog                       # noqa: E402
 from api.main import app                                    # noqa: E402
-from api.routers.logs import K13_3, K16_1, _not_birlestir   # noqa: E402
+from api.routers.logs import BAKIM, K13_3, K16_1, _not_birlestir  # noqa: E402
 from api.services.plan_service import uyku_sureleri         # noqa: E402
 from api.zaman import bugun_tr, tr_gun_araligi              # noqa: E402
 
@@ -258,7 +264,8 @@ s = satir("k5-sayac")
 check("K5a) Sayaç manuel kaydın bitişinde kapandı",
       ayni_an(s.ended_at, an(6, "16:00")), str(s.ended_at))
 check("K5b) kapanis_kaynagi = 'k13_3'", s.kapanis_kaynagi == K13_3, s.kapanis_kaynagi)
-check("K5c) K13.3 notu eklendi", "otomatik kapatıldı" in (s.notes or ""), s.notes)
+check("K5c) K13.3 not YAZMIYOR (bitiş annenin girdiği gerçek saat)",
+      not (s.notes or ""), s.notes)
 _k = j.get("kapatilanlar") or []
 check("K5d) kapatilanlar'da k13_3",
       len(_k) == 1 and _k[0]["client_id"] == "k5-sayac" and _k[0]["kaynak"] == "k13_3", str(_k))
@@ -268,6 +275,24 @@ check("K5f) Yeniden gönderim K13.3 kapanışını açmadı",
       ayni_an(satir("k5-sayac").ended_at, an(6, "16:00")), str(satir("k5-sayac").ended_at))
 check("K5g) Manuel kaydın kaynağı NULL", satir("k5-manuel").kapanis_kaynagi is None,
       satir("k5-manuel").kapanis_kaynagi)
+
+
+def timeline(bid) -> list[dict]:
+    r = client.get("/api/v1/logs/timeline", headers=H, params={"baby_id": bid, "days": 7})
+    assert r.status_code == 200, r.text
+    return [o for g in r.json()["gunler"] for o in g["oturumlar"]]
+
+
+# Eşit saatli ikiz (sayaç + manuel): hangisi oturum olursa olsun bayrak false.
+B5b = bebek("Kapanis5b")
+gonder(kayit(B5b, "k5b-sayac", an(5, "15:00")))
+gonder(kayit(B5b, "k5b-manuel", an(5, "15:00"), an(5, "16:00")))
+check("K5h) (hazırlık) ikiz sayaç K13.3 ile kapandı",
+      satir("k5b-sayac").kapanis_kaynagi == K13_3, satir("k5b-sayac").kapanis_kaynagi)
+_ot = timeline(B5b) + timeline(B5)
+check("K5i) Timeline: K13.3 kapanışında otomatik_kapatildi false",
+      _ot and not any(o["otomatik_kapatildi"] for o in _ot),
+      str([(o["client_id"], o["otomatik_kapatildi"]) for o in _ot]))
 
 # =============================================================================
 # K6 — eski istemci yanıtı
@@ -310,6 +335,10 @@ _satirlar = [
     ("a3", "otomatik kapatıldı: yeni kayıt açıldı", None),         # sonradan yeniden açılmış
     ("a4", "otomatik kapatıldı", "2026-09-20 12:00:00"),           # betik (K16.1 değil)
     ("a5", None, "2026-09-20 13:00:00"),
+    ("a6", "anne | otomatik kapatıldı: manuel kayıt girildi", "2026-09-20 14:00:00"),
+    ("a7", "otomatik kapatıldı: manuel kayıt girildi", "2026-09-20 15:00:00"),
+    ("a8", "otomatik kapatıldı: manuel kayıt girildi | sonra", "2026-09-20 16:00:00"),
+    ("a9", "otomatik kapatıldı", None),                            # bakım notlu ama açık
 ]
 for _id, _not, _bit in _satirlar:
     _c.execute("INSERT INTO sleep_logs (id, user_id, baby_id, type, started_at, ended_at, notes, "
@@ -321,10 +350,15 @@ _r = _alembic("upgrade", "head")
 check("K7b) head'e migration", _r.returncode == 0, _r.stderr[-300:])
 _c = sqlite3.connect(_mdb)
 _kay = dict(_c.execute("SELECT id, kapanis_kaynagi FROM sleep_logs").fetchall())
+_not = dict(_c.execute("SELECT id, notes FROM sleep_logs").fetchall())
 _upd = {r[0] for r in _c.execute("SELECT updated_at FROM sleep_logs")}
 _c.close()
-check("K7c) K16.1 notlu kapalı kayıtlar 'k16_1', diğerleri NULL",
-      _kay == {"a1": "k16_1", "a2": "k16_1", "a3": None, "a4": None, "a5": None}, str(_kay))
+check("K7c) K16.1 notlu kapalı 'k16_1', bakım notlu kapalı 'bakim', diğerleri NULL",
+      _kay == {"a1": "k16_1", "a2": "k16_1", "a3": None, "a4": "bakim", "a5": None,
+               "a6": None, "a7": None, "a8": None, "a9": None}, str(_kay))
+check("K7f) K13.3 notu silindi, annenin notu kaldı",
+      (_not["a6"], _not["a7"], _not["a8"]) == ("anne", None, "sonra"),
+      str((_not["a6"], _not["a7"], _not["a8"])))
 check("K7d) Doldurma updated_at'e dokunmadı", _upd == {"2026-09-20 09:00:00"}, str(_upd))
 _r = _alembic("downgrade", "0022_topluluk_v2")
 check("K7e) downgrade çalışıyor", _r.returncode == 0, _r.stderr[-300:])
@@ -334,7 +368,47 @@ check("K7e) downgrade çalışıyor", _r.returncode == 0, _r.stderr[-300:])
 # =============================================================================
 _uz = SleepLog.__table__.c.kapanis_kaynagi.type.length
 check("K8) kapanis_kaynagi uzunluğu tüm değerlere yetiyor",
-      _uz >= max(len(K16_1), len(K13_3)), _uz)
+      _uz >= max(len(K16_1), len(K13_3), len(BAKIM)), _uz)
+
+# =============================================================================
+# K9 — bakım betiği 'bakim' yazar
+# =============================================================================
+from scripts import acik_sayac_kapat                        # noqa: E402
+
+B9 = bebek("Kapanis9")
+gonder(kayit(B9, "k9-a", an(3, "09:00")))                   # 16 saatten eski, tek açık
+_argv = sys.argv
+sys.argv = ["acik_sayac_kapat.py", "--gun", "7", "--uygula"]
+try:
+    acik_sayac_kapat.main()
+finally:
+    sys.argv = _argv
+a9 = satir("k9-a")
+check("K9a) Betik kaydı kapattı ve kaynak 'bakim'",
+      a9.ended_at is not None and a9.kapanis_kaynagi == BAKIM,
+      f"{a9.ended_at} {a9.kapanis_kaynagi}")
+check("K9b) Betik notu duruyor", "otomatik kapatıldı" in (a9.notes or ""), a9.notes)
+_bit9 = a9.ended_at
+j = gonder(kayit(B9, "k9-a", an(3, "09:00")))
+check("K9c) Yeniden gönderim bakım kapanışını AÇMADI",
+      ayni_an(satir("k9-a").ended_at, _bit9), str(satir("k9-a").ended_at))
+_k = j.get("kapatilanlar") or []
+check("K9d) kapatilanlar'da kaynak 'bakim'",
+      len(_k) == 1 and _k[0]["client_id"] == "k9-a" and _k[0]["kaynak"] == "bakim", str(_k))
+check("K9e) Timeline: bakım kapanışı otomatik_kapatildi=true",
+      any(o["client_id"] == "k9-a" and o["otomatik_kapatildi"] for o in timeline(B9)),
+      str([(o["client_id"], o["otomatik_kapatildi"]) for o in timeline(B9)]))
+
+# =============================================================================
+# K10 — timeline: K16.1 kapanışı işaretli
+# =============================================================================
+B10 = bebek("Kapanis10")
+gonder(kayit(B10, "k10-a", an(2, "10:00")))
+gonder(kayit(B10, "k10-b", an(2, "13:00")))
+gonder(kayit(B10, "k10-b", an(2, "13:00"), an(2, "14:00")))
+_ot = {o["client_id"]: o["otomatik_kapatildi"] for o in timeline(B10)}
+check("K10) K16.1 kapanışı true, kullanıcının kapattığı false",
+      _ot.get("k10-a") is True and _ot.get("k10-b") is False, str(_ot))
 
 
 # =============================================================================
