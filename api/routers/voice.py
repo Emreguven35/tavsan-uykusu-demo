@@ -13,6 +13,9 @@ süresince (dakikalar) tutuluyor.
 - GET /stories: katalog + her içerik için "hazır mı" + imzalı bağlantı.
 - POST /generate: ÜRETİM YAPMAZ. Hazır dosyanın 1 saatlik imzalı bağlantısını
   döner; hazır değilse 409. Yanıt şeması eski istemciler için AYNI.
+- DELETE /me ("Sesimi sil", 2026-10-07): ses dosyaları + ses profili + ElevenLabs'te
+  kalan klon silinir. Aylık kayıt hakkı ETKİLENMEZ (users.ses_son_kayit_at).
+- POST /clone build 28+ için `acik_riza_ses` onayı ister (eski build'ler aynen).
 
 Hepsi auth korumalı. Dış servis hatası (key yok/kota) → anlamlı JSON + uygun kod.
 """
@@ -21,7 +24,8 @@ import math
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (APIRouter, Depends, File, Form, Header, HTTPException, UploadFile,
+                     status)
 from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -32,7 +36,7 @@ from api.deps import get_current_user, require_premium
 from api.models import User, VoiceProfile
 from api.models import VoiceAudio
 from api.schemas.voice import (
-    Progress, StoriesResp, StoryItem, VoiceCloneResp, VoiceGenerateReq,
+    Progress, SesSilResp, StoriesResp, StoryItem, VoiceCloneResp, VoiceGenerateReq,
     VoiceGenerateResp, VoiceStatusResp,
 )
 from api.services import storage
@@ -83,13 +87,23 @@ def _son_klonlama(profile: VoiceProfile | None):
     return getattr(profile, "last_cloned_at", None) or profile.created_at
 
 
-def _klon_durumu(profile: VoiceProfile | None, simdi: datetime | None = None) -> dict:
+def _utc(t: datetime | None) -> datetime | None:
+    return None if t is None else (t if t.tzinfo else t.replace(tzinfo=timezone.utc))
+
+
+def _klon_durumu(profile: VoiceProfile | None, simdi: datetime | None = None,
+                 user: User | None = None) -> dict:
     """{can_clone, next_clone_available_at, retry_after_days} — tek hesap yeri.
 
     Hem POST /clone kapısı hem GET /voice-status aynı fonksiyondan besleniyor:
-    mobilin gösterdiği tarih ile sunucunun uyguladığı sınır AYRIŞAMAZ."""
+    mobilin gösterdiği tarih ile sunucunun uyguladığı sınır AYRIŞAMAZ.
+
+    `user` verilirse "Sesimi sil" sonrası saklanan son kayıt anı da sayılır
+    (users.ses_son_kayit_at): profil silinse de hak değişmez."""
     simdi = simdi or datetime.now(timezone.utc)
-    son = _son_klonlama(profile)
+    adaylar = [t for t in (_utc(_son_klonlama(profile)),
+                           _utc(getattr(user, "ses_son_kayit_at", None))) if t]
+    son = max(adaylar) if adaylar else None
     if son is None:
         return {"can_clone": True, "next_clone_available_at": None,
                 "retry_after_days": 0}
@@ -135,11 +149,18 @@ def _son_profil(db: Session, user: User) -> VoiceProfile | None:
                         503: {"description": "Ses servisi/kapasitesi yok"}})
 async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Sesi"),
                 db: Session = Depends(get_db),
-                user: User = Depends(require_premium)):
+                user: User = Depends(require_premium),
+                x_app_version: str | None = Header(default=None, alias="X-App-Version")):
+    # AÇIK RIZA (2026-10-07) — ses kaydı biyometrik veri. Build 28+ `acik_riza_ses`
+    # onayı (güncel sürüm) olmadan kayıt alınmaz; eski build'ler bugünkü gibi.
+    # Ses OKUNMADAN ve ElevenLabs'e gitmeden ÖNCE.
+    hata = _ses_rizasi_eksik(db, user, x_app_version)
+    if hata is not None:
+        return hata
     # AYLIK LİMİT — ses OKUNMADAN önce kontrol edilir: 15MB'lık gövdeyi boşuna
     # almayalım ve ElevenLabs'e hiç gitmeyelim.
     onceki = _son_profil(db, user)
-    durum = _klon_durumu(onceki)
+    durum = _klon_durumu(onceki, user=user)
     if not durum["can_clone"]:
         tarih = durum["next_clone_available_at"].strftime("%d.%m.%Y")
         logger.info("Klonlama limiti: user=%s sonraki=%s", user.id, tarih)
@@ -294,9 +315,12 @@ def voice_status(db: Session = Depends(get_db), user: User = Depends(get_current
     profile = _son_profil(db, user)
     # Klonlama hakkı POST /clone ile AYNI fonksiyondan hesaplanıyor: mobilin
     # gösterdiği tarih ile sunucunun uyguladığı sınır ayrışamaz.
-    durum = _klon_durumu(profile)
+    durum = _klon_durumu(profile, user=user)
     if profile is None:
-        return VoiceStatusResp(status="none", can_clone=True,
+        # "Sesimi sil" sonrası da profil yok — hak yine kayıtlı andan hesaplanır.
+        return VoiceStatusResp(status="none", can_clone=durum["can_clone"],
+                               next_clone_available_at=durum["next_clone_available_at"],
+                               retry_after_days=durum["retry_after_days"],
                                progress=Progress(done=0, total=0),
                                kayit_hakki=_kayit_hakki(durum))
     hazir = (db.query(VoiceAudio)
@@ -509,6 +533,8 @@ def _klon_hakkini_iade_et(db: Session, user: User) -> None:
     olarak okur. NULL yapmak İŞE YARAMAZ: _son_klonlama NULL'da created_at'e
     düşer ve bekleme aynen sürer."""
     geri = datetime.now(timezone.utc) - timedelta(days=CLONE_COOLDOWN_DAYS)
+    if user.ses_son_kayit_at is not None:          # "Sesimi sil" izi de geri çekilir
+        user.ses_son_kayit_at = geri
     n = 0
     for p in (db.query(VoiceProfile)
               .filter(VoiceProfile.user_id == user.id).all()):
@@ -518,3 +544,75 @@ def _klon_hakkini_iade_et(db: Session, user: User) -> None:
         db.commit()
         logger.info("Klonlama hakkı iade edildi (kendi sesi feda edildi ama "
                     "klonlama tutmadı): user=%s profil=%d", user.id, n)
+
+
+# ---------------------------------------------------------------------------
+# Açık rıza kapısı ve "Sesimi sil" (2026-10-07)
+# ---------------------------------------------------------------------------
+SES_RIZA_TURU = "acik_riza_ses"
+SES_RIZA_MIN_BUILD = 28
+SES_RIZA_MESAJ = ("Sesini kaydedebilmemiz için önce Anne Sesi açık rıza metnini "
+                  "onaylaman gerekiyor.")
+
+
+def _ses_rizasi_eksik(db: Session, user: User, x_app_version: str | None):
+    """Build 28+ ve güncel `acik_riza_ses` onayı yoksa 403 yanıtı; aksi hâlde None.
+    Build önce isteğin başlığından, yoksa kullanıcının son görülen sürümünden."""
+    from api.config import KVKK_METIN_SURUMLERI
+    from api.routers.app_config import istemci_build
+    from api.services import kvkk
+    build = istemci_build(user, x_app_version)
+    if build is None or build < SES_RIZA_MIN_BUILD:
+        return None
+    d = kvkk.durum(db, user).get(SES_RIZA_TURU) or {}
+    if d.get("onay") is True and not d.get("guncelleme_gerekli"):
+        return None
+    logger.info("Ses kaydı reddedildi (açık rıza yok): user=%s build=%s", user.id, build)
+    return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={
+        "detail": SES_RIZA_MESAJ, "code": "riza_gerekli", "tur": SES_RIZA_TURU,
+        "metin_surumu": KVKK_METIN_SURUMLERI[SES_RIZA_TURU]})
+
+
+@router.delete("/me", response_model=SesSilResp,
+               responses={409: {"description": "Ses paketi hâlâ hazırlanıyor"}})
+def sesimi_sil(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """"Sesimi sil": annenin ses dosyaları, ses profilleri ve ElevenLabs'te kalan
+    klon silinir. İdempotent (silinecek bir şey yoksa da 200).
+
+    Aylık kayıt hakkı ETKİLENMEZ: son kayıt anı users.ses_son_kayit_at'e yazılır
+    (silme yeni hak vermez, var olanı da almaz). Paket hâlâ üretiliyorsa 409 —
+    üretim iş parçacığı silinen profile dosya yazmasın."""
+    profiller = db.query(VoiceProfile).filter(VoiceProfile.user_id == user.id).all()
+    if any(p.status in ("cloning", "generating") for p in profiller):
+        return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={
+            "detail": ("Ses paketin hâlâ hazırlanıyor. Birkaç dakika sonra "
+                       "tekrar deneyebilirsin.")})
+    anlar = [t for t in [_utc(user.ses_son_kayit_at)]
+             + [_utc(_son_klonlama(p)) for p in profiller] if t]
+    if anlar:
+        user.ses_son_kayit_at = max(anlar)
+    klon = 0
+    for p in profiller:
+        if p.elevenlabs_voice_id:
+            r = voice_svc.delete_voice(p.elevenlabs_voice_id)
+            if r.get("ok"):
+                klon += 1
+            else:                                   # günlük temizlik yeniden dener
+                logger.warning("Sesimi sil: ElevenLabs sesi silinemedi (%s) — "
+                               "günlük temizlik deneyecek", p.elevenlabs_voice_id)
+    dosya = 0
+    try:
+        dosya = storage.depo().klasor_sil(storage.ses_klasoru(user.id))
+    except Exception:                               # gece temizliği yeniden dener
+        logger.exception("Sesimi sil: depo klasörü silinemedi (user=%s)", user.id)
+    for p in profiller:
+        db.query(VoiceAudio).filter(VoiceAudio.voice_profile_id == p.id).delete()
+        db.delete(p)
+    db.commit()
+    durum = _klon_durumu(None, user=user)
+    logger.info("Sesimi sil: user=%s profil=%d dosya=%d klon=%d",
+                user.id, len(profiller), dosya, klon)
+    return SesSilResp(detail="Sesin ve ses dosyaların silindi.", silinen_dosya=dosya,
+                      silinen_profil=len(profiller), klon_silindi=klon,
+                      can_clone=durum["can_clone"],
+                      next_clone_available_at=durum["next_clone_available_at"])

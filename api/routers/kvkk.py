@@ -28,7 +28,7 @@ account_router = APIRouter(prefix="/account", tags=["kvkk"])
 
 
 class OnayReq(BaseModel):
-    tur: str = Field(pattern="^(aydinlatma|acik_riza_saglik|pazarlama)$")
+    tur: str = Field(pattern="^(aydinlatma|acik_riza_saglik|acik_riza_ses|pazarlama)$")
     onay: bool
     # Verilmezse GÜNCEL sürüm yazılır. Mobil hangi metni gösterdiyse onu yollar.
     metin_surumu: str | None = Field(default=None, max_length=40)

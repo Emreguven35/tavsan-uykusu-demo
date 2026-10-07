@@ -23,7 +23,8 @@ from api.models import (Block, Bookmark, CommunityProfile, Like, Reply, Report,
                         Thread, User)
 from api.schemas.community import (
     CATEGORIES, DELETED_NICKNAME, BlockItem, BlockReq, CategoriesResp,
-    CategoryItem, KATEGORI_PATTERN, BookmarkResp, KategoriItem, LikeReq, LikeResp,
+    CategoryItem, IcerikEngelReq, IcerikEngelResp, KATEGORI_PATTERN, BookmarkResp,
+    KategoriItem, LikeReq, LikeResp,
     MessageResp, ModActionReq, ModReportItem, ModReportsResp, ModUserReq, PinReq,
     ProfileCreateReq, ProfileResp, ProfileUpdateReq, ReplyCreateReq, ReplyItem,
     ReportReq, ThreadCreateReq, ThreadDetailResp, ThreadListItem, ThreadListResp,
@@ -613,6 +614,56 @@ def block_user(req: BlockReq, db: Session = Depends(get_db),
     return MessageResp(detail="Kullanıcı engellendi")
 
 
+@router.post("/block/icerik", response_model=IcerikEngelResp)
+def block_by_content(req: IcerikEngelReq, db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)):
+    """İçerikten engelle (2026-10-07). Mobil kullanıcı kimliği bilmiyordu ve
+    takma adla /block deniyor, 422 alıyordu — engelleme HİÇ çalışmıyordu (App
+    Store 1.2). Yazarı sunucu konu/cevap kaydından bulur.
+
+    Anonim içerikten açılan engelde yanıt ve liste yazarı GÖSTERMEZ
+    ("Anonim anne", kimlik yok). Görünürlük kuralı /block ile aynı: engellenen
+    kişinin konuları listelerde, cevapları konu detayında gizlenir."""
+    obj = _target_obj(db, req.target_type, req.target_id)
+    if obj is None or obj.status == "removed":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="İçerik bulunamadı")
+    if obj.user_id is None:                      # yazarın hesabı silinmiş
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Bu içeriğin yazarı artık uygulamada değil")
+    if obj.user_id == user.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Kendinizi engelleyemezsiniz")
+    anonim = bool(getattr(obj, "anonim", False))
+    engel = db.query(Block).filter(Block.user_id == user.id,
+                                   Block.blocked_user_id == obj.user_id).one_or_none()
+    if engel is None:
+        engel = Block(user_id=user.id, blocked_user_id=obj.user_id,
+                      anonim_kaynak=anonim)
+        db.add(engel)
+        db.commit()
+        db.refresh(engel)
+    if engel.anonim_kaynak:
+        ad = topluluk.ANONIM_AD
+    else:
+        ad = topluluk.eski_takma_ad(_profile_of(db, obj.user_id), obj.user_id, False)
+    return IcerikEngelResp(detail="Kullanıcı engellendi", engel_id=engel.id,
+                           gorunen_ad=ad)
+
+
+@router.delete("/block/kayit/{engel_id}", response_model=MessageResp)
+def unblock_by_id(engel_id: uuid.UUID, db: Session = Depends(get_db),
+                  user: User = Depends(get_current_user)):
+    """Engeli engel kaydının kimliğiyle kaldır (anonim kaynaklı engellerde
+    kullanıcı kimliği istemciye verilmediği için gerekli). İdempotent."""
+    row = db.query(Block).filter(Block.id == engel_id,
+                                 Block.user_id == user.id).one_or_none()
+    if row is not None:
+        db.delete(row)
+        db.commit()
+    return MessageResp(detail="Engel kaldırıldı")
+
+
 @router.delete("/block/{blocked_user_id}", response_model=MessageResp)
 def unblock_user(blocked_user_id: uuid.UUID, db: Session = Depends(get_db),
                  user: User = Depends(get_current_user)):
@@ -630,9 +681,11 @@ def list_blocks(db: Session = Depends(get_db), user: User = Depends(get_current_
             .outerjoin(CommunityProfile, CommunityProfile.user_id == Block.blocked_user_id)
             .filter(Block.user_id == user.id)
             .order_by(Block.created_at.desc()).all())
-    return [BlockItem(blocked_user_id=b.blocked_user_id,
-                      nickname=topluluk.eski_takma_ad(p, b.blocked_user_id, False),
-                      created_at=b.created_at) for b, p in rows]
+    return [BlockItem(blocked_user_id=None if b.anonim_kaynak else b.blocked_user_id,
+                      nickname=(topluluk.ANONIM_AD if b.anonim_kaynak
+                                else topluluk.eski_takma_ad(p, b.blocked_user_id, False)),
+                      created_at=b.created_at, engel_id=b.id,
+                      anonim=bool(b.anonim_kaynak)) for b, p in rows]
 
 
 # ===========================================================================

@@ -5,7 +5,7 @@ Her iki taraf da ondelete=CASCADE (hesap silinince engel kaydı anlamsız → gi
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, UniqueConstraint, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.db.base import GUID, Base
@@ -23,6 +23,12 @@ class Block(Base):
         GUID, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     blocked_user_id: Mapped[uuid.UUID] = mapped_column(  # engellenen
         GUID, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+
+    # Engel ANONİM bir gönderiden/cevaptan mı açıldı (POST /community/block/icerik)?
+    # Öyleyse engellenenler listesi yazarın takma adını ve kimliğini GÖSTERMEZ —
+    # yoksa engelleme anonimliği delerdi.
+    anonim_kaynak: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                                default=False, server_default=false())
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False)

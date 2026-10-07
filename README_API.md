@@ -764,6 +764,27 @@ kaldırılacak.
 - `push_tokens.device_name` saklanmaz; mailer alıcıyı maskeler, console modu
   içerik loglamaz; önbellek isabetinde soru loglanmaz.
 
+### Topluluk: içerikten engelleme (v2.8.1)
+
+`POST /community/block/icerik` `{"target_type": "thread"|"reply", "target_id": uuid}`
+→ 200 `{"detail", "engel_id", "gorunen_ad"}`. Yazarı sunucu bulur; istemci kullanıcı
+kimliği bilmez. Anonim içerikten engelde ad "Anonim anne", listede
+`blocked_user_id: null`. 400 kendi içeriği, 404 içerik yok / yazar silinmiş.
+`DELETE /community/block/kayit/{engel_id}` engeli kaldırır (idempotent).
+`GET /community/blocks` kalemleri `engel_id` ve `anonim` taşır. Eski `/block` ve
+`/block/{user_id}` uçları duruyor.
+
+### Anne Sesi: açık rıza + "Sesimi sil" (v2.8.1)
+
+- `POST /voice/clone`: build 28+ (X-App-Version, yoksa son görülen sürüm) güncel
+  `acik_riza_ses` onayı yoksa **403** `{"detail", "code": "riza_gerekli", "tur":
+  "acik_riza_ses", "metin_surumu": "kvkk-2026-10"}`; ses okunmaz, ses servisine
+  gidilmez. Eski build'ler aynen.
+- `DELETE /voice/me` → 200 `{"detail", "silinen_dosya", "silinen_profil",
+  "klon_silindi", "can_clone", "next_clone_available_at"}`. Ses dosyaları, ses
+  profili ve ElevenLabs'te kalan klon silinir; aylık kayıt hakkı değişmez
+  (`users.ses_son_kayit_at`). Paket hazırlanırken 409. İdempotent.
+
 ### Kayıtta KVKK onayları (v2.7.8)
 
 Mobil `POST /auth/register` gövdesindeki mevcut `consents` dizisini kullanır;

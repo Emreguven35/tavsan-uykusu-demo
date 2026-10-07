@@ -55,7 +55,7 @@ from fastapi.testclient import TestClient                   # noqa: E402
 from api.db import Base, SessionLocal, engine               # noqa: E402
 import api.models                                           # noqa: E402,F401
 from api.models import (Baby, Consent, OnayKaniti, PlanUretimIsi,   # noqa: E402
-                        PushToken, RevenueCatOlayi, User)
+                        PushToken, RevenueCatOlayi, User, VoiceProfile)
 from api.main import app                                    # noqa: E402
 from api.services import kvkk, mailer, saklama, storage     # noqa: E402
 from api.zaman import bugun_tr                              # noqa: E402
@@ -167,13 +167,23 @@ db.close()
 check("S2b) Gece temizliği sahipsiz klasörü sildi",
       _n == 1 and not kok.parent.exists(), f"silinen={_n} var_mi={kok.parent.exists()}")
 _HD, UD, BD = kullanici("sesli@test.com")
-kendi = Path(os.environ["MEDIA_ROOT"]) / storage.KOVA_SES / str(UD) / "p"
-kendi.mkdir(parents=True, exist_ok=True)
-(kendi / "a.mp3").write_bytes(b"x")
+db = SessionLocal()
+_vp = VoiceProfile(user_id=UD, status="ready", progress_done=4, progress_total=4)
+db.add(_vp)
+db.commit()
+_vpid = str(_vp.id)
+db.close()
+_ses = Path(os.environ["MEDIA_ROOT"]) / storage.KOVA_SES / str(UD)
+kendi, artik = _ses / _vpid, _ses / str(uuid.uuid4())     # artik: profili silinmiş
+for k in (kendi, artik):
+    k.mkdir(parents=True, exist_ok=True)
+    (k / "a.mp3").write_bytes(b"x")
 db = SessionLocal()
 saklama.sahipsiz_ses_klasorleri(db)
 db.close()
-check("S2c) Sahibi olan klasöre dokunulmadı", (kendi / "a.mp3").exists(), "")
+check("S2c) Profili duran klasöre dokunulmadı", (kendi / "a.mp3").exists(), "")
+check("S2d) Profili silinmiş alt klasör silindi (Sesimi sil yeniden denemesi)",
+      not artik.exists(), "")
 
 # =============================================================================
 # S3 — plan işleri

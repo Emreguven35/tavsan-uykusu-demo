@@ -10,6 +10,17 @@ class VoiceCloneResp(BaseModel):
     sampleUrl: str | None = None
 
 
+class SesSilResp(BaseModel):
+    """DELETE /voice/me — "Sesimi sil"."""
+    detail: str
+    silinen_dosya: int
+    silinen_profil: int
+    klon_silindi: int
+    # Aylık kayıt hakkı silmeden ETKİLENMEZ: silmeden önce neyse o.
+    can_clone: bool
+    next_clone_available_at: datetime | None = None
+
+
 class Progress(BaseModel):
     """Paket üretim ilerlemesi — mobil çember göstergesi."""
     done: int = 0

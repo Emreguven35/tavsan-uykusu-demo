@@ -26,7 +26,8 @@ class Consent(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     user_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    # aydinlatma | acik_riza_saglik | pazarlama  (config.KVKK_METIN_SURUMLERI)
+    # aydinlatma | acik_riza_saglik | acik_riza_ses | pazarlama
+    # (config.KVKK_METIN_SURUMLERI)
     tur: Mapped[str] = mapped_column(String(30), nullable=False)
     metin_surumu: Mapped[str] = mapped_column(String(40), nullable=False)
     onay: Mapped[bool] = mapped_column(Boolean, nullable=False)

@@ -48,6 +48,11 @@ class User(Base, TimestampMixin):
     # Topluluk v2 — tavsan | ayi | kedi | civciv | tilki. NULL → kimlikten sabit
     # seçim (api.services.topluluk.avatar_of); PATCH /users/me ile değişir.
     avatar: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # "Sesimi sil" (2026-10-07) ses profilini siler; aylık kayıt hakkı profilin
+    # last_cloned_at'inden hesaplandığı için o an BURADA saklanır — silme hakkı
+    # ne verir ne alır (api/routers/voice.py _klon_durumu).
+    ses_son_kayit_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
     # KVKK silme hakkı: kullanıcı silinince ilişkili tüm veriler cascade ile gider.
     babies = relationship("Baby", back_populates="user",

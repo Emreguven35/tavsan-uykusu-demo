@@ -7,7 +7,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 # --- İstekler ----------------------------------------------------------------
 class KayitOnayi(BaseModel):
-    tur: str = Field(pattern="^(aydinlatma|acik_riza_saglik|pazarlama)$")
+    tur: str = Field(pattern="^(aydinlatma|acik_riza_saglik|acik_riza_ses|pazarlama)$")
     onay: bool
     metin_surumu: str | None = Field(default=None, max_length=40)
 

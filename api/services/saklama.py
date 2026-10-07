@@ -137,8 +137,10 @@ def onay_kanitlarini_temizle(db, simdi: datetime | None = None) -> int:
 
 
 def sahipsiz_ses_klasorleri(db) -> int:
-    """voice-audio/{user_id} klasörlerinden sahibi silinmiş olanları sil."""
-    from api.models import User
+    """voice-audio/{user_id} klasörlerinden sahibi silinmiş olanları sil; sahibi
+    duran kullanıcıda da artık hiçbir ses profiline ait olmayan alt klasörleri
+    ("Sesimi sil"de dosya silme başarısız olduysa burada yeniden denenir)."""
+    from api.models import User, VoiceProfile
     from api.services import storage
     depo = storage.depo()
     kok = getattr(depo, "kok", None)
@@ -148,14 +150,23 @@ def sahipsiz_ses_klasorleri(db) -> int:
     if not ses_kok.is_dir():
         return 0
     kullanicilar = {str(u) for (u,) in db.query(User.id).all()}
+    profiller = {(str(u), str(p)) for p, u in
+                 db.query(VoiceProfile.id, VoiceProfile.user_id).all()}
     silinen = 0
     for k in ses_kok.iterdir():
-        if k.is_dir() and k.name not in kullanicilar:
-            try:
+        if not k.is_dir():
+            continue
+        try:
+            if k.name not in kullanicilar:
                 depo.klasor_sil(storage.ses_klasoru(k.name))
                 silinen += 1
-            except Exception:
-                logger.exception("Sahipsiz ses klasörü silinemedi: %s", k.name)
+                continue
+            for alt in k.iterdir():
+                if alt.is_dir() and (k.name, alt.name) not in profiller:
+                    depo.klasor_sil(storage.ses_klasoru(k.name, alt.name))
+                    silinen += 1
+        except Exception:
+            logger.exception("Sahipsiz ses klasörü silinemedi: %s", k.name)
     return silinen
 
 

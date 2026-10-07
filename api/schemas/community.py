@@ -204,10 +204,26 @@ class BlockReq(BaseModel):
     user_id: uuid.UUID
 
 
+class IcerikEngelReq(BaseModel):
+    """POST /community/block/icerik — yazarı İÇERİKTEN engelle. İstemcinin
+    kullanıcı kimliği bilmesi gerekmez; yazarı sunucu bulur."""
+    target_type: str = Field(pattern=TARGET_PATTERN)     # thread | reply
+    target_id: uuid.UUID
+
+
+class IcerikEngelResp(BaseModel):
+    detail: str
+    engel_id: uuid.UUID            # kaldırmak için: DELETE /community/block/kayit/{engel_id}
+    gorunen_ad: str                # listede görünecek ad ("Anonim anne" olabilir)
+
+
 class BlockItem(BaseModel):
-    blocked_user_id: uuid.UUID
+    # Anonim içerikten açılan engelde NULL: kimlik verilirse anonimlik delinirdi.
+    blocked_user_id: uuid.UUID | None
     nickname: str
     created_at: datetime
+    engel_id: uuid.UUID | None = None   # DELETE /community/block/kayit/{engel_id}
+    anonim: bool = False
 
 
 class MessageResp(BaseModel):

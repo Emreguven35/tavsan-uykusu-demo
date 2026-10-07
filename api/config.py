@@ -115,6 +115,9 @@ PREMIUM_ENTITLEMENT = "premium"
 KVKK_METIN_SURUMLERI: dict[str, str] = {
     "aydinlatma": "kvkk-2026-10",
     "acik_riza_saglik": "kvkk-2026-10",
+    # Anne Sesi (2026-10-07): ses kaydı biyometrik veri — ayrı açık rıza. Build
+    # 28+ ses kaydını bu onay olmadan yapamaz (api/routers/voice.py).
+    "acik_riza_ses": "kvkk-2026-10",
     "pazarlama": "taslak-2026-09-25",
 }
 KURUCU_PREMIUM_GUN = 30
