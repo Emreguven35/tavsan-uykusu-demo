@@ -714,6 +714,48 @@ yalnız `kaynak` (`kayit|plan|varsayilan`) ve gece bloğunda `gece_uykusu_dk` **
   kaybolur, koşul oluşunca gelir. Mobil listeyi önbelleğe almamalı, her
   `plans/today` yanıtında gelen listeyi göstermelidir.
 
+### Bebek boy/kilo ölçümleri (v2.7.8, ilk açılış akışı)
+
+Ölçümler **yalnız saklanır**: plan motoru, eğitim planı, sohbet bağlamı ve
+denetim okumaz (`tests/test_bebek_olcum.py` O11 sabitliyor). Tablo:
+`bebek_olcumleri` (geçmiş; bebek silinince silinir). Hassasiyet: boy 1, kilo 2
+ondalık (yuvarlama ROUND_HALF_UP).
+
+- `POST /babies` ve `PATCH /babies/{id}` isteğe bağlı **`boy_cm`**, **`kilo_kg`**
+  (sayı) alır. Geldiyse bugünün (Türkiye günü) tarihiyle ölçüm yazılır —
+  kaynak `onboarding` (POST) / `profil` (PATCH). Aynı bebek + aynı gün + aynı
+  değerler zaten varsa yeni satır açılmaz. Gelmezse hiçbir şey değişmez.
+- Aralık: boy **30–120 cm**, kilo **0,5–25 kg**. Dışındaysa **422** ve bebek
+  oluşturulmaz/güncellenmez:
+  `{"detail": "Boy 30–120 cm arasında olmalı.", "alan": "boy_cm"}` /
+  `{"detail": "Kilo 0,5–25 kg arasında olmalı.", "alan": "kilo_kg"}`.
+- Bebek yanıtları (`POST`/`GET`/`PATCH /babies`) **`son_olcum`** taşır:
+  `{"olcum_tarihi": "2026-10-07", "boy_cm": 62.5, "kilo_kg": 6.36}` ya da `null`
+  (ölçümsüz bebek). Değerler JSON sayıdır.
+- `POST /babies/{id}/olcumler` `{olcum_tarihi?, boy_cm?, kilo_kg?}` → 201
+  `{id, olcum_tarihi, boy_cm, kilo_kg, kaynak:"profil", created_at}`. Tarih
+  verilmezse bugün; gelecek ya da doğumdan önce → 422 (`alan: "olcum_tarihi"`);
+  ikisi de boş → 422 "Boy ya da kilo girilmeli.". Aynı gün aynı değer → mevcut
+  ölçüm döner.
+- `GET /babies/{id}/olcumler` → ölçüm geçmişi, yeniden eskiye.
+- KVKK dışa aktarımı (`GET /account/export`) `bebek_olcumleri` içerir.
+
+### Kayıtta KVKK onayları (v2.7.8)
+
+Mobil `POST /auth/register` gövdesindeki mevcut `consents` dizisini kullanır;
+aydınlatma teyidi ile sağlık verisi açık rızası **ayrı satırlardır**:
+
+```json
+"consents": [{"tur": "aydinlatma", "onay": true, "metin_surumu": "kvkk-2026-10"},
+             {"tur": "acik_riza_saglik", "onay": true, "metin_surumu": "kvkk-2026-10"}]
+```
+
+Güncel sürümler `api/config.py` `KVKK_METIN_SURUMLERI` (aydinlatma ve
+acik_riza_saglik: `kvkk-2026-10`). Metin değişirse mobil ve sunucu birlikte
+güncellenir; eski sürümle onay vermiş kullanıcıda `GET /consents/me`
+`guncelleme_gerekli: true` döner. Kayıtlar `consents` tablosunda (salt ekleme,
+`kaynak: "kayit"`); hesap silinince onaylar da silinir.
+
 ## 6.2 Bildirimler (Expo Push)
 
 | Endpoint | Açıklama |

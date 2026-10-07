@@ -109,9 +109,12 @@ PREMIUM_ENTITLEMENT = "premium"
 # sürüm de değişmeli: eski sürüme onay vermiş kullanıcı yeniden onaylar
 # (GET /consents/me → guncelleme_gerekli).
 # =============================================================================
+# 2026-10 (ilk açılış akışı): mobil kayıtta aydinlatma ("okudum, anladım"
+# teyidi) ve acik_riza_saglik'ı AYRI satırlar olarak "kvkk-2026-10" ile gönderir.
+# Sürüm mobil ile BİRLİKTE değişir. pazarlama bu akışta sorulmuyor.
 KVKK_METIN_SURUMLERI: dict[str, str] = {
-    "aydinlatma": "taslak-2026-09-25",
-    "acik_riza_saglik": "taslak-2026-09-25",
+    "aydinlatma": "kvkk-2026-10",
+    "acik_riza_saglik": "kvkk-2026-10",
     "pazarlama": "taslak-2026-09-25",
 }
 KURUCU_PREMIUM_GUN = 30

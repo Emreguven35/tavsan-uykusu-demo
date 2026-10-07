@@ -110,10 +110,11 @@ def export_bekleme(user: User) -> int:
 
 def disa_aktar(db: Session, user: User) -> dict:
     from api.models import Bookmark, ToplulukBildirimi
-    from api.models import (Baby, Block, ChatMessage, CommunityProfile, Like,
-                            PlanFeedback, PremiumHak, PushToken, Reply, Report,
-                            SentNotification, SilinenSleepLog, SleepLog,
-                            SleepPlan, Subscription, Thread, VideoProgress,
+    from api.models import (Baby, BebekOlcumu, Block, ChatMessage,
+                            CommunityProfile, Like, PlanFeedback, PremiumHak,
+                            PushToken, Reply, Report, SentNotification,
+                            SilinenSleepLog, SleepLog, SleepPlan, Subscription,
+                            Thread, VideoProgress,
                             VoiceAudio, VoiceProfile)
 
     def hepsi(model, *filtre, haric=()):
@@ -127,6 +128,8 @@ def disa_aktar(db: Session, user: User) -> dict:
         "olusturma_zamani": datetime.now(timezone.utc).isoformat(),
         "hesap": _satir(user, haric=("password_hash",)),
         "bebekler": hepsi(Baby, Baby.user_id == user.id),
+        "bebek_olcumleri": hepsi(BebekOlcumu, BebekOlcumu.baby_id.in_(
+            db.query(Baby.id).filter(Baby.user_id == user.id))),
         "uyku_kayitlari": hepsi(SleepLog, SleepLog.user_id == user.id),
         "silinen_uyku_kayitlari": hepsi(SilinenSleepLog, SilinenSleepLog.user_id == user.id),
         "planlar": hepsi(SleepPlan, SleepPlan.user_id == user.id),

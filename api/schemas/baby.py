@@ -30,6 +30,11 @@ class BabyCreate(BaseModel):
     # Eğitim takibi (Faz 6.1R) — mobilin 14 günlük modülü set eder.
     training_started_at: date | None = None
     training_completed_at: date | None = None
+    # İlk açılış akışı (2026-10) — İSTEĞE BAĞLI. Geldiyse bugünün (TR) tarihiyle
+    # bir ölçüm yazılır (bebek_olcumleri); bebek satırına yazılmaz. Aralık ve
+    # yuvarlama router'da (Türkçe 422 mesajı için): bkz. babies.olcum_dogrula.
+    boy_cm: float | None = None
+    kilo_kg: float | None = None
 
 
 class BabyUpdate(BaseModel):
@@ -56,6 +61,36 @@ class BabyUpdate(BaseModel):
     # Eğitim videolarının aşama rozeti. NULL'a çekilirse aşama yeniden PLANDAN
     # türetilir; dolu ise annenin beyanı hesabı ezer.
     mevcut_asama: AsamaKodu | None = None
+    # Onboarding bebek zaten varsa PATCH'liyor — ölçüm burada da yazılır. Aynı
+    # gün aynı değerler zaten kayıtlıysa yeni satır açılmaz.
+    boy_cm: float | None = None
+    kilo_kg: float | None = None
+
+
+class SonOlcum(BaseModel):
+    """Bebeğin en son ölçümü (en son tarih; eşitlikte en son yazılan)."""
+    olcum_tarihi: date
+    boy_cm: float | None
+    kilo_kg: float | None
+
+
+class OlcumIn(BaseModel):
+    """POST /babies/{id}/olcumler. Tarih verilmezse bugün (Türkiye günü)."""
+    olcum_tarihi: date | None = None
+    boy_cm: float | None = None
+    kilo_kg: float | None = None
+
+
+class OlcumResp(BaseModel):
+    id: uuid.UUID
+    olcum_tarihi: date
+    # float — Decimal JSON'da string'e dönerdi (Pydantic v2); mobil sayı bekliyor.
+    boy_cm: float | None
+    kilo_kg: float | None
+    kaynak: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class BabyResp(BaseModel):
@@ -78,5 +113,7 @@ class BabyResp(BaseModel):
     mevcut_asama: str | None = None
     created_at: datetime
     updated_at: datetime
+    # Ölçüm yoksa null (eski build'lerle oluşturulmuş bebekler).
+    son_olcum: SonOlcum | None = None
 
     model_config = {"from_attributes": True}

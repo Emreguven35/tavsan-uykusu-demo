@@ -4,6 +4,7 @@ autogenerate ve create_all için gerekli).
 """
 from api.models.user import User
 from api.models.baby import Baby
+from api.models.bebek_olcumu import BebekOlcumu
 from api.models.sleep_log import SleepLog
 from api.models.silinen_sleep_log import SilinenSleepLog
 from api.models.sleep_plan import SleepPlan
@@ -31,7 +32,7 @@ from api.models.consent import Consent
 from api.models.community_v2 import Bookmark, ToplulukBildirimi
 
 __all__ = [
-    "User", "Baby", "SleepLog", "SilinenSleepLog", "SleepPlan",
+    "User", "Baby", "BebekOlcumu", "SleepLog", "SilinenSleepLog", "SleepPlan",
     "Subscription", "ChatMessage", "VoiceProfile", "VoiceAudio",
     "RefreshToken", "PasswordResetToken",
     "PushToken", "SentNotification",
