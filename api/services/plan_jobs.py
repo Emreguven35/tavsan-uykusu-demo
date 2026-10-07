@@ -154,6 +154,62 @@ def create_job(user_id, baby_id) -> str:
     return job_id
 
 
+# Idempotency (2026-10): aynı bebek için kuyrukta/çalışan iş varken ikinci
+# POST /plans/generate yeni bir yapay zekâ işi BAŞLATMAZ, mevcut işi döner.
+# Bu kilit "ara + oluştur"u süreç içinde atomik yapar (_LOCK yeniden girişli
+# değil, create_job onu kendi alıyor).
+_OLUSTURMA_LOCK = threading.Lock()
+
+
+def _bayat_mi(olusma: datetime | None) -> bool:
+    if olusma is None:
+        return False
+    if olusma.tzinfo is None:
+        olusma = olusma.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - olusma).total_seconds() > BAYAT_IS_DK * 60
+
+
+def aktif_is(user_id, baby_id) -> str | None:
+    """Bebeğin kuyrukta ya da çalışan (bayat olmayan) işinin kimliği.
+
+    Önce bu süreç, sonra paylaşılan tablo (iş başka worker'da olabilir). Bayat
+    "processing" iş aktif SAYILMAZ: bakim onu zaten failed'a çekecek."""
+    with _LOCK:
+        aday = [(j["created_at"], k) for k, j in _JOBS.items()
+                if j["baby_id"] == str(baby_id) and j["user_id"] == str(user_id)
+                and j["status"] == STATUS_PROCESSING and not _bayat_mi(j["created_at"])]
+    if aday:
+        return max(aday)[1]
+    try:
+        from api.db.session import SessionLocal
+        from api.models import PlanUretimIsi
+        db = SessionLocal()
+        try:
+            esik = datetime.now(timezone.utc) - timedelta(minutes=BAYAT_IS_DK)
+            s_ = (db.query(PlanUretimIsi)
+                  .filter(PlanUretimIsi.baby_id == str(baby_id),
+                          PlanUretimIsi.user_id == str(user_id),
+                          PlanUretimIsi.status == STATUS_PROCESSING,
+                          PlanUretimIsi.created_at >= esik)
+                  .order_by(PlanUretimIsi.created_at.desc()).first())
+            return None if s_ is None else s_.id
+        finally:
+            db.close()
+    except Exception as e:                      # defter okunamadı → yeni iş açılır
+        logger.warning("Aktif plan işi aranamadı (baby=%s): %s", baby_id, e)
+        return None
+
+
+def is_al_ya_da_olustur(user_id, baby_id) -> tuple[str, bool]:
+    """(job_id, yeni_mi). Aktif iş varsa onu döner, yoksa yeni iş kaydeder.
+    Yeni işi havuza vermek (submit) çağıranın işidir."""
+    with _OLUSTURMA_LOCK:
+        mevcut = aktif_is(user_id, baby_id)
+        if mevcut is not None:
+            return mevcut, False
+        return create_job(user_id, baby_id), True
+
+
 def _kuyruk_sirasi(job_id: str) -> int:
     """Kaç iş bu işten ÖNCE slot bekliyor + 1. Çalışmaya başlamışsa 0.
 

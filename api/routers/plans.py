@@ -132,10 +132,18 @@ def generate_plan(req: PlanGenerateReq,
     # Async: iş kaydet + ADANMIŞ havuzda üret (Faz O2 — uvicorn threadpool'u
     # değil; havuz doluysa iş kuyrukta bekler, istemci 202'yi yine hemen alır).
     # baby.id'yi geçiriyoruz (Session yanıttan sonra kapanacak).
-    job_id = plan_jobs.create_job(user.id, baby.id)
-    plan_jobs.submit(job_id, baby.id, req.profile_overrides, req.dogum_haftasi)
-    sira = plan_jobs.get_job(job_id, user.id)["queue_position"]
-    logger.info("Plan job kuyruğa alındı: job=%s baby=%s sıra=%s", job_id, baby.id, sira)
+    # Idempotency (2026-10): bu bebeğin kuyrukta/çalışan işi varsa YENİ yapay
+    # zekâ işi başlatılmaz, mevcut iş aynı 202 biçimiyle döner (çift dokunma,
+    # mobilin yeniden denemesi, onboarding + Plan sekmesi aynı anda). İş yoksa
+    # ya da bittiyse (done/failed) davranış eskisi gibi.
+    job_id, yeni = plan_jobs.is_al_ya_da_olustur(user.id, baby.id)
+    if yeni:
+        plan_jobs.submit(job_id, baby.id, req.profile_overrides, req.dogum_haftasi)
+    is_ = plan_jobs.get_job(job_id, user.id) or {}
+    sira = is_.get("queue_position", 0)
+    logger.info("Plan job %s: job=%s baby=%s sıra=%s",
+                "kuyruğa alındı" if yeni else "zaten sürüyor (mevcut iş döndü)",
+                job_id, baby.id, sira)
     return PlanJobResp(job_id=job_id, status=plan_jobs.STATUS_PROCESSING,
                        queue_position=sira)
 
