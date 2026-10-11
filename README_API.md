@@ -785,6 +785,16 @@ kimliği bilmez. Anonim içerikten engelde ad "Anonim anne", listede
   profili ve ElevenLabs'te kalan klon silinir; aylık kayıt hakkı değişmez
   (`users.ses_son_kayit_at`). Paket hazırlanırken 409. İdempotent.
 
+### Bitişi bilinmeyen kayıt (v2.8.2)
+
+Sunucunun kapattığı kayıtta (`kapanis_kaynagi` = `k16_1` ya da `bakim`) bitiş
+bir tahmindir, uyanış değil. Kayıt başlangıcına göre sınıflanır ve bağlanır;
+**sabah uyanışı adayı olmaz**, gece/gündüz toplamlarına (timeline `gece_dk` /
+`gunduz_dk`, weekly-summary `sleep_hours`, plan özeti) **girmez**. Timeline'da
+oturum durur: `sure_dk: null`, `otomatik_kapatildi: true`. Aynı gecenin gerçek
+kaydı varsa bitişi bilinmeyen kayıt `yok_sayilan`a `bitis_bilinmiyor` koduyla
+düşer. `k13_3` (bitiş annenin kapsayan kaydından) eskisi gibi sayılır.
+
 ### Kayıtta KVKK onayları (v2.7.8)
 
 Mobil `POST /auth/register` gövdesindeki mevcut `consents` dizisini kullanır;

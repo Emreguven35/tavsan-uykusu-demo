@@ -678,7 +678,16 @@ def _log_alanlari(lg: Any, tz_offset_min: int) -> dict | None:
         # K12.1 — bitiş başlangıçtan ÖNCE mi? `sure_dk` 0'a kırpıldığı için bu
         # bilgi orada kayboluyor; "sıfır süreli" ile "ters kayıt" ayrı sebepler.
         "ters_mi": (ended is not None and ended < started),
+        # Sunucunun KAPATTIĞI kayıt (K16.1 / bakım): bitiş bir tahmindir.
+        "_bitis_bilinmiyor": (ended is not None and ended > started
+                              and getattr(lg, "kapanis_kaynagi", None)
+                              in TAHMINI_BITIS_KAYNAKLARI),
     }
+
+
+# kapanis_kaynagi değerleri arasında bitişi TAHMİN olanlar (2026-10-12). K13.3
+# HARİÇ: onun bitişi annenin girdiği kapsayan manuel kaydın bitişidir.
+TAHMINI_BITIS_KAYNAKLARI = ("k16_1", "bakim")
 
 
 # Bir kaydın "uyku" sayıldığı tipler. `sekerleme` eski istemcilerin gönderdiği
@@ -803,9 +812,10 @@ def _cakisma_kazanani(a: dict, b: dict) -> tuple[dict, dict]:
 
     Kapalı kayıt açık olana TERCİH EDİLİR (açık kayıt yalnız "şu an sürüyor"
     demektir, K13.2); ikisi de kapalıysa UZUN olan alınır — kısa olan genellikle
-    sayacın erken durdurulup yeniden başlatılmış hâlidir."""
-    a_acik = a.get("bit_dk_lin") is None
-    b_acik = b.get("bit_dk_lin") is None
+    sayacın erken durdurulup yeniden başlatılmış hâlidir. Bitişi BİLİNMEYEN
+    kayıt (sunucu kapattı) bu karşılaştırmada açık sayılır."""
+    a_acik = a.get("bit_dk_lin") is None or bool(a.get("_bitis_bilinmiyor"))
+    b_acik = b.get("bit_dk_lin") is None or bool(b.get("_bitis_bilinmiyor"))
     if a_acik != b_acik:
         return (b, a) if a_acik else (a, b)
     return (a, b) if (a["sure_dk"] or 0) >= (b["sure_dk"] or 0) else (b, a)
@@ -944,6 +954,22 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
             out["atlananlar"].append(k)
             continue
 
+        # --- Bitişi BİLİNMEYEN kayıt (sunucu kapattı, 2026-10-12) -----------
+        # Bitiş "yeni kayıt açıldı" ya da bakım anıdır, uyanış değil: eskiden
+        # 21:40'ta kapatılan sayaç o günün "sabah uyanışı" oluyordu. Kayıt
+        # BAŞLANGICINA göre sınıflanır ve bağlanır (açık kayıt gibi); sabah
+        # uyanışı adayı değildir, gece/gündüz toplamlarına girmez.
+        if k.get("_bitis_bilinmiyor"):
+            if uyku_tipi_belirle(dict(k, bit_dk=None, bit_gun=None, sure_dk=None),
+                                 bant) == GECE_UYKUSU:
+                hedef = (k["bas_gun"] + timedelta(days=1)
+                         if k["bas_dk"] >= GUNDUZ_PENCERE_BIT else k["bas_gun"])
+                if hedef == gun:
+                    out["gece_uykulari"].append(dict(k))
+            elif k["bas_gun"] == gun:
+                out["gunduz_uykulari"].append(dict(k))
+            continue
+
         # --- K21.2 — sabah biten 16 saat üstü kayıt (sınıfından BAĞIMSIZ) ----
         # Dün 14:20'de başlayan kayıt saat kuralına göre "gündüz" sınıfına
         # düşer ve başladığı güne 18 saatlik şekerleme olarak yazılırdı. Bu
@@ -1009,6 +1035,14 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
             _yok_say(out, g, "asiri_uzun",
                      f"{g['sure_dk'] // 60} saat sürmüş görünüyor; sayaç açık "
                      f"kalmış olabilir, aynı gecenin diğer kaydı kullanıldı")
+
+    # Gerçek bir gece kaydı varsa bitişi bilinmeyen gece kaydı gereksizdir.
+    if any(not g.get("_asiri_uzun") and not g.get("_bitis_bilinmiyor")
+           for g in out["gece_uykulari"]):
+        for g in [g for g in out["gece_uykulari"] if g.get("_bitis_bilinmiyor")]:
+            out["gece_uykulari"].remove(g)
+            _yok_say(out, g, "bitis_bilinmiyor",
+                     "bitişi bilinmiyor; aynı gecenin diğer kaydı kullanıldı")
 
     # --- K13 — çakışanları tekilleştir (yuvalara girmeden ÖNCE) -------------
     out["gunduz_uykulari"] = _gunduz_cakismalarini_birlestir(
@@ -1135,7 +1169,7 @@ def _gece_icindekileri_ayikla(out: dict, gun: date) -> list[dict]:
     geceler = []
     for g in out["gece_uykulari"]:
         bit = g.get("bit_dk_lin")
-        if bit is None:
+        if bit is None or g.get("_bitis_bilinmiyor"):
             continue                      # açık gece uykusu: kapsama belirsiz
         # `bas_dk`/`bit_dk_lin` KAYDIN BAŞLADIĞI günün eksenindedir. Bugünün
         # eksenine çekmek için İKİSİ BİRDEN kaydırılır — yalnız birini
@@ -1347,6 +1381,8 @@ def sabah_uyanisi(kayitlar: dict, hedef_minute: int) -> dict:
     adaylar: list[int] = []
     acik_gece = False
     for g in kayitlar["gece_uykulari"]:
+        if g.get("_bitis_bilinmiyor"):
+            continue                          # bitişi bilinmiyor: uyanış değil
         if g["bit_dk"] is not None:
             adaylar.append(g["bit_dk"])       # K12.3 — önce gece uykusunun bitişi
         else:
@@ -1448,7 +1484,7 @@ def _gece_uykusu_ozeti(kayitlar: dict, kapanis_dk: int | None) -> dict | None:
     brut = 0
     acik = False
     for g in geceler:
-        if g.get("_asiri_uzun"):
+        if g.get("_asiri_uzun") or g.get("_bitis_bilinmiyor"):
             continue                      # K21.2 — süresi gece uykusu sayılmaz
         bit = g.get("bit_dk_lin")
         if bit is not None:
@@ -2330,6 +2366,8 @@ def summarize_logs(logs: Iterable[Any], today: date | None = None,
         # sabah uyanışı olurdu) ne gündüz uykusu (20 saatlik "şekerleme").
         if typ in UYKU_TIPLERI and asiri_uzun_gece_mi(k):
             continue
+        if typ in UYKU_TIPLERI and k.get("_bitis_bilinmiyor"):
+            continue                      # bitişi bilinmiyor: süre/uyanış yok
         # K21.2 — sabah biten 16 saat üstü kayıt: yalnız bitişi (uyanış) sayılır.
         if typ in UYKU_TIPLERI and asiri_uzun_sabah_mi(k):
             if start <= k["bit_gun"] <= today:

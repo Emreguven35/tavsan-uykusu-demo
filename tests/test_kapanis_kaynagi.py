@@ -23,6 +23,10 @@ Kapsam:
   K9  Bakım betiği (acik_sayac_kapat --uygula) 'bakim' yazar; koruma ve
       kapatilanlar bu kaynakta da çalışır
   K10 Timeline: K16.1 kapanışı otomatik_kapatildi=true
+  K11 Bitiş bilinmiyor (2026-10-12): k16_1/bakim kaydının bitişi sabah uyanışı
+      değil, gece/gündüz toplamlarına (timeline, weekly-summary) girmez;
+      sure_dk=null; aynı gecenin gerçek kaydı varsa o kullanılır; K13.3 ve
+      kaynaksız kayıt eskisi gibi sayılır
 
 Çalıştırma: python tests/test_kapanis_kaynagi.py
 """
@@ -409,6 +413,82 @@ gonder(kayit(B10, "k10-b", an(2, "13:00"), an(2, "14:00")))
 _ot = {o["client_id"]: o["otomatik_kapatildi"] for o in timeline(B10)}
 check("K10) K16.1 kapanışı true, kullanıcının kapattığı false",
       _ot.get("k10-a") is True and _ot.get("k10-b") is False, str(_ot))
+
+
+# =============================================================================
+# K11 — bitiş bilinmiyor: sunucunun kapattığı kayıt uyanış/süre üretmez
+# =============================================================================
+def kaynak_yaz(cid, kaynak):
+    db = SessionLocal()
+    try:
+        db.query(SleepLog).filter(SleepLog.client_id == cid).update(
+            {"kapanis_kaynagi": kaynak})
+        db.commit()
+    finally:
+        db.close()
+
+
+def tl_gun(bid, gun_once) -> dict:
+    r = client.get("/api/v1/logs/timeline", headers=H, params={"baby_id": bid, "days": 7})
+    assert r.status_code == 200, r.text
+    hedef = str(BUGUN - timedelta(days=gun_once))
+    return next(g for g in r.json()["gunler"] if g["tarih"] == hedef)
+
+
+def haftalik_dk(bid, gun_once) -> int:
+    r = client.get("/api/v1/logs/weekly-summary", headers=H, params={"baby_id": bid})
+    assert r.status_code == 200, r.text
+    hedef = str(BUGUN - timedelta(days=gun_once))
+    g = next(d for d in r.json()["days"] if d["date"] == hedef)
+    return round(g["sleep_hours"] * 60)
+
+
+# a) 20:30 gece kaydı bakımda 21:40'ta kapatılmış (prod: Bebek 14, 22, 23):
+#    o gün 21:40 "sabah uyanışı" olmamalı.
+B11 = bebek("Kapanis11")
+gonder(kayit(B11, "k11-gece", an(2, "20:30"), an(2, "21:40"), tip="sleep"))
+_once = tl_gun(B11, 2)
+kaynak_yaz("k11-gece", BAKIM)
+_sonra = tl_gun(B11, 2)
+check("K11a) (hazırlık) kaynaksız kayıtta bitiş sabah uyanışı sayılıyordu",
+      (_once["sabah_uyanisi"] or {}).get("saat") == "21:40", str(_once["sabah_uyanisi"]))
+check("K11a) bakım kapanışında sabah uyanışı 21:40 DEĞİL, gece_dk 0",
+      (_sonra["sabah_uyanisi"] or {}).get("saat") != "21:40" and _sonra["gece_dk"] == 0,
+      str((_sonra["sabah_uyanisi"], _sonra["gece_dk"])))
+# Bitişi bilinmeyen 20:30 kaydı açık bir gece uykusu gibi ERTESİ güne bağlanır.
+_ot = [o for o in tl_gun(B11, 1)["oturumlar"] if o["client_id"] == "k11-gece"]
+check("K11a) oturum ertesi günde duruyor: sure_dk null, otomatik_kapatildi true",
+      len(_ot) == 1 and _ot[0]["sure_dk"] is None and _ot[0]["otomatik_kapatildi"] is True,
+      str(_ot))
+
+# b) Gündüz uykusu K16.1 ile kapanmış: toplamlara girmez (timeline + haftalık).
+B11b = bebek("Kapanis11b")
+gonder(kayit(B11b, "k11b-nap", an(2, "10:00"), an(2, "11:30")))
+gonder(kayit(B11b, "k11b-nap2", an(2, "14:00"), an(2, "15:00")))
+_g_once, _h_once = tl_gun(B11b, 2)["gunduz_dk"], haftalik_dk(B11b, 2)
+kaynak_yaz("k11b-nap", K16_1)
+_g_sonra, _h_sonra = tl_gun(B11b, 2)["gunduz_dk"], haftalik_dk(B11b, 2)
+check("K11b) K16.1 gündüz uykusu timeline gunduz_dk'ya girmez (150 → 60)",
+      _g_once == 150 and _g_sonra == 60, f"{_g_once} → {_g_sonra}")
+check("K11b) weekly-summary aynı (150 → 60)",
+      _h_once == 150 and _h_sonra == 60, f"{_h_once} → {_h_sonra}")
+
+# c) K13.3: bitiş annenin kaydından → eskisi gibi sayılır.
+kaynak_yaz("k11b-nap", K13_3)
+check("K11c) K13.3 kapanışı sayılır (gunduz_dk 150)",
+      tl_gun(B11b, 2)["gunduz_dk"] == 150, str(tl_gun(B11b, 2)["gunduz_dk"]))
+
+# d) Aynı gece gerçek kayıt + bitişi bilinmeyen kayıt: gerçek olan kullanılır.
+B11d = bebek("Kapanis11d")
+gonder(kayit(B11d, "k11d-oto", an(3, "20:00"), an(3, "22:30"), tip="sleep"))
+gonder(kayit(B11d, "k11d-gercek", an(3, "21:00"), an(2, "06:45"), tip="sleep"))
+kaynak_yaz("k11d-oto", K16_1)
+_d = tl_gun(B11d, 2)
+check("K11d) sabah uyanışı gerçek kayıttan (06:45), bilinmeyen yok sayıldı",
+      (_d["sabah_uyanisi"] or {}).get("saat") == "06:45"
+      and any(y["kod"] == "bitis_bilinmiyor" for y in _d["yok_sayilan"])
+      and _d["gece_dk"] == 585,
+      str((_d["sabah_uyanisi"], _d["gece_dk"], _d["yok_sayilan"])))
 
 
 # =============================================================================
