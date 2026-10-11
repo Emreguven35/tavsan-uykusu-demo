@@ -26,7 +26,7 @@ from api.schemas.plan import (
     PlanAdaptResp, PlanGenerateReq, PlanJobResp, PlanJobStatusResp, PlanResp,
     RegresyonCevapReq, RegresyonCevapResp,
 )
-from api.services import plan_adapter, plan_jobs, plan_service
+from api.services import hazirlik, plan_adapter, plan_jobs, plan_service
 from api.zaman import bugun_tr, tr_gunu
 
 logger = logging.getLogger("tavsan.plans")
@@ -282,7 +282,19 @@ def get_today_plan(baby_id: uuid.UUID = Query(...), db: Session = Depends(get_db
             "detail": detay,
             "plan_isi": ({"job_id": is_["job_id"], "status": is_["status"]}
                          if is_ else None)})
-    return _plan_yaniti(db, user, plan, referans=bugun_tr())
+    resp = _plan_yaniti(db, user, plan, referans=bugun_tr())
+    if hazirlik.acik_mi() and resp is not None:
+        # "Eğitime başlamadan önce" kartı (HAZIRLIK_KURALLARI): her istekte
+        # hesaplanır, saklanmaz. Başlamış bebekte ve yenidoğanda null. Kart bir
+        # SÜSLEMEDİR: hesaplanamazsa null döner, plan düşmez.
+        resp.content = dict(resp.content or {})
+        try:
+            resp.content["egitim_oncesi"] = hazirlik.egitim_oncesi_karti(
+                baby, resp.content, bugun_tr())
+        except Exception:
+            logger.exception("Eğitim öncesi kartı hesaplanamadı (baby=%s)", baby.id)
+            resp.content["egitim_oncesi"] = None
+    return resp
 
 
 @router.get("", response_model=list[PlanResp])

@@ -785,6 +785,38 @@ kimliği bilmez. Anonim içerikten engelde ad "Anonim anne", listede
   profili ve ElevenLabs'te kalan klon silinir; aylık kayıt hakkı değişmez
   (`users.ses_son_kayit_at`). Paket hazırlanırken 409. İdempotent.
 
+### Hazırlık kuralları — "Eğitime başlamadan önce" (bayrak: HAZIRLIK_KURALLARI)
+
+Kapalı gelir; kapalıyken hiçbir yanıt değişmez. Açıkken:
+- Yeni üretilen planın (yaş bandı geçişiyle yeniden üretilen dahil, yenidoğan
+  hariç) ön hazırlık listesi İlayda'nın kurallarından kurulur. Mevcut planlar
+  yeniden üretilmez.
+- `GET /plans/today` → `content.egitim_oncesi`, her istekte hesaplanır:
+
+```json
+"egitim_oncesi": {
+  "egitim_baslangic": "2026-11-11",
+  "adimlar": [{"kimlik": "beslenme_1_saat",
+               "baslik": "Beslenme uykudan en az 1 saat önce bitsin",
+               "aciklama": "Uykudan önceki son beslenme en geç 1 saat önce bitmeli; bu kural her durumda geçerli."},
+              {"kimlik": "sallamayi_birak", "baslik": "Sallamayı bırak", "aciklama": "…"}],
+  "uyarilar": [{"kimlik": "yatakta_pelus_battaniye",
+                "baslik": "Yatakta peluş ve battaniye olmasın",
+                "aciklama": "12 aydan küçük bebeklerde güvenlik için. Mutlaka uyku tulumu kullan."}]
+}
+```
+  Eğitimi başlamış bebekte (`training_started_at` ≤ bugün) ve yenidoğan
+  planında `null`. `egitim_baslangic`: ileri tarihli `training_started_at`,
+  yoksa bekleme planının tahmini tarihi, yoksa `null`. Hepsi öneridir; eğitim
+  başlangıcını değiştirmez.
+- Kimlikler (sabit): `beslenme_1_saat`, `emzirerek_uyutmayi_birak`,
+  `sallamayi_birak`, `kucaktan_yataga`, `pusetten_kucaga_yataga`,
+  `salincaktan_yataga`, `ortak_yataktan_besige`, `emzigi_birak` (< 8 ay),
+  `emzik_kullanimi` (≥ 8 ay), `sesi_kademeli_kapat`, `odayi_karart` (d:0; d
+  yoksa aynı kimlik, koşullu metin); uyarı `yatakta_pelus_battaniye` (< 12 ay).
+- Mobil biçimi: ses `w:1`/`w:0` (eski veride `a:white_noise` ya da `w:1` →
+  kullanıyor); oda `d:1`/`d:0` (eski veride `d` yok → cevapsız).
+
 ### Bitişi bilinmeyen kayıt (v2.8.2)
 
 Sunucunun kapattığı kayıtta (`kapanis_kaynagi` = `k16_1` ya da `bakim`) bitiş

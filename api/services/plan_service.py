@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from api.db import upsert
 from api.models import Baby, SleepLog, SleepPlan, User
+from api.services import hazirlik
 from api.services import plan_adapter
 from api.services import takma_ad
 from api.services import usage
@@ -612,6 +613,14 @@ def generate_content(baby: Baby, req_overrides: dict | None,
     # eğitim tekniğinin sızması yapısal olarak imkânsız.
     if yenidogan.yenidogan_mi(param["yas"]["duzeltilmis_ay"]):
         return _yenidogan_content(baby, param, dogum_haftasi)
+
+    # İlayda'nın hazırlık kuralları (HAZIRLIK_KURALLARI, 2026-10-12): ön hazırlık
+    # listesi mobil KODLARINDAN kurulur (eski motor Türkçe anahtar kelime arıyordu,
+    # hiçbir bebekte tetiklenmiyordu). Yalnız listeyi değiştirir; çizelge, uyarılar
+    # ve eğitim başlangıcı aynı. Kapalıyken eski motorunki (bkz. hazirlik.py).
+    if hazirlik.acik_mi():
+        param["on_hazirlik"] = hazirlik.on_hazirlik_listesi(
+            baby, param["yas"]["duzeltilmis_ay"])
 
     used_claude = bool(os.getenv("ANTHROPIC_API_KEY")) and plan_generator.HAS_ANTHROPIC
     tip = param["plan_secimi"]["tip"]
