@@ -133,17 +133,22 @@ check("D8) Tek eksik alan → yalnız o listelenir",
 # =============================================================================
 # F — Plan geri bildirimi
 # =============================================================================
+# Geri bildirim anı SAATTEN BAĞIMSIZ: dün 12:00 TR (hep geçmişte, gün ortası).
+# Eskiden "şimdiden 2 saat önce"ydi; TR 00:00–02:00 arası koşuda an bir önceki
+# güne düşüyor, eğitim günü 5 yerine 4 çıkıyordu (F7). Eğitim başlangıcı ve
+# günün kaydı bu güne göre kurulur.
+AN_GUN = BUGUN - timedelta(days=1)
+_an = datetime.fromisoformat(yerel(AN_GUN, 12 * 60))
 H, BID = hesap("anne@gercek.com")
 client.patch(f"/api/v1/babies/{BID}", headers=H,
-             json={"training_started_at": (BUGUN - timedelta(days=4)).isoformat()})
+             json={"training_started_at": (AN_GUN - timedelta(days=4)).isoformat()})
 _gen = client.post("/api/v1/plans/generate?sync=true", headers=H, json={"baby_id": BID})
 check("F0) Tam profille plan üretildi", _gen.status_code == 201, _gen.text[:120])
 client.post("/api/v1/logs/batch", headers=H, json={"logs": [{
     "baby_id": BID, "type": "sleep", "client_id": "gece-f",
-    "started_at": yerel(BUGUN - timedelta(days=1), 20 * 60),
-    "ended_at": yerel(BUGUN, 7 * 60 + 10)}]})
+    "started_at": yerel(AN_GUN - timedelta(days=1), 20 * 60),
+    "ended_at": yerel(AN_GUN, 7 * 60 + 10)}]})
 
-_an = SIMDI - timedelta(hours=2)
 govde = {"baby_id": BID, "block_key": "nap_1", "block_time": "10:30",
          "secenek": "cok_erken", "metin": "Zeynep bu saatte hiç uyumuyor",
          "client_id": "fb-1", "created_at": _an.isoformat()}
