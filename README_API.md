@@ -795,6 +795,16 @@ oturum durur: `sure_dk: null`, `otomatik_kapatildi: true`. Aynı gecenin gerçek
 kaydı varsa bitişi bilinmeyen kayıt `yok_sayilan`a `bitis_bilinmiyor` koduyla
 düşer. `k13_3` (bitiş annenin kapsayan kaydından) eskisi gibi sayılır.
 
+### Gece işi: eski açık kayıtlar kapanır (v2.8.2)
+
+Gece temizliği (03:30 UTC) başlangıcının üzerinden 24 saat geçmiş AÇIK uyku
+kayıtlarını kapatır (`api/services/acik_kayit.py`, `scripts/acik_sayac_kapat.py`
+ile aynı kural): kapsayan manuel kaydın bitişi, yoksa sonraki kaydın başlangıcı /
+bant süresi / +16 saat'in en erkeni. `kapanis_kaynagi='bakim'` (bitiş
+bilinmiyor), not "otomatik kapatıldı", eski hâl `/data/arsiv`. Mobil kaydı
+bitişi boş yeniden gönderirse kayıt açılmaz ve batch yanıtının
+`kapatilanlar`ında `kaynak: "bakim"` ile döner.
+
 ### Kayıtta KVKK onayları (v2.7.8)
 
 Mobil `POST /auth/register` gövdesindeki mevcut `consents` dizisini kullanır;

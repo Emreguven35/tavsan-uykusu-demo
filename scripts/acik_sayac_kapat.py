@@ -7,8 +7,9 @@ sürüyor" sanılıyor. 2026-09-21 taramasında son 7 günde 19 bebeğin 13'ünd
 toplam 107 adet 16 saatten uzun süredir açık kayıt vardı.
 
 Bundan SONRASI için akış düzeltildi (K13.3): POST /logs/batch, gelen manuel
-kaydın KAPSADIĞI açık sayacı otomatik kapatıyor. Bu betik yalnız GEÇMİŞİ
-temizler; kalıcı bir iş değildir.
+kaydın KAPSADIĞI açık sayacı otomatik kapatıyor. 2026-10-12'den beri gece
+temizliği (03:30 UTC) 24 saatten eski açık kayıtları da aynı kuralla kapatıyor;
+bu betik elle tarama ve onarım içindir.
 
 KURAL:
   1. Açık kaydı KAPSAYAN kapalı bir manuel kayıt varsa (started_at <= açık
@@ -68,18 +69,15 @@ from dotenv import load_dotenv                              # noqa: E402
 load_dotenv(ROOT / ".env")
 
 from api.db import SessionLocal                             # noqa: E402
-from api.models import Baby, SleepLog                       # noqa: E402
-from api.services.plan_service import uyku_sureleri         # noqa: E402
+from api.models import SleepLog                             # noqa: E402
+from api.services.acik_kayit import (                       # noqa: E402
+    KAPANIS_KAYNAGI, KAPATMA_NOTU, TERK_SAAT, TZ_OFFSET_MIN, UYKU_TIPLERI,
+    _adaylar, _arsivle, _bant_sureleri, _not_ekle, _tahmini_kapanis, _utc,
+)
 
-UYKU_TIPLERI = ("sleep", "nap")
-KAPATMA_NOTU = "otomatik kapatıldı"
-# v1.7 (2026-10-07): kapatılan/onarılan kayda sleep_logs.kapanis_kaynagi yazılır.
-# Dolu kaynak, mobilin bitişi boş yeniden gönderiminin kaydı AÇMASINI engeller
-# (logs._kaydi_guncelle) ve batch yanıtında `kapatilanlar`a girer.
-KAPANIS_KAYNAGI = "bakim"
-TERK_SAAT = 16                 # mutlak tavan: bundan uzun açık kayıt "terk edilmiş"
-ASGARI_DK = 60                 # kapanış başlangıcın gerisine düşerse
-TZ_OFFSET_MIN = 180            # UTC+3 — motorla aynı
+# Kural ve kapanış hesabı api/services/acik_kayit.py'de (2026-10-12): gece
+# temizliği (saklama.gece_temizligi) 24 saatten eski açık kayıtları aynı
+# kuralla her gece kapatıyor. Bu betik elle tarama/onarım için duruyor.
 # --duzelt-gunduz-uzun: bu betiğin ÖNCEKİ sürümlerinin çalıştığı pencere.
 # v2.2'de gündüz başlayan `sleep` kayıtlarına GECE tavanı uygulanıyordu; kapanış
 # "sonraki kaydın başlangıcına" kadar uzayıp arka arkaya zincirlenmiş dev
@@ -91,98 +89,6 @@ ONARIM_PENCERESI = ("2026-09-21T16:45:00+00:00", "2026-09-21T17:30:00+00:00")
 # `sleep` kaydı gece uykusudur; arası gündüz uykusudur.
 GECE_BASLANGIC_DK = 18 * 60    # 18:00
 GUNDUZ_BASLANGIC_DK = 6 * 60   # 06:00
-
-
-def _bant_sureleri(db, baby_id, _onbellek: dict = {}) -> tuple[int, int]:
-    """(planlanan gündüz uykusu dk, gece uykusu ÜST sınırı dk).
-
-    Hesabın TEK kaynağı plan_service.uyku_sureleri — batch (K16.1) ve motor
-    (K17) da aynı fonksiyonu kullanıyor. Burada yalnız bebek başına önbellek
-    tutulur (betik yüzlerce satır tarıyor)."""
-    if baby_id not in _onbellek:
-        _onbellek[baby_id] = uyku_sureleri(db.get(Baby, baby_id))
-    return _onbellek[baby_id]
-
-
-def _sonraki_kayit_bas(kayitlar: list, bas: datetime) -> datetime | None:
-    """Aynı bebeğin bu andan SONRA başlayan ilk kaydının başlangıcı.
-
-    Yeni bir kayıt açılmışsa bebek o an uyanıktır — açık sayaç en geç o zaman
-    bitmiştir. Elimizdeki en güçlü kanıt bu."""
-    sonrakiler = [_utc(r.started_at) for r in kayitlar
-                  if _utc(r.started_at) > bas]
-    return min(sonrakiler) if sonrakiler else None
-
-
-def _utc(t: datetime | None) -> datetime | None:
-    if t is None:
-        return None
-    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
-
-
-def _adaylar(db, gun: int):
-    """(açık kayıt, kapanış, gerekçe) üçlüleri."""
-    simdi = datetime.now(timezone.utc)
-    sinir = simdi - timedelta(hours=TERK_SAAT)
-    basla = simdi - timedelta(days=gun)
-
-    acik = (db.query(SleepLog)
-            .filter(SleepLog.type.in_(UYKU_TIPLERI),
-                    SleepLog.ended_at.is_(None),
-                    SleepLog.started_at >= basla)
-            .order_by(SleepLog.baby_id, SleepLog.started_at)
-            .all())
-    acik = [a for a in acik if _utc(a.started_at) < sinir]
-    if not acik:
-        return []
-
-    kapali: dict = {}
-    tum: dict = {}
-    for r in (db.query(SleepLog)
-              .filter(SleepLog.started_at >= basla - timedelta(days=1))
-              .all()):
-        tum.setdefault(r.baby_id, []).append(r)
-        if r.type in UYKU_TIPLERI and r.ended_at is not None:
-            kapali.setdefault(r.baby_id, []).append(r)
-
-    out = []
-    for a in acik:
-        bas = _utc(a.started_at)
-        ortusen = [_utc(r.ended_at) for r in kapali.get(a.baby_id, [])
-                   if _utc(r.started_at) <= bas <= _utc(r.ended_at)
-                   and _utc(r.ended_at) > bas]
-        if ortusen:
-            out.append((a, min(ortusen), "kapsayan manuel kayıt"))
-            continue
-        out.append((a,) + _tahmini_kapanis(db, a, bas, tum.get(a.baby_id, [])))
-    return out
-
-
-def _tahmini_kapanis(db, kayit, bas: datetime, bebek_kayitlari: list):
-    """Kapsayan kayıt yokken kapanış anı ve gerekçesi.
-
-    `sleep` tipi TEK BAŞINA "gece uykusu" demek DEĞİLDİR: mobil gündüz
-    uykularını da `sleep` olarak gönderebiliyor. Gece uykusu ölçütü motorunkiyle
-    (plan_adapter._gece_uykusu_mu) aynı olmalı — yerel saate bakılır. Aksi hâlde
-    sabah 09:50'de başlayan bir gündüz uykusuna 11 saatlik gece tavanı
-    uygulanıyor ve kayıt "sonraki kaydın başlangıcına" kadar uzuyordu."""
-    nap_dk, gece_dk = _bant_sureleri(db, kayit.baby_id)
-    # v1.6: sınıf MOTORUN K19 kuralıyla (tipten bağımsız, gece 19:00+). Eski
-    # yerel kural yalnız `sleep`e bakıyordu: 00:15'te açılmış `nap` 60 dk'lık
-    # gündüz uykusu diye kapanıyordu.
-    from api.services.plan_adapter import GECE_UYKUSU, uyku_sinifi_ham
-    gece_mi = uyku_sinifi_ham(bas, None, TZ_OFFSET_MIN) == GECE_UYKUSU
-    sure_dk = gece_dk if gece_mi else nap_dk
-    adaylar = [(bas + timedelta(minutes=sure_dk),
-                f"bant süresi +{sure_dk} dk"),
-               (bas + timedelta(hours=TERK_SAAT), f"tavan +{TERK_SAAT} saat")]
-    sonraki = _sonraki_kayit_bas(bebek_kayitlari, bas)
-    if sonraki is not None:
-        adaylar.append((sonraki, "sonraki kaydın başlangıcı"))
-    kapanis, gerekce = min(adaylar, key=lambda x: x[0])
-    if kapanis <= bas:
-        return bas + timedelta(minutes=ASGARI_DK), f"asgari +{ASGARI_DK} dk"
-    return kapanis, gerekce
 
 
 def main():
@@ -249,29 +155,6 @@ def main():
         print(f"Kalan {TERK_SAAT} saatten uzun açık uyku kaydı: {len(kalan)}")
     finally:
         db.close()
-
-
-def _not_ekle(row, metin: str) -> None:
-    """notes alanına not EKLE (annenin notunu ezme) — logs._not_ekle ile aynı."""
-    mevcut = (row.notes or "").strip()
-    if metin in mevcut:
-        return
-    row.notes = f"{mevcut} | {metin}".strip(" |") if mevcut else metin
-
-
-def _arsivle(satirlar: list) -> Path:
-    """Değişiklikten ÖNCE satırların tam hâlini JSON'a yaz (geri alınabilir)."""
-    from api.services.denetim import denetim_koku
-    from api.services.kvkk import _satir
-    klasor = denetim_koku().parent / "arsiv"
-    klasor.mkdir(parents=True, exist_ok=True)
-    zaman = datetime.now(timezone.utc)
-    yol = klasor / f"acik-sayac-kapat-{zaman:%Y%m%dT%H%M%S}.json"
-    yol.write_text(json.dumps({"zaman": zaman.isoformat(),
-                               "sebep": f"{TERK_SAAT} saatten eski açık uyku sayacı kapatıldı",
-                               "kayitlar": [_satir(r) for r in satirlar]},
-                              ensure_ascii=False, indent=1, default=str), "utf-8")
-    return yol
 
 
 def _duzelt_gunduz_uzun(db, uygula: bool) -> None:

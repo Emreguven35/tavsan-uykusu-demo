@@ -15,6 +15,11 @@ Kapsam:
   S8  Mailer: alıcı maskeli; console modunda içerik/bağlantı loglanmaz
   S9  Cevap önbelleği isabetinde soru metni loglanmaz
   S10 Topluluk: is_mine (anonim kendi gönderisinde de true), başkasında false
+  S11 Gece temizliği 24 saatten eski AÇIK uyku kayıtlarını kapatır (2026-10-12):
+      kaynak 'bakim' + not + arşiv; kapanış = sonraki kaydın başlangıcı ya da
+      bant süresi; 24 saatten yeni açık kayıt ve beslenme kaydı açık kalır;
+      kuru koşu yazmaz; bitişi boş yeniden gönderim kaydı açmaz ve
+      kapatilanlar'da döner; timeline'da süre yok, otomatik_kapatildi true
 
 Çalıştırma: python tests/test_saklama.py
 """
@@ -359,6 +364,90 @@ check("S10c) Başkasının konusunda is_mine=false",
 _tid = _ben.get(_t, {}).get("id")
 _d = client.get(f"/api/v1/community/threads/{_tid}", headers=HB).json() if _tid else {}
 check("S10d) Konu detayında is_mine", _d.get("is_mine") is True, str(_d)[:120])
+
+
+# =============================================================================
+# S11 — gece temizliği: 24 saatten eski açık uyku kayıtları kapanır
+# =============================================================================
+from api.models import SleepLog                             # noqa: E402
+from api.services import acik_kayit                         # noqa: E402
+
+
+def bebek_ekle(h, ad):
+    return client.post("/api/v1/babies", headers=h, json={"name": ad, **PROFIL}).json()["id"]
+
+
+def log_gonder(h, *loglar):
+    r = client.post("/api/v1/logs/batch", headers=h, json={"logs": list(loglar)})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def log(bid, cid, tip, bas, bit=None):
+    return {"baby_id": bid, "type": tip, "started_at": bas.isoformat(),
+            "ended_at": bit.isoformat() if bit else None, "client_id": cid}
+
+
+def satir(cid):
+    db = SessionLocal()
+    try:
+        return db.query(SleepLog).filter(SleepLog.client_id == cid).one()
+    finally:
+        db.close()
+
+
+def _u(t):
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+from api.zaman import tr_gun_araligi                        # noqa: E402
+_s = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+# Sınıf saate bağlı (K19): saatler TR gününe sabit, hepsi en az 24 saat önce.
+_g2 = tr_gun_araligi(bugun_tr() - timedelta(days=2))[0]
+_NAP_BAS = _g2 + timedelta(hours=10)                          # 10:00 TR → gündüz
+_GECE_BAS = _g2 + timedelta(hours=20)                         # 20:00 TR → gece
+_SONRAKI = _g2 + timedelta(hours=30)                          # ertesi gün 06:00
+B11a, B11b, B11c = bebek_ekle(HB, "A11"), bebek_ekle(HB, "B11"), bebek_ekle(HB, "C11")
+log_gonder(HB, log(B11a, "s11-nap", "nap", _NAP_BAS))
+log_gonder(HB, log(B11b, "s11-taze", "sleep", _s - timedelta(hours=20)),
+           log(B11b, "s11-feed", "feed", _s - timedelta(hours=40)))
+log_gonder(HB, log(B11c, "s11-gece", "sleep", _GECE_BAS))
+log_gonder(HB, log(B11c, "s11-sonraki", "nap", _SONRAKI, _SONRAKI + timedelta(hours=1)))
+db = SessionLocal()
+_kuru = [r.client_id for r, _k, _g in saklama.acik_kayitlari_kapat(db, uygula=False)]
+db.rollback()
+db.close()
+check("S11a) Kuru koşu listeler, yazmaz",
+      set(_kuru) >= {"s11-nap", "s11-gece"} and "s11-taze" not in _kuru
+      and satir("s11-nap").ended_at is None, _kuru)
+_arsiv_once = set(saklama.denetim_arsiv_klasorleri()[1].glob("acik-sayac-kapat-*.json"))
+_sonuc = saklama._temizle()
+_nap, _gece, _taze, _feed = (satir("s11-nap"), satir("s11-gece"), satir("s11-taze"),
+                             satir("s11-feed"))
+_nap_dk, _ = acik_kayit._bant_sureleri(SessionLocal(), uuid.UUID(B11a))
+check("S11b) Eski açık gündüz nap'ı kapandı: kaynak bakim, not, bant süresi",
+      _nap.kapanis_kaynagi == "bakim" and "otomatik kapatıldı" in (_nap.notes or "")
+      and _u(_nap.ended_at) == _NAP_BAS + timedelta(minutes=_nap_dk),
+      (_nap.ended_at, _nap.kapanis_kaynagi, _nap.notes, _nap_dk))
+check("S11c) Eski açık gece kaydı sonraki kaydın başlangıcında kapandı",
+      _gece.kapanis_kaynagi == "bakim"
+      and _u(_gece.ended_at) == _SONRAKI, (_gece.ended_at, _gece.kapanis_kaynagi))
+check("S11d) 20 saatlik açık kayıt ve beslenme kaydı açık kaldı",
+      _taze.ended_at is None and _taze.kapanis_kaynagi is None and _feed.ended_at is None,
+      (_taze.ended_at, _feed.ended_at))
+check("S11e) Sonuçta sayı + eski hâl arşivde",
+      _sonuc.get("acik_kayit_kapandi", 0) >= 2
+      and len(set(saklama.denetim_arsiv_klasorleri()[1].glob("acik-sayac-kapat-*.json"))
+              - _arsiv_once) == 1, _sonuc)
+_y = log_gonder(HB, log(B11a, "s11-nap", "nap", _NAP_BAS))
+_kap = {k["client_id"]: k for k in _y["kapatilanlar"]}
+check("S11f) Bitişi boş yeniden gönderim açmadı; kapatilanlar'da kaynak bakim",
+      satir("s11-nap").ended_at is not None and _kap.get("s11-nap", {}).get("kaynak") == "bakim",
+      _y["kapatilanlar"])
+_tl = client.get("/api/v1/logs/timeline", headers=HB, params={"baby_id": B11a, "days": 3}).json()
+_ot = [o for g in _tl["gunler"] for o in g["oturumlar"] if o["client_id"] == "s11-nap"]
+check("S11g) Timeline: süre yok (bitiş bilinmiyor), otomatik_kapatildi true",
+      len(_ot) == 1 and _ot[0]["sure_dk"] is None and _ot[0]["otomatik_kapatildi"] is True, _ot)
 
 check("Z) Canlı LLM çağrısı yapılmadı", canli_cagri_sayisi() == 0, canli_cagri_sayisi())
 

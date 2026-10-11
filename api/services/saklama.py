@@ -15,7 +15,10 @@ Her gece (gece_temizligi, 03:30 UTC, çok worker'da yalnız biri):
   • /data/denetim ve /data/arsiv: 30 günden eski dosyalar,
   • onay_kanitlari: hesap silineli 10 yılı geçenler,
   • Anne Sesi klasörü: sahibi silinmiş kullanıcı klasörleri (hesap silmede dosya
-    silme başarısız olduysa burada yeniden denenir).
+    silme başarısız olduysa burada yeniden denenir),
+  • sleep_logs (2026-10-12): başlangıcının üzerinden 24 saat geçmiş AÇIK uyku
+    kayıtları kapatılır (silinmez) — kural api/services/acik_kayit.py,
+    kapanis_kaynagi='bakim' (bitiş bilinmiyor), eski hâl /data/arsiv'e.
 
 Bağımlılık denetimi (silmeden önce, 2026-10-07): plan iş tablosunu okuyan akışlar
 — iş yoklama (GET /plans/generate/{id}, dakikalar), idempotency (son 15 dk'nın
@@ -34,6 +37,7 @@ from pathlib import Path
 logger = logging.getLogger("tavsan.saklama")
 
 IS_SAKLAMA_GUN = 30
+ACIK_KAYIT_SAAT = 24          # bundan eski açık uyku kaydı gece kapatılır
 DOSYA_SAKLAMA_GUN = 30
 KILIT_ID = 7_351_204          # pg advisory lock (denetim'inkinden ayrı)
 
@@ -170,6 +174,28 @@ def sahipsiz_ses_klasorleri(db) -> int:
     return silinen
 
 
+def acik_kayitlari_kapat(db, simdi: datetime | None = None,
+                         uygula: bool = True) -> list[tuple]:
+    """24 saatten eski açık uyku kayıtlarını bakım olarak kapat. Commit ETMEZ.
+
+    K16.1 açık kaydı yalnız bebeğe YENİ bir açık kayıt gelince kapatıyor; anne
+    sayacı unutup bir daha kayıt girmezse kayıt günlerce açık kalıyordu (prod
+    2026-10-12: 10-02'den beri açık olanlar dahil 5 kayıt). Dönen: (kayıt,
+    kapanış, gerekçe) listesi; `uygula=False` yalnız listeler (kuru koşu)."""
+    from api.services import acik_kayit as ak
+    adaylar = ak._adaylar(db, gun=3650, terk_saat=ACIK_KAYIT_SAAT, simdi=simdi)
+    if not adaylar or not uygula:
+        return adaylar
+    ak._arsivle([r for r, _k, _g in adaylar])
+    for r, kapanis, gerekce in adaylar:
+        r.ended_at = kapanis
+        r.kapanis_kaynagi = ak.KAPANIS_KAYNAGI
+        ak._not_ekle(r, ak.KAPATMA_NOTU)
+        logger.info("Açık kayıt bakımda kapatıldı: log=%s baby=%s ended_at=%s (%s)",
+                    r.id, r.baby_id, kapanis.isoformat(), gerekce)
+    return adaylar
+
+
 def _temizle() -> dict:
     from api.db.session import SessionLocal
     db = SessionLocal()
@@ -182,6 +208,16 @@ def _temizle() -> dict:
     except Exception:
         db.rollback()
         logger.exception("Gece temizliği (DB) başarısız")
+    finally:
+        db.close()
+    # Açık kayıt kapatma AYRI işlemde: hatası silme kurallarını geri almasın.
+    db = SessionLocal()
+    try:
+        sonuc["acik_kayit_kapandi"] = len(acik_kayitlari_kapat(db))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Gece temizliği (açık kayıt kapatma) başarısız")
     finally:
         db.close()
     try:
