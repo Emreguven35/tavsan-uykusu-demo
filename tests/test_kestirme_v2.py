@@ -272,6 +272,61 @@ b6.gunduz(NAPLAR[0])                           # eksik kayıt girildi
 check("V6c) Eksik kayıt girilince şekerleme geri gelir",
       b6.sekerleme(an(0, 16 * 60 + 1)) is not None, "")
 
+# =============================================================================
+# V7–V9 — kayıt tamlığı ve eksik kayıt bildirimi (İlayda 12 Ekim, 8. soru)
+# =============================================================================
+def tur_eksik(t, uid) -> list:
+    once = len(GIDEN)
+    s = SessionLocal()
+    try:
+        with saat_sabitle(t):
+            notifier.run_reminder_cycle(s, now=t.astimezone(timezone.utc))
+    finally:
+        s.close()
+    return [g for g in GIDEN[once:]
+            if (g[2] or {}).get("kategori") == notifier.KAT_EKSIK_KAYIT and g[0] == uid]
+
+
+b7 = Bebek("Yarim")
+for _dk in NAPLAR[:2]:                         # 10'ar dk; 3. uyku (15:30) henüz gelmedi
+    b7.log("nap", an(0, _dk), an(0, _dk + 10))
+bayrak(False)
+_k7 = b7.sekerleme(an(0, 13 * 60 + 30))
+bayrak(True)
+_a7 = b7.sekerleme(an(0, 13 * 60 + 30))
+check("V7a) Kapalıyken uykular bitmeden (tahmini bloklarla) şekerleme çiziliyordu (fark kanıtı)",
+      _k7 is not None, _k7)
+check("V7b) Açıkken yaşın beklediği sayıda uyku kayıtlı değilse şekerleme önerilmez", _a7 is None, _a7)
+b7.gunduz(NAPLAR[2])
+check("V7c) 3. uyku kaydedilip açık sürünce şekerleme gelir",
+      b7.sekerleme(an(0, 16 * 60 + 1)) is not None, "")
+_ad7 = b7.bugun(an(0, 16 * 60 + 1))["adaptation"]
+check("V7d) Uykular tam: kestirme_kayit_eksik false", _ad7.get("kestirme_kayit_eksik") is False, _ad7)
+
+b8 = Bebek("Bildirim")
+b8.gunduz(NAPLAR[0])                           # 12:30 ve 15:30 kaydı yok
+_ad8 = b8.bugun(an(0, 16 * 60 + 30))["adaptation"]
+check("V8a) Saati geçmiş planlı uykunun kaydı yok → kestirme_kayit_eksik true, şekerleme yok",
+      _ad8.get("kestirme_kayit_eksik") is True and b8.sekerleme(an(0, 16 * 60 + 30)) is None, _ad8)
+_U8 = b8.user_id()
+_e1 = tur_eksik(an(0, 16 * 60 + 30), _U8)
+check("V8b) Eksik kayıt bildirimi şekerleme penceresinden (17:00) önce bir kez gider",
+      len(_e1) == 1 and _e1[0][1] == notifier.EKSIK_KAYIT_BASLIK, _e1)
+check("V8c) Aynı gün ikinci kez gitmez", tur_eksik(an(0, 16 * 60 + 45), _U8) == [], "")
+from engine import yontem as _yontem
+check("V8d) Bildirim metni yöntem tablosuyla aynı ('Bugünkü uykuları eksik mi kaydettiniz?')",
+      notifier.EKSIK_KAYIT_GOVDE == _yontem.deger("kestirme.eksik_kayit_bildirimi")["metin"]
+      and _yontem.deger("kestirme.eksik_kayit_bildirimi")["gunde_en_fazla"] == 1)
+
+b9 = Bebek("Gec")
+b9.gunduz(NAPLAR[0])
+check("V9a) Şekerleme penceresinden sonra (17:10) eksik kayıt bildirimi gitmez",
+      tur_eksik(an(0, 17 * 60 + 10), b9.user_id()) == [], "")
+bayrak(False)
+check("V9b) Bayrak kapalı: adaptation'da kestirme_kayit_eksik alanı YOK, bildirim yok",
+      "kestirme_kayit_eksik" not in b8.bugun(an(0, 16 * 60 + 30))["adaptation"]
+      and tur_eksik(an(1, 16 * 60 + 30), _U8) == [], "")
+
 bayrak(False)
 check("Z) Canlı LLM çağrısı yapılmadı", canli_cagri_sayisi() == 0, canli_cagri_sayisi())
 

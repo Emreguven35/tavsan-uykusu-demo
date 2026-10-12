@@ -41,6 +41,7 @@ from api.models import (
 )
 from api.models.user import DEFAULT_NOTIFICATION_PREFS
 from api.services import plan_adapter, plan_service, yontem_kart
+from engine import yas_bantlari
 
 logger = logging.getLogger("tavsan.notifier")
 
@@ -123,6 +124,12 @@ UYANDI_MI_UYGULAMA_ACIK_DK = int(os.getenv("UYANDI_MI_UYGULAMA_ACIK_DK") or 30)
 # gönderilir. Anahtar uykunun başlangıç dakikasını taşır: aynı uyku için
 # ikinci kez gitmez, aynı gün ikinci bir şekerleme olursa o ayrı uykudur.
 KAT_SEKERLEME_UYANDIR = "sekerleme_uyandir"
+# KESTIRME_V2 (İlayda 12 Ekim, 8. soru): kayıt eksikse şekerleme önerilmez,
+# onun yerine bu bildirim — günde en fazla 1 kez, şekerleme saatinden önce.
+# Metin yöntem tablosundaki kestirme.eksik_kayit_bildirimi ile aynı (testli).
+KAT_EKSIK_KAYIT = "eksik_kayit"
+EKSIK_KAYIT_BASLIK = "Gündüz uykuları"
+EKSIK_KAYIT_GOVDE = "Bugünkü uykuları eksik mi kaydettiniz?"
 SEKERLEME_UYANDIR_BASLIK = "Şekerleme bitti, uyandırma zamanı."
 SEKERLEME_UYANDIR_GOVDE = ("{ad} şekerlemesini tamamladı; şimdi "
                            "uyandırabilirsin. Gece uykusuna en erken 1 saat "
@@ -410,6 +417,7 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
         if plan_service.kestirme_v2_acik():
             _sekerleme_uyandir(db, user, baby, plan, content, now_minute,
                                today_local, stats)
+            _eksik_kayit_sor(db, user, baby, plan, adapt, now_minute, today_local, stats)
         # SABAH KURALI — uyanış girilmeden çizelge tahmindir; o tahmine göre
         # "uyku zamanı" demek anneyi yanlış saate yönlendirir.
         if adapt.get("sabah_uyanis_kaynak") in (None, "varsayilan"):
@@ -618,6 +626,22 @@ def _sekerleme_uyandir(db: Session, user: User, baby: Baby, plan: SleepPlan,
                 SEKERLEME_UYANDIR_GOVDE.format(ad=baby.name), stats,
                 ek={"block_key": blok.get("key"),
                     "saat": blok.get("uyandir_saat")})
+
+
+def _eksik_kayit_sor(db: Session, user: User, baby: Baby, plan: SleepPlan,
+                     adapt: dict, now_minute: int, today_local: date, stats: dict) -> None:
+    """KESTIRME_V2 — saati geçmiş planlı gündüz uykusunun kaydı yoksa şekerleme
+    önerilmez; anneye bir kez "Bugünkü uykuları eksik mi kaydettiniz?" sorulur.
+    Yalnız şekerleme penceresinin başlangıcından ÖNCE; anahtar günlük (tek gönderim)."""
+    if not adapt.get("kestirme_kayit_eksik"):
+        return
+    pencere = (yas_bantlari.kestirme_protokolu().get("saat_penceresi") or ["17:00"])[0]
+    pen_bas = int(pencere[:2]) * 60 + int(pencere[3:5])
+    if now_minute >= pen_bas:
+        return
+    key = f"{today_local.isoformat()}:eksik_kayit:{_bebek_kisa(baby)}"
+    _gonder(db, user, baby, plan, key, KAT_EKSIK_KAYIT, EKSIK_KAYIT_BASLIK,
+            EKSIK_KAYIT_GOVDE, stats)
 
 
 def _uyandi_mi_sor(db: Session, user: User, baby: Baby, plan: SleepPlan,
