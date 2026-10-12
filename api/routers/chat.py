@@ -195,25 +195,36 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     # yeniden üretim (ihlal modele söylenir), yine aykırıysa duzelt (ölçüm için).
     # Log içeriksiz: sonuç + ihlal sayısı/türü + değişen/çıkan cümle sayısı.
     dogrulama = "-"
-    mod = sor_kural.dogrulama_modu() if kural else "kapali"
-    if mod != "kapali" and r.get("llm"):
-        ihlal = sor_kural.dogrula(r["cevap"], kural)
-        if not ihlal:
-            dogrulama = "gecti"
-        elif mod == "izle":
-            dogrulama = f"izle {sor_kural.ozet(ihlal)}"
-        elif mod == "duzelt":
-            r["cevap"], _deg, _cik = sor_kural.duzelt_ayrinti(r["cevap"], kural)
-            dogrulama = f"duzeltildi {sor_kural.ozet(ihlal)} degisen={_deg} cikan={_cik}"
-        else:
-            r = chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx, **ek_param,
-                                    duzeltme_notu=sor_kural.duzeltme_notu(ihlal))
-            cagrilar.append(r)
-            dogrulama = f"yeniden {sor_kural.ozet(ihlal)}"
-            if sor_kural.dogrula(r["cevap"], kural):
-                r["cevap"], _deg, _cik = sor_kural.duzelt_ayrinti(r["cevap"], kural)
-                dogrulama = (f"duzeltildi {sor_kural.ozet(ihlal)} degisen={_deg} "
-                             f"cikan={_cik} cagri=2")
+    # GÜVENLİK AĞI (2026-10-12): doğrulama/düzeltme/yeniden üretim hata verirse
+    # cevap YİNE gider — elde olan son tam cevap, doğrulamasız (dogrulama=hata).
+    # Kural bloğu kurulamazsa yukarıda zaten bloksuz devam ediliyor.
+    try:
+        mod = sor_kural.dogrulama_modu() if kural else "kapali"
+        if mod != "kapali" and r.get("llm"):
+            ihlal = sor_kural.dogrula(r["cevap"], kural)
+            if not ihlal:
+                dogrulama = "gecti"
+            elif mod == "izle":
+                dogrulama = f"izle {sor_kural.ozet(ihlal)}"
+            elif mod == "duzelt":
+                _yeni, _deg, _cik = sor_kural.duzelt_ayrinti(r["cevap"], kural)
+                r["cevap"] = _yeni
+                dogrulama = f"duzeltildi {sor_kural.ozet(ihlal)} degisen={_deg} cikan={_cik}"
+            else:
+                r2 = chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx, **ek_param,
+                                         duzeltme_notu=sor_kural.duzeltme_notu(ihlal))
+                cagrilar.append(r2)
+                r = r2
+                dogrulama = f"yeniden {sor_kural.ozet(ihlal)}"
+                if sor_kural.dogrula(r["cevap"], kural):
+                    _yeni, _deg, _cik = sor_kural.duzelt_ayrinti(r["cevap"], kural)
+                    r["cevap"] = _yeni
+                    dogrulama = (f"duzeltildi {sor_kural.ozet(ihlal)} degisen={_deg} "
+                                 f"cikan={_cik} cagri=2")
+    except Exception:
+        logger.exception("Sor sayı doğrulaması başarısız, cevap doğrulamasız gidiyor "
+                         "(user=%s)", user.id)
+        dogrulama = "hata"
     r["cevap"] = takma_ad.adi_geri_koy(r["cevap"], takma, gercek_ad)
     _sure_ms = int((time.perf_counter() - _t0) * 1000)
 
