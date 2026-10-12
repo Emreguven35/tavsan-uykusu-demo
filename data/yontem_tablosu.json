@@ -1,9 +1,10 @@
 {
-  "surum": "0.2",
+  "surum": "0.3",
   "guncelleme": "2026-10-12",
   "surum_notlari": {
     "0.1": "İlk taslak: KB + kod metinlerinden; tutarlı değerler dolduruldu, çelişenler ilayda_bekliyor.",
-    "0.2": "İlayda'nın KENDİ kaynakları önce tarandı (öncelik: 1 sesli cevaplar 21/25/27 Eylül, 2 12 Ekim cevapları, 3 ders kayıtları + KB, 4 yas_bantlari/decision_tree, 5 kod). İki kaynak çelişirse daha yeni tarihli İlayda cevabı geçerli; kod metni İlayda'yı geçersiz KILMAZ. Değişenler: kısa gündüz gün 1-3 dizisi İlayda ders kaydından dolduruldu (kod '1 → 1,5 → 2'nin İlayda kaynağı bulunamadı); gece akışı (dış bekleme → içeride 45 dk uğraş → odada 15 dk rutin → ×3 → gece destekle uyut) ve 3 tekrar sonrası (gece/gündüz ayrı) dolduruldu; ilk gece bekleme süresi İlayda'ya göre 'anneye özel' → bekliyor; gece rutin hatırlatması 15 dk (İlayda 25 Eylül; kod 30); gün sınırı (06:00) ve hazırlık (12 Ekim) eklendi; rutin süresi 15-30 dk eklendi. Yatır-çık en fazla 20-25 dk ve 21 gün kuralı İlayda ders kaydından (kayıt37) dolduruldu."
+    "0.2": "İlayda'nın KENDİ kaynakları önce tarandı (öncelik: 1 sesli cevaplar 21/25/27 Eylül, 2 12 Ekim cevapları, 3 ders kayıtları + KB, 4 yas_bantlari/decision_tree, 5 kod). İki kaynak çelişirse daha yeni tarihli İlayda cevabı geçerli; kod metni İlayda'yı geçersiz KILMAZ. Değişenler: kısa gündüz gün 1-3 dizisi İlayda ders kaydından dolduruldu (kod '1 → 1,5 → 2'nin İlayda kaynağı bulunamadı); gece akışı (dış bekleme → içeride 45 dk uğraş → odada 15 dk rutin → ×3 → gece destekle uyut) ve 3 tekrar sonrası (gece/gündüz ayrı) dolduruldu; ilk gece bekleme süresi İlayda'ya göre 'anneye özel' → bekliyor; gece rutin hatırlatması 15 dk (İlayda 25 Eylül; kod 30); gün sınırı (06:00) ve hazırlık (12 Ekim) eklendi; rutin süresi 15-30 dk eklendi. Yatır-çık en fazla 20-25 dk ve 21 gün kuralı İlayda ders kaydından (kayıt37) dolduruldu.",
+    "0.3": "Kestirme bölümü (İlayda 12 Ekim): kestirme 30 dk, gündüz açığına göre uzamaz; amaç açığı kapatmak değil uykuya geri dönmesi (yatışa köprü). 21 Eylül'deki 'gece uykusunu geciktirmiyorsak bir saat de yapabilir' cümlesi 12 Ekim'de açıkça geri alınmadı; kodun 60 dk dalı İlayda'ya teyit ettirilecek."
   },
   "aciklama": "13 günlük eğitim yönteminin sayıları için TEK KAYNAK adayı. Yaşa bağlı değerler (uyanıklık penceresi, kısa uyku eşiği, kestirme) data/yas_bantlari.json'da kalır; burada yalnız onlara atıf vardır. Okuma: engine/yontem.py. Bu sürümde HİÇBİR uç ya da iş tabloyu okumuyor.",
   "okuma_kurallari": {
@@ -1051,6 +1052,40 @@
         }
       ],
       "not": "Bugünkü metinlerin yer tutuculu hâli. once_gece İlayda'nın 15 dk'sına bağlandı — bugünkü kod metni (30 dk) bu şablondan FARKLI üretilir.",
+      "onay": null
+    }
+  },
+  "kestirme": {
+    "sure_dk": {
+      "deger": 30,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "soru": "5 aylık bebek gündüz 4 saat yerine 2 saat uyuduysa yarım saat kestirme yeterli mi?",
+          "alinti": "30 dk kestirme yeterli. Amaç uykuya geri dönmesi."
+        },
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.43.32.txt",
+          "tarih": "2026-09-21",
+          "alinti": "30 dakika minimum süredir. … gece uykusunu geciktirmiyorsak bir saat de şekerleme yapabilir."
+        }
+      ],
+      "not": "Kestirme gündüz açığını kapatmak için değil, yatışa köprüdür. KOD FARKLI: plan_adapter._sekerleme_yerlestir ve yas_bantlari.kestirme_protokolu, şekerleme başlangıcı ile gece yatışı arasında 150 dk ya da fazlası varsa süreyi 60 dk yapıyor (21 Eylül cevabına dayanıyor; açığa göre değil, yatışa kalan süreye göre). 12 Ekim cevabı bunu açıkça geri almadı → İlayda'ya teyit. Kod değiştirilmedi.",
+      "onay": null
+    },
+    "aciga_gore_uzamaz": {
+      "deger": true,
+      "kaynak": [
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "alinti": "30 dk kestirme yeterli. Amaç uykuya geri dönmesi."
+        }
+      ],
+      "not": "Gündüz 4 saat yerine 2 saat uyunan (120 dk açık) örnekte bile 30 dk.",
       "onay": null
     }
   },

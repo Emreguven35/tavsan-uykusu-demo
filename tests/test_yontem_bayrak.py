@@ -645,6 +645,41 @@ check("V) Saatli süre: çizelge süreleri (gece uykusu 11-12 sa) ve saat (09:30
 check("V) Saatli süre karşılığı yaş bandından; kendi doğrulamasından geçer",
       k_g2g["karsilik"]["saat_sure"] == "Bu yaşta uyanıklık penceresi 3–4 saattir."
       and ihlal(k_g2g["karsilik"]["saat_sure"], k_g2g) == [])
+# --- 2026-10-12 d: hitap, rutin zamanı, kestirme (İlayda 12 Ekim) ------------
+from engine import yontem as _yontem
+check("K) Hitap: blokta ve sistem kuralında 'siz' kuralı",
+      "- Hitap: anneye HER ZAMAN 'siz' diye hitap et" in blok2
+      and "Anneye HER ZAMAN 'siz' diye hitap et; 'sen' kullanma." in sor_kural.SISTEM_KURALI)
+_S = _ilk_uyku
+check("K) Rutin zamanı: 'rutin uykudan ÖNCE biter' + bugünün uykuları için başlangıç aralığı (uyku − 30…15)",
+      "Rutin uyku saatinden ÖNCE biter: başlangıcı = uyku saati − rutin süresi" in k_g2g["blok"]
+      and f"{_ss_(_S)} uykusu → rutine {_ss_(_S - 30)}–{_ss_(_S - 15)} arasında başla" in k_g2g["blok"],
+      k_g2g["blok"])
+_rz = [f"{_ss_(_S)} civarında rutine başlayabilirsiniz.",
+       f"{_ss_(_S - 15)}-{_ss_(_S)} arasında rutininizi başlatın.",
+       f"Rutine {_ss_(_S)}'da başlayın.",
+       f"{_ss_(_S)}'a doğru uyku rutinini başlatın."]
+check("V) Rutin zamanı: uyku saatinde ya da sonrasında başlayan rutin ihlal",
+      all(ihlal(c, k_g2g) == [("rutin_zamani", 0.0)] for c in _rz), [ihlal(c, k_g2g) for c in _rz])
+_rz_ok = [f"{_ss_(_S)} uykusu için {_ss_(_S - 30)}'da rutine başlayın.",
+          f"Rutine {_ss_(_S - 30)}'da başlayın.",
+          f"{_ss_(_S)}'da uyku başlar, rutin {_ss_(_S - 30)}'da.",
+          f"Rutin bitince {_ss_(_S)}'da yatırın."]
+check("V) Rutin zamanı: uykudan önce başlayan rutin ve rutin sonrası yatış uygun",
+      all(ihlal(c, k_g2g) == [] for c in _rz_ok), [ihlal(c, k_g2g) for c in _rz_ok])
+check("V) Düzelt: rutin zamanı karşılığı (sonraki uyku için aralık); karşılık kendi doğrulamasından geçer",
+      sor_kural.duzelt(_rz[0], k_g2g) == k_g2g["karsilik"]["rutin_zamani"]
+      and "rutine" in k_g2g["karsilik"]["rutin_zamani"] and ihlal(k_g2g["karsilik"]["rutin_zamani"], k_g2g) == [],
+      k_g2g["karsilik"]["rutin_zamani"])
+check("T) Tablo v0.3: kestirme 30 dk (İlayda 12 Ekim), açığa göre uzamaz",
+      _yontem.deger("kestirme.sure_dk") == 30 and _yontem.deger("kestirme.aciga_gore_uzamaz") is True
+      and any(k.get("tur") == "ilayda_12_ekim" for k in _yontem.kaynaklar("kestirme.sure_dk")))
+check("K) Kestirme: blok 30 dk der, açığa göre uzamaz",
+      "- Kestirme (şekerleme): 30 dk; gündüz açığına göre UZAMAZ" in k_g2g["blok"], k_g2g["blok"])
+check("V) Kestirme: '60 dakikalık kestirme' ihlal, '30 dakikalık kestirme yeterli' uygun",
+      ihlal("Gündüz açığı büyükse 60 dakikalık kestirme yaptırın.", k_g2g) == [("kestirme", 60.0)]
+      and ihlal("30 dakikalık kestirme yeterli.", k_g2g) == []
+      and ihlal(k_g2g["karsilik"]["kestirme"], k_g2g) == [])
 check("V) Yeni karşılıklar (yatis_dis, mola_tanimi) kendi doğrulamasından geçer",
       all(ihlal(k["karsilik"][r], k) == [] for k in (_k_yat, k_g2g, k_g8) for r in ("yatis_dis", "mola_tanimi")))
 

@@ -36,7 +36,7 @@ TABLO_PATH = DATA_DIR / "yontem_tablosu.json"
 
 BEKLIYOR = "ilayda_bekliyor"
 BOLUMLER = ("merdiven", "gece_uyanma", "kisa_gunduz", "seans", "kucak_araligi_sn", "hazirlik",
-            "yatir_cik", "regresyon", "asama_gecisi", "bildirim", "yas_atiflari")
+            "yatir_cik", "regresyon", "asama_gecisi", "bildirim", "kestirme", "yas_atiflari")
 _META = ("surum", "guncelleme", "surum_notlari", "aciklama", "okuma_kurallari",
          "plan_tipi")
 ATIF_ONEKI = "yas_bantlari.json#"
