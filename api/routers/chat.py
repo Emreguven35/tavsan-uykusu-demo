@@ -23,6 +23,7 @@ from api.models import ChatMessage, User
 from api.schemas.chat import ChatReq, ChatResp, ChatSource
 from api.services import baby_context as baby_ctx
 from api.services import sor_baglam
+from api.services import sor_kural
 from api.services import takma_ad
 from api.services import usage
 from engine import chatbot
@@ -116,6 +117,7 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     # LLM YOK; sabit kısa cevap (bkz. chatbot.kapanis_mesaji_mi).
     kapanis = _bayrak(GECMIS_BAYRAK) and chatbot.kapanis_mesaji_mi(req.message)
     ctx = None
+    kural = None                      # SOR_KURAL_BLOGU / SOR_SAYI_DOGRULAMA
     gercek_ad = takma = None
     if req.baby_id is not None and kapanis:
         get_owned_baby(req.baby_id, db, user)             # sahiplik 404'ü korunur
@@ -150,6 +152,20 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
                                  "(baby=%s)", baby.id)
                 db.rollback()
 
+        # SOR_KURAL_BLOGU / SOR_SAYI_DOGRULAMA: bugünün kuralları (yöntem
+        # tablosundan) — blok bağlama, aynı değerler doğrulamaya. Blokta ad yok.
+        if ctx and (sor_kural.blok_acik_mi() or sor_kural.dogrulama_acik_mi()):
+            try:
+                kural = sor_kural.kurallar(sor_baglam.gun_durumu(db, baby), baby,
+                                           soru=req.message)    # yalnız yatış tespiti
+                if kural and sor_kural.blok_acik_mi():
+                    ctx = ctx + "\n" + kural["blok"]
+            except Exception:
+                logger.exception("Sor kural bloğu kurulamadı, bloksuz devam (baby=%s)",
+                                 baby.id)
+                db.rollback()
+                kural = None
+
     # Mevcut RAG + cache motoru (yeniden yazılmadı — import edildi).
     # NOT: ctx doluysa motor cevap cache'ini BYPASS eder (kişisel veri paylaşılmaz).
     # Ek parametreler YALNIZ bayrak açıkken verilir: kapalıyken çağrı (ve modele
@@ -165,11 +181,39 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
                 ek_param["onceki_soru"] = onceki[-1]
     if sor_baglam.acik_mi():
         ek_param["sistem_eki"] = sor_baglam.SISTEM_EKI
+    if kural and sor_kural.blok_acik_mi():
+        ek_param["sistem_eki"] = "\n".join(
+            x for x in (ek_param.get("sistem_eki"), sor_kural.SISTEM_KURALI) if x)
 
     _t0 = time.perf_counter()
     soru = takma_ad.adi_gizle(req.message, gercek_ad, takma)
     r = (chatbot.kapanis_cevabi() if kapanis else
          chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx, **ek_param))
+    cagrilar = [r]                    # maliyet: yapılan HER LLM çağrısı kaydedilir
+    # SOR_SAYI_DOGRULAMA (sor_kural.dogrulama_modu): izle → yalnız log; duzelt →
+    # ikinci çağrı YOK, ihlalli cümle karşılığıyla değişir/çıkar; yeniden → bir kez
+    # yeniden üretim (ihlal modele söylenir), yine aykırıysa duzelt (ölçüm için).
+    # Log içeriksiz: sonuç + ihlal sayısı/türü + değişen/çıkan cümle sayısı.
+    dogrulama = "-"
+    mod = sor_kural.dogrulama_modu() if kural else "kapali"
+    if mod != "kapali" and r.get("llm"):
+        ihlal = sor_kural.dogrula(r["cevap"], kural)
+        if not ihlal:
+            dogrulama = "gecti"
+        elif mod == "izle":
+            dogrulama = f"izle {sor_kural.ozet(ihlal)}"
+        elif mod == "duzelt":
+            r["cevap"], _deg, _cik = sor_kural.duzelt_ayrinti(r["cevap"], kural)
+            dogrulama = f"duzeltildi {sor_kural.ozet(ihlal)} degisen={_deg} cikan={_cik}"
+        else:
+            r = chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx, **ek_param,
+                                    duzeltme_notu=sor_kural.duzeltme_notu(ihlal))
+            cagrilar.append(r)
+            dogrulama = f"yeniden {sor_kural.ozet(ihlal)}"
+            if sor_kural.dogrula(r["cevap"], kural):
+                r["cevap"], _deg, _cik = sor_kural.duzelt_ayrinti(r["cevap"], kural)
+                dogrulama = (f"duzeltildi {sor_kural.ozet(ihlal)} degisen={_deg} "
+                             f"cikan={_cik} cagri=2")
     r["cevap"] = takma_ad.adi_geri_koy(r["cevap"], takma, gercek_ad)
     _sure_ms = int((time.perf_counter() - _t0) * 1000)
 
@@ -177,9 +221,11 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     # cache HIT'inde Anthropic çağrısı hiç yapılmadı — oraya 0 dolarlık satır
     # yazmak "cache hit oranı"nı da maliyeti de bulandırırdı; uygulama cache'inin
     # isabet oranı chat_messages.cached üzerinden raporlanıyor (admin/usage).
-    if r.get("llm"):
-        usage.kaydet(usage.SERVIS_ANTHROPIC, usage.OP_CHAT, model=r.get("model"),
-                     usage=r.get("usage"), user_id=user.id, duration_ms=_sure_ms)
+    for _c in cagrilar:
+        if _c.get("llm"):
+            usage.kaydet(usage.SERVIS_ANTHROPIC, usage.OP_CHAT, model=_c.get("model"),
+                         usage=_c.get("usage"), user_id=user.id,
+                         duration_ms=_sure_ms if _c is cagrilar[-1] else None)
 
     # Her mesaj çifti kaydedilir (ürün özelliği: geçmiş). İçerik DB'de tutulur ama
     # uygulama LOGUNA yazılmaz (KVKK).
@@ -197,10 +243,10 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
 
     # KVKK: bebek verisi İÇERİĞİ loglanmaz — yalnız bağlamın eklenip eklenmediği.
     logger.info("chat: user=%s q_len=%d a_len=%d cached=%s katman=%s skor=%s bebek=%s "
-                "gecmis=%d",
+                "gecmis=%d dogrulama=%s",
                 user.id, len(req.message), len(r["cevap"]), r["cache_hit"],
                 layer, f"{top_score:.3f}" if top_score is not None else "-",
-                "var" if ctx else "yok", r.get("gecmis_sayisi", 0))
+                "var" if ctx else "yok", r.get("gecmis_sayisi", 0), dogrulama)
 
     sources = None
     if r["kaynaklar"]:

@@ -1,0 +1,1120 @@
+{
+  "surum": "0.3",
+  "guncelleme": "2026-10-12",
+  "surum_notlari": {
+    "0.1": "İlk taslak: KB + kod metinlerinden; tutarlı değerler dolduruldu, çelişenler ilayda_bekliyor.",
+    "0.2": "İlayda'nın KENDİ kaynakları önce tarandı (öncelik: 1 sesli cevaplar 21/25/27 Eylül, 2 12 Ekim cevapları, 3 ders kayıtları + KB, 4 yas_bantlari/decision_tree, 5 kod). İki kaynak çelişirse daha yeni tarihli İlayda cevabı geçerli; kod metni İlayda'yı geçersiz KILMAZ. Değişenler: kısa gündüz gün 1-3 dizisi İlayda ders kaydından dolduruldu (kod '1 → 1,5 → 2'nin İlayda kaynağı bulunamadı); gece akışı (dış bekleme → içeride 45 dk uğraş → odada 15 dk rutin → ×3 → gece destekle uyut) ve 3 tekrar sonrası (gece/gündüz ayrı) dolduruldu; ilk gece bekleme süresi İlayda'ya göre 'anneye özel' → bekliyor; gece rutin hatırlatması 15 dk (İlayda 25 Eylül; kod 30); gün sınırı (06:00) ve hazırlık (12 Ekim) eklendi; rutin süresi 15-30 dk eklendi. Yatır-çık en fazla 20-25 dk ve 21 gün kuralı İlayda ders kaydından (kayıt37) dolduruldu.",
+    "0.3": "Kestirme bölümü: iki İlayda cevabı birlikte geçerli — standart 30 dk ve gündüz açığına göre uzamaz (12 Ekim: 'amaç uykuya geri dönmesi'); gece yatışını geciktirmiyorsa 60 dk'ya çıkabilir (21 Eylül). Koşulun sayısı (yatışa ≥ 150 dk) kodun ve yas_bantlari'nın değeri; İlayda sayı vermedi."
+  },
+  "aciklama": "13 günlük eğitim yönteminin sayıları için TEK KAYNAK adayı. Yaşa bağlı değerler (uyanıklık penceresi, kısa uyku eşiği, kestirme) data/yas_bantlari.json'da kalır; burada yalnız onlara atıf vardır. Okuma: engine/yontem.py. Bu sürümde HİÇBİR uç ya da iş tabloyu okumuyor.",
+  "okuma_kurallari": {
+    "dolu_alan": "{deger, birim?, kaynak: [...], onay}. onay null = İlayda henüz tabloyu onaylamadı (değer kaynaklarda var).",
+    "bekleyen_alan": "{durum: 'ilayda_bekliyor', soru, adaylar: [{deger, kaynak, not?}], onay}. Okunmak istenirse engine.yontem.BekleyenAlanHatasi.",
+    "atif": "{atif: 'yas_bantlari.json#yol', kaynak?, not?}. Değer bu tabloya KOPYALANMAZ.",
+    "kaynak": "{tur, dosya?, satir?, anahtar?, tarih?, alinti?}. tur: ilayda_sesli_cevap (öncelik 1) · ilayda_12_ekim (2) · ilayda_ders_kaydi / kb (3) · yas_bantlari (4) · kod (5). Ders kayıtlarının tarihi yok ve 5 günlük program dönemine ait gün numaraları taşıyabilir. Satır numaraları main ba85158 içindir.",
+    "oncelik_kurali": "Çelişkide daha yeni tarihli İlayda cevabı geçerli. Kod metni hiçbir zaman İlayda'nın cevabını geçersiz kılamaz."
+  },
+  "plan_tipi": "13_gun_dirençli",
+  "merdiven": {
+    "asamalar": {
+      "deger": [
+        {
+          "gun": [
+            1,
+            3
+          ],
+          "kod": "besik_yani",
+          "ad": "Beşik yanı",
+          "pozisyon": "Beşik yanı (sandalye veya ayakta)"
+        },
+        {
+          "gun": [
+            4,
+            6
+          ],
+          "kod": "oda_ortasi",
+          "ad": "Oda ortası",
+          "pozisyon": "Oda ortası (temas ihtiyacını kademeli azaltma; gerekirse temas edip sandalyeye geri dönün)"
+        },
+        {
+          "gun": [
+            7,
+            9
+          ],
+          "kod": "kapi",
+          "ad": "Kapı",
+          "pozisyon": "Kapı (içerden, anneye tam görünür)"
+        },
+        {
+          "gun": [
+            10,
+            12
+          ],
+          "kod": "kapi_esigi",
+          "ad": "Kapı eşiği",
+          "pozisyon": "Kapı eşiği (anneye tam görünür — oda müsaitse)"
+        },
+        {
+          "gun": [
+            13,
+            13
+          ],
+          "kod": "yatir_cik",
+          "ad": "Yatır-çık",
+          "pozisyon": "Yatır-çık"
+        }
+      ],
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar-2/transkript/WhatsApp Ptt 2026-09-25 at 11.57.20.txt",
+          "tarih": "2026-09-25",
+          "alinti": "bir, üç, dört, altı, … yedi, dokuz, … 10, 12 ve tek başına 13 olacak şekilde ilerliyoruz"
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": "486-493",
+          "anahtar": "global_rules.kademeli_uzaklasma_13_gun_dirençli"
+        },
+        {
+          "tur": "kod",
+          "dosya": "engine/parameter_engine.py",
+          "satir": "577-583",
+          "anahtar": "bekleme_sureleri_planla('13_gun_dirençli').kademeli_uzaklasma"
+        }
+      ],
+      "not": "Gün aralıkları varsayılan takvimdir; İlayda aşama geçişini ağlama ortalamasına bağlıyor (bkz. asama_gecisi). 'pozisyon' metni planların gösterdiği kod metnidir.",
+      "onay": null
+    }
+  },
+  "gece_uyanma": {
+    "gun_siniri": {
+      "deger": {
+        "gun_en_erken_baslangic": "06:00",
+        "gece_yarisi_sonrasi": "onceki_gunun_gecesi"
+      },
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.42.54.txt",
+          "tarih": "2026-09-21",
+          "alinti": "bebek altıdan önce uyanıp tekrar uyumazsa günü altıda başlatıyoruz"
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt26_chunk_002 (= kayıt6_chunk_002)",
+          "alinti": "eğitimde birinci günün gecesi, yani ikinci güne bağlayan gecede eğer ki erken uyanırsa"
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt26_chunk_004",
+          "alinti": "erken uyanmalarda bebeğinizi güne en erken altıda kalkmış gibi hesap edip"
+        }
+      ],
+      "onay": null
+    },
+    "ilk_gece_ilk_bekleme_dk": {
+      "durum": "ilayda_bekliyor",
+      "soru": "İlk gecenin ilk dış beklemesi herkes için 5 dk mı, yoksa anneye özel mi (özel kayıtta verdiğin süre)? Uygulama bu süreyi neye göre belirlesin?",
+      "adaylar": [
+        {
+          "deger": "anneye_ozel",
+          "kaynak": [
+            {
+              "tur": "ilayda_ders_kaydi",
+              "dosya": "data/chunks.json",
+              "anahtar": "kayıt11_chunk_001",
+              "alinti": "Odaya girmemek için bekleme süreniz var. Bu süreyi ben size özel kayıtta zaten iletiyor olacağım. … her anneye ilettiğim bir süre oluyor."
+            }
+          ]
+        },
+        {
+          "deger": 5,
+          "kaynak": [
+            {
+              "tur": "kb",
+              "dosya": "data/master_knowledge_base.json",
+              "satir": 496,
+              "anahtar": "egitim_gece_uyanmasi",
+              "alinti": "Gün 1: 5dk"
+            },
+            {
+              "tur": "ilayda_ders_kaydi",
+              "dosya": "data/chunks.json",
+              "anahtar": "kayıt24_chunk_005",
+              "alinti": "Birinci gece beş dakika bekleriz, gireriz. İkinci gece on dakika … Üçüncü gece on beş dakika. Fakat bu bebeğe özel bir uygulama olmaz."
+            },
+            {
+              "tur": "kod",
+              "dosya": "engine/parameter_engine.py",
+              "satir": 608
+            }
+          ]
+        },
+        {
+          "deger": 10,
+          "kaynak": [
+            {
+              "tur": "ilayda_ders_kaydi",
+              "dosya": "data/chunks.json",
+              "anahtar": "kayıt26_chunk_002",
+              "alinti": "Mesela birinci gün odaya girmemek için bekleme süremiz on dakika ise"
+            }
+          ],
+          "not": "İlayda 'örnek veriyorum' diyerek söylüyor."
+        }
+      ],
+      "onay": null
+    },
+    "taban_dk": {
+      "deger": 5,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 496,
+          "anahtar": "egitim_gece_uyanmasi",
+          "alinti": "Asla 5dk altı."
+        },
+        {
+          "tur": "kod",
+          "dosya": "engine/parameter_engine.py",
+          "satir": 608,
+          "alinti": "Asla 5 dk altına inme."
+        }
+      ],
+      "not": "İlayda'nın sesli cevaplarında ve ders kayıtlarında 5 dk altını yasaklayan cümle bulunamadı; çelişen bir sözü de yok.",
+      "onay": null
+    },
+    "gece_ici_artis_dk": {
+      "durum": "ilayda_bekliyor",
+      "soru": "Aynı gece içinde her yeni uyanmada dış bekleme artar mı, kaç dakika?",
+      "adaylar": [],
+      "kaynak_notu": "Bulunamadı. İlayda gece uyanmasında 'gece' bazında artış anlatıyor (kayıt24: birinci gece 5, ikinci gece 10; kayıt30: her gece +5). Aynı seans içinde +5 artış (kayıt16: dışarıda 5 → 10 → 15 → 20) YATIŞ (uykuya geçiş) için anlatılıyor, gece uyanması için değil. KB/kod 'her uyanmada artırarak' diyor, sayı vermiyor.",
+      "onay": null
+    },
+    "gunluk_artis_standart_dk": {
+      "deger": 5,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt24_chunk_005",
+          "alinti": "Birinci gece beş dakika … İkinci gece on dakika … Üçüncü gece on beş dakika."
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt30_chunk_003 (= kayıt34)",
+          "alinti": "süreniz yine yirmi … ondan sonraki gece … yirmi beş … ondan sonraki gece … otuz"
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 503,
+          "anahtar": "bekleme_suresi_artis_esnekligi.standart_ilerleme"
+        }
+      ],
+      "onay": null
+    },
+    "gunluk_artis_en_az_dk": {
+      "deger": 0.5,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": "496, 504",
+          "anahtar": "egitim_gece_uyanmasi, bekleme_suresi_artis_esnekligi (ek 2026-08-25, İlayda düzeltmesi)",
+          "alinti": "çok dirençli çocukta +1dk ya da +30sn olabilir"
+        },
+        {
+          "tur": "kod",
+          "dosya": "engine/parameter_engine.py",
+          "satir": 611
+        }
+      ],
+      "onay": null
+    },
+    "onceki_gunle_ayni_veya_dusuk_olabilir": {
+      "deger": false,
+      "kaynak": [
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 505,
+          "anahtar": "bekleme_suresi_artis_esnekligi.DEGISMEZ_KURAL_her_gun_artar (ek 2026-08-25)",
+          "alinti": "Bir önceki günün süresinden DÜŞÜK olamaz, bir önceki günle AYNI da olamaz"
+        }
+      ],
+      "not": "Eğitim dönemi için. İlayda'nın YATIR-ÇIK SONRASI dersi (kayıt30) farklı: 'odaya girmeden önce çocuğunuz uyuduysa aynı şekilde kalıyor dakikanız' ve süre zamanla 20 dk'da sabitlenir — bu eğitim sonrası dönem kuralıdır, eğitim içi kuralla çelişmez ama ayrı bir alan olarak İlayda'ya teyit ettirilmeli.",
+      "onay": null
+    },
+    "akis": {
+      "deger": {
+        "1_dis_bekleme": "odaya girmemek için bekleme süresi (ilk_gece_ilk_bekleme_dk + günlük artış)",
+        "2_iceride": "o günün yöntemiyle uyuyana kadar (gün 1-2: pat-pat, pış-pış; histerik değilse kucak yok)",
+        "3_deneme_dk": 45,
+        "4_rutin_dk": 15,
+        "5_rutin_yeri": "oda içinde; rutinde beslenme yok (mama, meme, süt, sıvı yok)",
+        "6_tekrar_en_fazla": 3
+      },
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt11_chunk_001..003 (Eğitim 1. gün gece uyanmaları yönetimi)",
+          "alinti": "bekleme sürenizi bekledikten sonra içeri girdiniz. Uyuyana kadar pış pış, pat pat … 45 dakika uğraşacağız … odanın içerisinde on beş dakika rutin yapabiliriz. Rutinimizde beslenme olmamalı."
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt37_chunk_025",
+          "alinti": "Gece … on beş dakikalık rutini odanın içerisinde yapacağız ve bu süreci üç kere tekrar ettireceğiz."
+        }
+      ],
+      "not": "İlayda'ya göre '45 dk dene → 15 dk rutin → 45 dk' ile 'dışarıda bekle, giderek artır' AYNI akışın iki katmanıdır: önce dış bekleme, sonra içeride 45 dk uğraş. Kodun mobil kartı (plan_adapter.NIGHT_WAKE_PROTOCOL: '45 dk bekleyip kendi kendine dalmasına izin verin') İlayda'nın sözüyle uyuşmuyor — 45 dk beklenen değil, içeride UĞRAŞILAN süredir.",
+      "onay": null
+    },
+    "icerde_temas": {
+      "deger": {
+        "besik_yani": "uyuyana kadar pat-pat, pış-pış; histerik ağlama yoksa kucak yok, histerikse kucak serbest",
+        "oda_ortasi": "temassız: oda ortasından pış-pış, ninni; aşırı (histerik) ağlamada yanına gidip temas, sonra yerine dön",
+        "yatir_cik": "içeride kısa kal (on saniye – bir dakika); histerik ağlamada temas"
+      },
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt11_chunk_001..003",
+          "alinti": "Eğer çok histerik bir ağlama yoksa kucak yok. … eğitimin birinci günün uykusunda devamlı odada kalabiliyoruz. İkinci gün de aynı şekilde. Ve devamlı temas edebiliyoruz."
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt12_chunk_006..007 (Üçüncü gün uzaklaşma günü)",
+          "alinti": "oda ortasına geçtiğimiz noktaya gelip oradan sadece pış pış yapabileceğiz ya da ninni söyleyeceğiz. Yani temassız … Aşırı bir ağlama gelirse yanına gidip tekrardan temas edip tekrar yerimize geçip"
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt16_chunk_003 (Beşinci gün yatır çık)",
+          "alinti": "böyle bir dakika bile kalsak yeterli, on saniye bile kalsak yeterli"
+        }
+      ],
+      "not": "Ders kayıtları eski 5 günlük programın gün numaralarını kullanıyor; burada aşama adına göre yazıldı. Kapı ve kapı eşiği aşamaları için ders kaydı bulunamadı (bkz. icerde_temas_kapi).",
+      "onay": null
+    },
+    "icerde_temas_kapi": {
+      "durum": "ilayda_bekliyor",
+      "soru": "Kapı (gün 7-9) ve kapı eşiği (gün 10-12) aşamalarında gece girişlerinde temas/kucak nasıl?",
+      "adaylar": [],
+      "kaynak_notu": "Sesli cevaplarda ve ders kayıtlarında bu iki aşama için gece temas kuralı bulunamadı (ders kayıtları 5 günlük programdan; kapı/eşik aşamaları orada yok ya da tek gün).",
+      "onay": null
+    },
+    "protokol_karti": {
+      "durum": "ilayda_bekliyor",
+      "soru": "Mobilin gece kartında (content.night_wake_protocol) hangi metin yazsın? Bugünkü kod metni ('45 dk bekleyip kendi kendine dalmasına izin verin') senin anlattığın akışla (önce dış bekleme, sonra içeride 45 dk uğraş) uyuşmuyor.",
+      "adaylar": [
+        {
+          "deger": {
+            "metin": "45 dk bekleyip kendi kendine dalmasına izin verin; dalamazsa 15 dk kısa rutin yapın, sonra tekrar 45 dk deneyin — uykuya geçene kadar."
+          },
+          "kaynak": [
+            {
+              "tur": "kod",
+              "dosya": "api/services/plan_adapter.py",
+              "satir": "108-115",
+              "anahtar": "NIGHT_WAKE_PROTOCOL"
+            }
+          ],
+          "not": "İlayda kaynağı yok."
+        },
+        {
+          "deger": {
+            "akis": "gece_uyanma.akis"
+          },
+          "kaynak": [
+            {
+              "tur": "ilayda_ders_kaydi",
+              "dosya": "data/chunks.json",
+              "anahtar": "kayıt11_chunk_001..003, kayıt37_chunk_025"
+            }
+          ],
+          "not": "Metin İlayda'nın akışından yazılmalı; metnin kendisi bir ürün kararı."
+        }
+      ],
+      "onay": null
+    }
+  },
+  "kisa_gunduz": {
+    "kisa_uyku_tanimi": {
+      "atif": "yas_bantlari.json#bantlar[].kisa_uyku_esigi_dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.44.40.txt",
+          "tarih": "2026-09-21",
+          "alinti": "bir saatin altında kalan uykulara kısa gündüz uykusu denir altı ay üzeri bebeklerde. Altı ayın altındaki bebeklerde ise 45 dakikanın altındaki uykulara"
+        }
+      ],
+      "not": "Yaşa bağlı; engine.yas_bantlari üzerinden okunur."
+    },
+    "seans_toplam_dk": {
+      "deger": 45,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.45.27.txt",
+          "tarih": "2026-09-21",
+          "alinti": "Uğraştık, uğraştık, 45 dakika boyunca çocuğu uykuya geri döndürmeye çalıştık"
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt36_chunk_016",
+          "alinti": "kırk beş dakika boyunca uykuya geri döndürmeye çalışmak demek"
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 497
+        }
+      ],
+      "onay": null
+    },
+    "gun_1_3_dis_ic_dk": {
+      "deger": {
+        "gun_1": {
+          "dis": 5,
+          "ic": 40
+        },
+        "gun_2": {
+          "dis": 10,
+          "ic": 35
+        },
+        "gun_3": {
+          "dis": 15,
+          "ic": 30
+        }
+      },
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt36_chunk_015..016",
+          "alinti": "ilk gün için beş dakika, beş dakika dışarıda beklemenizi istiyorum. Fakat beş dakika sonrasında içeri girdiğinizde kırk dakika … ikinci güne geldiğimizde on dakika dışarda … üçüncü güne geldiğimizde on beş"
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 497,
+          "anahtar": "global_rules.bekleme_sureleri.egitim_kisa_gunduz_uykusu",
+          "alinti": "Gün 1: dış 5dk + iç 40dk. Gün 2: 10+35. Gün 3: 15+30. Toplam 45dk."
+        }
+      ],
+      "not": "İLAYDA KAYNAĞI KODLA ÇELİŞİYOR: engine/parameter_engine.py:585 13 günlük plan için 'Dış bekleme kademesi: 1 dakika → 1,5 dakika → 2 dakika' yazıyor (commit 92d5c97, 'İlayda geri bildirimleri', 2026-06-08) ama bu sayıların İlayda'nın sesli cevaplarında ya da ders kayıtlarında kaynağı BULUNAMADI; aynı sayılar ders kayıtlarında kucağa alma aralığıdır (kayıt36_chunk_005/008). Öncelik kuralı gereği İlayda'nın ders kaydı esas alındı. Ders kaydı 5 günlük program dönemindendir: 'gün 1, 2, 3' 13 günlük programın ilk üç gününe (beşik yanı) eşlendi — teyit edilmeli.",
+      "onay": null
+    },
+    "yatir_cik_ve_sonrasi_dis_ic_dk": {
+      "deger": {
+        "dis": 20,
+        "ic": 25,
+        "ic_davranis": "içeri girip 'uyku bitmedi' deyip çık; 25 dk daha dışarıda bekle, uyumazsa al",
+        "az_aglamada": "45 dk dışarıda bekleyip al"
+      },
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt5_chunk_004",
+          "alinti": "Odaya girmemek için yirmi dakika bekleyeceğiz. … tekrardan çıkıp yirmi beş dakikaya da dışarıda bekleyip sessizce uyumazsa alıp çıkmak"
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt36_chunk_047",
+          "alinti": "Yirmi dakika dışarıda bekleriz. Yirmi dakikanın sonunda içeri girip … yirmi beş daha dışarıda bekleriz."
+        }
+      ],
+      "onay": null
+    },
+    "gun_4_12_dis_ic_dk": {
+      "durum": "ilayda_bekliyor",
+      "soru": "13 günlük programda 4-12. günlerde (oda ortası, kapı, kapı eşiği) kısa gündüz uykusunda dış/iç bekleme kaç dakika?",
+      "adaylar": [
+        {
+          "deger": {
+            "dis_kademe_dk": [
+              1,
+              1.5,
+              2
+            ]
+          },
+          "kaynak": [
+            {
+              "tur": "kod",
+              "dosya": "engine/parameter_engine.py",
+              "satir": 585
+            }
+          ],
+          "not": "İlayda kaynağı bulunamadı; kod bunu 13 günün TÜM aşamalarına yazıyor."
+        }
+      ],
+      "onay": null
+    },
+    "geri_dalis_esigi_dk": {
+      "deger": 5,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar-2/transkript/WhatsApp Ptt 2026-09-25 at 14.26.38.txt",
+          "tarih": "2026-09-25",
+          "alinti": "biz beklerken geri döndüyse ve beş dakikanın üstünde uyuyup kalktıysa"
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt5_chunk_005",
+          "alinti": "biz üç dakikayı uyku saymıyoruz … beş dakika ve üzerinde uyudu ise işte o zaman sürecimizi bitirebiliriz"
+        }
+      ],
+      "onay": null
+    }
+  },
+  "seans": {
+    "deneme_dk": {
+      "deger": 45,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar-2/transkript/WhatsApp Ptt 2026-09-25 at 14.25.33.txt",
+          "tarih": "2026-09-25",
+          "alinti": "45 dakika deniyoruz. Uyumazsa 15 dakika rutin, yeniden 45 dakika devam."
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt37_chunk_024",
+          "alinti": "45 dakika direnç, on beş dakika rutin molası, kırk beş dakika daha deneme"
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 499
+        }
+      ],
+      "onay": null
+    },
+    "mola_dk": {
+      "deger": 15,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar-2/transkript/WhatsApp Ptt 2026-09-25 at 14.25.33.txt",
+          "tarih": "2026-09-25",
+          "alinti": "Uyumazsa 15 dakika rutin"
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 499
+        }
+      ],
+      "onay": null
+    },
+    "mola_en_fazla_dk": {
+      "deger": 30,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt36_chunk_023, kayıt36_chunk_042",
+          "alinti": "On beş dakika, otuz dakika rutin yaparız. Kırk beş dakika daha yine deneriz."
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 499,
+          "alinti": "Çok dirençli bebekte rutin molası 30 dakikaya çıkarılabilir."
+        }
+      ],
+      "onay": null
+    },
+    "tekrar_en_fazla": {
+      "deger": 3,
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt11_chunk_004, kayıt12_chunk_007, kayıt37_chunk_025",
+          "alinti": "bunu üç kere tekrarlayabiliriz"
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 499
+        }
+      ],
+      "onay": null
+    },
+    "uc_tekrar_sonrasi": {
+      "deger": {
+        "gece": "mecburen destek verip uyutulur; o gün başarısız sayılır",
+        "gunduz": "uyku denemesi sonlandırılır, yaşa uygun uyanıklık süresi kadar uyanık tutulur, bir sonraki uykuda eğitime devam; hareketle/sallayarak/gezdirerek uyutulmaz"
+      },
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt37_chunk_025..026",
+          "alinti": "Gece uykusu ise bunu sadece üç kere tekrarlayabiliriz. Üç tekrar sonrasında uyumuyor ise mecburen destek verip uyutmanız gerekiyor. … Gündüz … o uyku denemesini sonlandırıyoruz; bebeği yaşına uygun uyanıklık süresi kadar uyanık tutup bir sonraki uyku denemesinde eğitime devam ediyoruz."
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt11_chunk_004",
+          "alinti": "eski desteğimizi verip maalesef uyutmak durumundayız ve bu gece başarısız kabul edilir"
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 499,
+          "alinti": "(yalnız gündüz kısmı)"
+        }
+      ],
+      "not": "0.1'de bekleyen olarak işaretliydi: KB ve kod yalnız gündüz kısmını yazıyordu. İlayda gece ve gündüzü ayırıyor; çelişki yok.",
+      "onay": null
+    },
+    "rutin_suresi_dk": {
+      "deger": {
+        "en_az": 15,
+        "en_fazla": 30
+      },
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt27_chunk_005..006",
+          "alinti": "rutinleri en az on beş dakika, en fazla otuz dakika yapacak şekilde uygulayın"
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt10_chunk_003",
+          "alinti": "on beş dakika en az sürmeli rutinler"
+        }
+      ],
+      "onay": null
+    }
+  },
+  "kucak_araligi_sn": {
+    "dizi": {
+      "deger": [
+        30,
+        60,
+        90,
+        120
+      ],
+      "birim": "sn",
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt36_chunk_005, kayıt36_chunk_008",
+          "alinti": "İlkinde otuz saniye beklediyseniz, ikincisinde bir dakika sonra alın. Üçüncüsünde bir buçuk dakika sonra alın. Dördüncüsünde iki dakika sonra alın."
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 495
+        },
+        {
+          "tur": "kod",
+          "dosya": "engine/parameter_engine.py",
+          "satir": 606
+        }
+      ],
+      "onay": null
+    }
+  },
+  "yatir_cik": {
+    "standart_dizi_dk": {
+      "deger": [
+        5,
+        10,
+        15,
+        20
+      ],
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt16_chunk_002..004 (Yatır çık uygulaması)",
+          "alinti": "Dışarıda beş dakika bekledik … Bu sefer on dakika … on beş dakika … dışarda yirmi dakika bekledik. Ne kadara kadar? Toplamda 45 dakika olana kadar."
+        },
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt37_chunk_046..047",
+          "alinti": "Beş dakika dışarıda bekleyeceğiz … on dakika … on beş dakika dışarıda bekle … dışarıda yirmi dakika bekle"
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 498
+        }
+      ],
+      "not": "İlayda'da bu dizi bir YATIŞ seansı içindedir (girişler arası), 45 dk dolunca 15 dk rutin, ×3.",
+      "onay": null
+    },
+    "artis_en_az_dk": {
+      "deger": 0.5,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": "501, 504",
+          "anahtar": "bekleme_suresi_artis_esnekligi (ek 2026-08-25)"
+        }
+      ],
+      "onay": null
+    },
+    "en_fazla_dk": {
+      "deger": [
+        20,
+        25
+      ],
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt37_chunk_046..047",
+          "alinti": "artma süresini maksimum yirmi, yirmi beşe kadar çıkarabilirsiniz. Yirmi, yirmi beşta artık kalmanız gerekiyor."
+        },
+        {
+          "tur": "kod",
+          "dosya": "engine/parameter_engine.py",
+          "satir": 610,
+          "alinti": "Max 20-25 dk."
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 498,
+          "alinti": "→ max 25 dakika"
+        }
+      ],
+      "not": "İlayda '20-25'te kalın' diyor (KB'deki tek '25' bunun üst ucu). Eğitim SONRASI gece uyanmalarında (kayıt30) süre 20'de sabitlenir, tekrar uyanmalarda 25-40'a kadar artabilir — ayrı dönem.",
+      "onay": null
+    },
+    "yirmi_bir_gun_kurali": {
+      "deger": {
+        "gun": 21,
+        "en_fazla_dk": 45,
+        "aksi": "tibbi_yonlendirme"
+      },
+      "kaynak": [
+        {
+          "tur": "ilayda_ders_kaydi",
+          "dosya": "data/chunks.json",
+          "anahtar": "kayıt37_chunk_047",
+          "alinti": "yirmi bir gün boyunca hiç dalamadıysa bu süreyi biraz daha artırmanız gerekiyor. Ya da bazı tıbbi kontroller … maksimum kırk beşe kadar esnetebiliriz"
+        },
+        {
+          "tur": "kb",
+          "dosya": "data/master_knowledge_base.json",
+          "satir": 498,
+          "alinti": "21 gün hiç dalmazsa max 45dk veya tıbbi yönlendirme."
+        },
+        {
+          "tur": "kod",
+          "dosya": "engine/parameter_engine.py",
+          "satir": 610
+        }
+      ],
+      "onay": null
+    }
+  },
+  "regresyon": {
+    "kendi_donme_esik_dk": {
+      "deger": 20,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.51.17.txt",
+          "tarih": "2026-09-21",
+          "alinti": "Hiç bu süreçte çocuk 20 dakika beklerken kendi uyuyor mu?"
+        },
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.48.01.txt",
+          "tarih": "2026-09-21",
+          "alinti": "Bu uyanmada 20 dakikanın üzerinde uyanık kalıp kendi dönemiyorsa sorundur"
+        },
+        {
+          "tur": "kod",
+          "dosya": "api/services/plan_adapter.py",
+          "satir": 101,
+          "anahtar": "SELF_SOOTHE_FAIL_MIN"
+        }
+      ],
+      "onay": null
+    },
+    "gerekli_gece": {
+      "deger": {
+        "en_az": 2,
+        "son_gece": 3
+      },
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.51.17.txt",
+          "tarih": "2026-09-21",
+          "alinti": "(soru metni İlayda'ya okundu: 'son üç gecenin ikisinde 20 dakika uzun gece uyanması'; itiraz etmedi)"
+        },
+        {
+          "tur": "kod",
+          "dosya": "api/services/plan_adapter.py",
+          "satir": "103-104"
+        }
+      ],
+      "onay": null
+    },
+    "devam_gun": {
+      "deger": 45,
+      "birim": "gun",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.51.17.txt",
+          "tarih": "2026-09-21",
+          "alinti": "Kendi dönmüyorsa ve 45 günü geride bıraktıysak … 45 gün dolana kadar devam ediyoruz eğitime"
+        },
+        {
+          "tur": "kod",
+          "dosya": "api/services/plan_adapter.py",
+          "satir": 2580
+        }
+      ],
+      "onay": null
+    },
+    "metin_sablonlari": {
+      "deger": {
+        "kendi_donuyor_mu": "Bebeğiniz gece uyandığında {kendi_donme_esik_dk} dakika beklerken kendi başına uykuya dönebiliyor mu?",
+        "devam": "Eğitime {devam_gun}. güne kadar aynı şekilde devam edin, bu dönemde gece uyanmaları normaldir."
+      },
+      "kaynak": [
+        {
+          "tur": "kod",
+          "dosya": "api/services/plan_adapter.py",
+          "satir": "2582-2588",
+          "anahtar": "REGRESYON_METINLERI"
+        }
+      ],
+      "onay": null
+    }
+  },
+  "asama_gecisi": {
+    "kural": {
+      "atif": "yas_bantlari.json#evrensel_kurallar.asama_gecisi",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar-2/transkript/WhatsApp Ptt 2026-09-25 at 11.57.20.txt",
+          "tarih": "2026-09-25",
+          "alinti": "yedi günü geçelim istemiyoruz. Yedi günü geçiyorsa direnç, tekrar başa dönmesi gerekiyor"
+        },
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar-3/transkript/WhatsApp Ptt 2026-09-27 at 16.39.50.txt",
+          "tarih": "2026-09-27",
+          "alinti": "Evet, her aşama için."
+        },
+        {
+          "tur": "yas_bantlari",
+          "dosya": "data/yas_bantlari.json",
+          "anahtar": "evrensel_kurallar.asama_gecisi.kaynak",
+          "alinti": "İlayda, 4. cevap (2026-09-30): … 1 hafta mola, sonra program en baştan."
+        }
+      ],
+      "not": "'1 hafta mola' kısmının birincil kaydı (ses/transkript) ilayda-cevaplar klasörlerinde bulunamadı; yalnız yas_bantlari notunda geçiyor."
+    },
+    "sure_kovalari": {
+      "deger": {
+        "5_dk_alti": 1,
+        "5_15_dk": 3,
+        "15_30_dk": 5,
+        "30_dk_ustu": 7,
+        "olcum": "gündüz + gece uykularının ortalama ağlama süresi"
+      },
+      "birim": "gun",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar-3/transkript/WhatsApp Ptt 2026-09-27 at 16.39.33.txt",
+          "tarih": "2026-09-27",
+          "alinti": "beş dakika altıysa … ikinci gün bile geçirebilir … beş-on beş dakika arasında … üç gün … on beş dakika ve otuz dakikaysa işte beş gün … otuz dakika üstündeyse yedi gün"
+        }
+      ],
+      "not": "Ses kaydında dil sürçmesi var (ilayda-cevaplar-3/RAPOR.md S1); sıralamadan okundu.",
+      "onay": null
+    }
+  },
+  "hazirlik": {
+    "beslenme_bitis_once_dk": {
+      "deger": 60,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "alinti": "Uykudan bir saat öncesinde beslenmenin bitmesi … Bu katı kural."
+        },
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.50.21.txt",
+          "tarih": "2026-09-21",
+          "alinti": "Mutlaka beslenme uykudan bir saat öncesinde bitmeli."
+        }
+      ],
+      "not": "Eski ders kaydı (kayıt29_chunk_004) '30-45 dakika öncesinde, 12 ay üstünde bir saat' diyor; daha yeni İlayda cevapları (21 Eylül, 12 Ekim) her yaş için 1 saat diyor → yeni cevap geçerli.",
+      "onay": null
+    },
+    "sallama_gecisi": {
+      "deger": {
+        "gun": 3,
+        "adimlar_sn": [
+          {
+            "salla": 60,
+            "bekle": 60
+          },
+          {
+            "salla": 50,
+            "bekle": 120
+          },
+          {
+            "salla": 40,
+            "bekle": 180
+          }
+        ],
+        "kime": "emzirerek uyuyanlar, eğitimden önce"
+      },
+      "kaynak": [
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "alinti": "Emzirerek uyuyanlar … üç gün boyunca sallayarak … bir dakika salladı bir dakika bekledi, 50 saniye salladı iki dakika bekledi, 40 saniye salladı üç dakika bekledi … eğitimin öncesinde bunu yapabilirler."
+        }
+      ],
+      "onay": null
+    },
+    "sallayarak_uyutan": {
+      "deger": "eğitimin birinci gününde sallama süresini azaltır ya da direkt yatağa geçer",
+      "kaynak": [
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "alinti": "Sallayarak uyutanlar eğitimin birinci gününde ya sallama süresini azaltırlar ya da direkt yatağa geçebilirler."
+        }
+      ],
+      "onay": null
+    },
+    "ortak_yatak": {
+      "deger": "önce beşiğe geçilir; gündüz uykuyla başlanır, eğitime sonra başlanır",
+      "kaynak": [
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "alinti": "Ortak yatakta uyuyanlar önce beşiğe geçiyor. Gündüz uykuyla başlıyor, eğitime sonra başlıyor."
+        }
+      ],
+      "onay": null
+    },
+    "emzik": {
+      "deger": {
+        "ilk_bekleme_dk": 1,
+        "sonra_dk": 2,
+        "artis": "her gün artar",
+        "alternatif": "emziği komple kaldırarak başlamak",
+        "bedel": "yavaş yavaş bırakarak başlarsa eğitim süresi uzar"
+      },
+      "kaynak": [
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "alinti": "Emzik … bir dakika bekledik, ağza taktık; iki dakika bekledik … her gün artacak bu süre … Ya da emziği komple kaldırarak başlayacak. Yavaş yavaş bırakarak başlarsa eğitim süresi uzar."
+        }
+      ],
+      "onay": null
+    },
+    "beyaz_gurultu": {
+      "deger": "her uykuda bir kademe kısılır",
+      "kaynak": [
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "alinti": "Beyaz gürültü her uykuda bir kademe kısılacak."
+        }
+      ],
+      "onay": null
+    },
+    "yatak_guvenligi": {
+      "deger": {
+        "peluş_battaniye_yok_ay_alti": 12,
+        "tulum": "mutlaka"
+      },
+      "kaynak": [
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "alinti": "12 ay öncesinde yatağında peluş ya da battaniye olmasın … mutlaka tulum kullanılsın."
+        }
+      ],
+      "onay": null
+    }
+  },
+  "bildirim": {
+    "uyku_once_dk": {
+      "deger": 30,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "kod",
+          "dosya": "api/services/notifier.py",
+          "satir": 71,
+          "anahtar": "UYKU_ONCE_DK"
+        },
+        {
+          "tur": "kod",
+          "dosya": "api/services/notifier.py",
+          "satir": "83-86",
+          "anahtar": "DIZI_METIN (once, gunduz)",
+          "alinti": "Uykuya 30 dakika var"
+        }
+      ],
+      "not": "GÜNDÜZ uyku öncesi bildirimi. İlayda kaynağı yok (ürün kararı); İlayda yalnız gece rutin hatırlatması için süre verdi.",
+      "onay": null
+    },
+    "gece_rutin_once_dk": {
+      "deger": 15,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar-2/transkript/WhatsApp Ptt 2026-09-25 at 14.42.49.txt",
+          "tarih": "2026-09-25",
+          "alinti": "gece yatışından önce rutine başla hatırlatması … Uykudan 15 dakika önce rutine başla çıksa mükemmel olur."
+        }
+      ],
+      "not": "KOD FARKLI: notifier.py:87-88 'Rutin zamanı 🛁 … yatışa 30 dakika var' (UYKU_ONCE_DK=30). İlayda 15 dk istiyor. İlayda'nın rutin süresi kuralı (en az 15 dk) ile tutarlı. Kod düzeltmesi ayrı iş.",
+      "onay": null
+    },
+    "kestirme_sonrasi_gece_gecis": {
+      "atif": "yas_bantlari.json#evrensel_kurallar.kestirme_protokolu.gece_uykusuna_gecis_dk",
+      "not": "notifier.py:127 'en erken 1 saat sonra' (tablodaki 60 dk ile uyumlu). İlayda 21 Eylül: '30 dakika uyutup kalktıktan sonra üç saat sonra bile gece uykusuna geçirebiliyoruz' — alt sınır söylemedi."
+    },
+    "metin_sablonlari": {
+      "deger": {
+        "once_gunduz": "Uykuya {uyku_once_dk} dakika var; sakin oyunlara geç, uyku işaretlerine bak.",
+        "once_gece": "Banyo, pijama, kitap; yatışa {gece_rutin_once_dk} dakika var.",
+        "sekerleme_uyandir": "{ad} şekerlemesini tamamladı; şimdi uyandırabilirsin. Gece uykusuna en erken {gece_gecis_saat} saat sonra geçilir."
+      },
+      "kaynak": [
+        {
+          "tur": "kod",
+          "dosya": "api/services/notifier.py",
+          "satir": "84-88",
+          "anahtar": "DIZI_METIN"
+        },
+        {
+          "tur": "kod",
+          "dosya": "api/services/notifier.py",
+          "satir": "127-129",
+          "anahtar": "SEKERLEME_UYANDIR_GOVDE"
+        }
+      ],
+      "not": "Bugünkü metinlerin yer tutuculu hâli. once_gece İlayda'nın 15 dk'sına bağlandı — bugünkü kod metni (30 dk) bu şablondan FARKLI üretilir.",
+      "onay": null
+    }
+  },
+  "kestirme": {
+    "sure_dk": {
+      "deger": 30,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.43.32.txt",
+          "tarih": "2026-09-21",
+          "alinti": "30 dakika minimum süredir."
+        },
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "soru": "5 aylık bebek gündüz 4 saat yerine 2 saat uyuduysa yarım saat kestirme yeterli mi?",
+          "alinti": "30 dk kestirme yeterli. Amaç uykuya geri dönmesi."
+        }
+      ],
+      "not": "Standart süre. Kestirme gündüz açığını kapatmak için değil, uykuya geri dönmesi / yatışa köprü.",
+      "onay": null
+    },
+    "aciga_gore_uzamaz": {
+      "deger": true,
+      "kaynak": [
+        {
+          "tur": "ilayda_12_ekim",
+          "tarih": "2026-10-12",
+          "soru": "5 aylık bebek gündüz 4 saat yerine 2 saat uyuduysa yarım saat kestirme yeterli mi?",
+          "alinti": "30 dk kestirme yeterli. Amaç uykuya geri dönmesi."
+        }
+      ],
+      "not": "Gündüz 4 saat yerine 2 saat uyunan (120 dk açık) örnekte bile 30 dk. Uzama yalnız en_fazla_dk koşuluyla (yatışı geciktirmiyorsa), açığa göre değil.",
+      "onay": null
+    },
+    "en_fazla_dk": {
+      "deger": 60,
+      "birim": "dk",
+      "kaynak": [
+        {
+          "tur": "ilayda_sesli_cevap",
+          "dosya": "ilayda-cevaplar/transkript/WhatsApp Ptt 2026-09-21 at 21.43.32.txt",
+          "tarih": "2026-09-21",
+          "alinti": "Eğer çocuğun son gündüz uykusundan kalkmasına daha çok varsa … bir saat de uyutabiliriz şekerlemede. … Yani gece uykusunu geciktirmiyorsak bir saat de şekerleme yapabilir."
+        }
+      ],
+      "not": "Yalnız gece yatışını geciktirmiyorsa (koşul: uzatma_kosulu_yatisa_kalan_min_dk). 12 Ekim cevabı bununla çelişmez: o örnekte koşul sorulmadı, standart 30 dk söylendi.",
+      "onay": null
+    },
+    "uzatma_kosulu_yatisa_kalan_min_dk": {
+      "atif": "yas_bantlari.json#evrensel_kurallar.kestirme_protokolu.gece_yatisina_kalan_min_dk",
+      "not": "Kodun koşulu (plan_adapter._sekerleme_yerlestir): şekerleme başlangıcı ile gece yatışı arası bu değer ya da fazlası ise 60 dk. İlayda sayı vermedi ('gece uykusunu geciktirmiyorsak'). Kod ve plan metinleri bu değerle aynı kuralı yazıyor."
+    }
+  },
+  "yas_atiflari": {
+    "uyaniklik_penceresi": {
+      "atif": "yas_bantlari.json#bantlar[].uyaniklik_penceresi_dk",
+      "not": "12-18 ay iki varyantlı. Mobil lib/ilayda-methodology.ts ve lib/ilayda-tips.ts farklı kopyalar taşıyor (0-3 ay ve 12-18 ay uyuşmuyor)."
+    },
+    "kestirme": {
+      "atif": "yas_bantlari.json#evrensel_kurallar.kestirme_protokolu"
+    }
+  }
+}

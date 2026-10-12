@@ -219,42 +219,32 @@ def _plan_adim_satiri(content: dict, gun_no: int, gece: bool) -> str | None:
 # ---------------------------------------------------------------------------
 # Ana giriş
 # ---------------------------------------------------------------------------
-def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None) -> str | None:
-    """Sor bağlamına eklenecek satırlar (düz metin). Kurulamazsa None.
+def gun_durumu(db: Session, baby: Baby, simdi: datetime | None = None) -> dict:
+    """Sorulan anın eğitim durumu — zaman satırı ve Sor kural bloğu (sor_kural)
+    AYNI hesabı kullanır. Plan yalnız okunur.
 
-    `simdi`: Türkiye saatli an (testler); verilmezse api.zaman.simdi_tr()."""
+    Dönen: {simdi, gun, dk, gece, plan, content, tip, durum, app_gun, etkin_gun,
+            sabah_once, toplam, uyanis, kaynak}
+      durum: "yenidogan" | "baslamadi" | "tamamlandi" | "egitim"
+      etkin_gun: gecesi sayılan gün (gece yarısından sabah uyanışına kadar önceki gün)."""
     from api.services import plan_service
     from api.zaman import simdi_tr
 
     simdi = simdi or simdi_tr()
     gun = simdi.date()
     dk = simdi.hour * 60 + simdi.minute
-    gece = gece_mi(dk)
-    satirlar = [f"Şu an: {_tarih_metni(gun)}, saat {_ss(dk)} "
-                f"({'gece' if gece else 'gündüz'})."]
-
     plan = _plan_oku(db, baby, gun)
     content = (plan.content or {}) if plan is not None else {}
     tip = plan_service.tip_turet(content) if plan is not None else None
-
-    # --- Özel durumlar ------------------------------------------------------
+    d = {"simdi": simdi, "gun": gun, "dk": dk, "gece": gece_mi(dk), "plan": plan,
+         "content": content, "tip": tip, "app_gun": None, "etkin_gun": None,
+         "sabah_once": False, "toplam": None, "uyanis": None, "kaynak": None}
     if tip == plan_service.TYPE_YENIDOGAN:
-        satirlar.append("Eğitim günü: Yenidoğan dönemi (eğitim programı yok).")
-        return " ".join(satirlar)
+        return dict(d, durum="yenidogan")
     if tip == plan_service.TYPE_BEKLEME or baby.training_started_at is None:
-        tahmini = (content.get("egitim_baslangic") or {}).get("tahmini_tarih")
-        if tip == plan_service.TYPE_BEKLEME and baby.birth_date is not None:
-            try:
-                tahmini = plan_service.egitim_baslangic_hesapla(baby, gun)["tahmini_tarih"]
-            except Exception:
-                pass
-        bas = baby.training_started_at.isoformat() if (
-            tip != plan_service.TYPE_BEKLEME and baby.training_started_at) else tahmini
-        satirlar.append(f"Eğitim günü: Eğitim henüz başlamadı (başlangıç: "
-                        f"{bas or 'belirlenmedi'}).")
-        return " ".join(satirlar)
+        return dict(d, durum="baslamadi")
 
-    # --- Gün numarası: UYGULAMANIN gösterdiği (TR takvim günü) -----------------
+    # Gün numarası: UYGULAMANIN gösterdiği (TR takvim günü)
     app_gun = plan_adapter.egitim_gunu(baby.training_started_at, gun)
     toplam = None
     try:
@@ -269,8 +259,45 @@ def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None) -> s
         uyanis, kaynak = _sabah_uyanisi(db, baby, gun, hedef, dk)
     sabah_once = dk < 12 * 60 and dk < uyanis
     etkin_gun = app_gun - 1 if sabah_once else app_gun     # gecesi sayılan gün
-
+    d.update(app_gun=app_gun, etkin_gun=etkin_gun, sabah_once=sabah_once,
+             toplam=toplam, uyanis=uyanis, kaynak=kaynak)
     if baby.training_completed_at is not None or etkin_gun > toplam:
+        return dict(d, durum="tamamlandi")
+    return dict(d, durum="egitim")
+
+
+def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None) -> str | None:
+    """Sor bağlamına eklenecek satırlar (düz metin). Kurulamazsa None.
+
+    `simdi`: Türkiye saatli an (testler); verilmezse api.zaman.simdi_tr()."""
+    from api.services import plan_service
+
+    d = gun_durumu(db, baby, simdi)
+    gun, dk, gece = d["gun"], d["dk"], d["gece"]
+    plan, content, tip = d["plan"], d["content"], d["tip"]
+    satirlar = [f"Şu an: {_tarih_metni(gun)}, saat {_ss(dk)} "
+                f"({'gece' if gece else 'gündüz'})."]
+
+    # --- Özel durumlar ------------------------------------------------------
+    if d["durum"] == "yenidogan":
+        satirlar.append("Eğitim günü: Yenidoğan dönemi (eğitim programı yok).")
+        return " ".join(satirlar)
+    if d["durum"] == "baslamadi":
+        tahmini = (content.get("egitim_baslangic") or {}).get("tahmini_tarih")
+        if tip == plan_service.TYPE_BEKLEME and baby.birth_date is not None:
+            try:
+                tahmini = plan_service.egitim_baslangic_hesapla(baby, gun)["tahmini_tarih"]
+            except Exception:
+                pass
+        bas = baby.training_started_at.isoformat() if (
+            tip != plan_service.TYPE_BEKLEME and baby.training_started_at) else tahmini
+        satirlar.append(f"Eğitim günü: Eğitim henüz başlamadı (başlangıç: "
+                        f"{bas or 'belirlenmedi'}).")
+        return " ".join(satirlar)
+
+    app_gun, etkin_gun, toplam = d["app_gun"], d["etkin_gun"], d["toplam"]
+    uyanis, kaynak, sabah_once = d["uyanis"], d["kaynak"], d["sabah_once"]
+    if d["durum"] == "tamamlandi":
         satirlar.append(f"Eğitim günü: {toplam} günlük program tamamlandı.")
         return " ".join(satirlar)
 
