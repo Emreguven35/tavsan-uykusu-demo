@@ -16,12 +16,13 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from api.config import SOR_GUNLUK_UCRETSIZ
+from api.config import SOR_GUNLUK_UCRETSIZ, _bayrak
 from api.db import get_db
 from api.deps import PremiumGerekli, get_current_user, get_owned_baby
 from api.models import ChatMessage, User
 from api.schemas.chat import ChatReq, ChatResp, ChatSource
 from api.services import baby_context as baby_ctx
+from api.services import sor_baglam
 from api.services import takma_ad
 from api.services import usage
 from engine import chatbot
@@ -29,11 +30,15 @@ from engine import chatbot
 logger = logging.getLogger("tavsan.chat")
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-# Faz G6: sunucu-taraflı geçmiş sınırı. history şu an motora GEÇMİYOR (tek-turlu RAG)
-# ama sözleşmede taşınıyor; ileride multi-turn'e açılırsa istemcinin sınırsız geçmiş
-# göndererek prompt'u (ve maliyeti) karesel şişirmesini önlemek için burada, SUNUCUDA
-# kırpılır. Mobil de kırpar ama sunucu istemciye güvenmez.
+# Faz G6: sunucu-taraflı geçmiş sınırı. SOR_GECMIS kapalıyken history motora
+# GEÇMİYOR (tek-turlu RAG); açıkken kırpılmış hâli modele gider. İstemcinin sınırsız
+# geçmiş göndererek prompt'u (ve maliyeti) karesel şişirmesini önlemek için burada,
+# SUNUCUDA kırpılır. Mobil de kırpar ama sunucu istemciye güvenmez.
 MAX_HISTORY_MESSAGES = 6
+
+# SOR_GECMIS (2026-10-12): geçmiş modele gider. Kapalıyken davranış eskisinin aynı.
+GECMIS_BAYRAK = "SOR_GECMIS"
+GECMIS_MAX_SAAT = 12             # zamanı bilinen ve bundan eski mesaj gönderilmez
 
 
 def trim_history(history: list, limit: int = MAX_HISTORY_MESSAGES) -> list:
@@ -41,6 +46,26 @@ def trim_history(history: list, limit: int = MAX_HISTORY_MESSAGES) -> list:
     if history and len(history) > limit:
         return history[-limit:]
     return history
+
+
+def gecmis_hazirla(history: list, gercek_ad: str | None, takma: str | None,
+                   simdi: datetime | None = None) -> list[dict]:
+    """Modele gidecek geçmiş: 12 saatten eski (zamanı bilinen) mesajlar düşer,
+    HER mesajda — asistan cevapları dahil — gerçek ad takma adla değişir.
+    Saf fonksiyon (DB yok)."""
+    simdi = simdi or datetime.now(timezone.utc)
+    sinir = simdi - timedelta(hours=GECMIS_MAX_SAAT)
+    out = []
+    for m in history or []:
+        zaman = getattr(m, "created_at", None)
+        if zaman is not None:
+            if zaman.tzinfo is None:
+                zaman = zaman.replace(tzinfo=timezone.utc)
+            if zaman < sinir:
+                continue
+        out.append({"role": m.role,
+                    "content": takma_ad.adi_gizle(m.content, gercek_ad, takma)})
+    return out
 
 
 def _ucretsiz_kalan(db: Session, user: User) -> int | None:
@@ -107,11 +132,37 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
             ctx = None
         # ctx yalnız profil bile kurulamazsa None döner → genel davranış korunur.
 
+        # SOR_BAGLAM_V2: şu an, gece/gündüz, eğitimin kaçıncı günü + o günün plan
+        # adımı. YALNIZ Sor'a gider (build_baby_context'e eklenmez). Plan metnini
+        # LLM yazdığı için gerçek ad geçebilir → takma adla gizlenir.
+        if ctx and sor_baglam.acik_mi():
+            try:
+                ek = sor_baglam.zaman_satirlari(db, baby)
+                if ek:
+                    ctx = ctx + "\n" + takma_ad.adi_gizle(ek, gercek_ad, takma)
+            except Exception:
+                logger.exception("Sor zaman satırı kurulamadı, satırsız devam "
+                                 "(baby=%s)", baby.id)
+                db.rollback()
+
     # Mevcut RAG + cache motoru (yeniden yazılmadı — import edildi).
     # NOT: ctx doluysa motor cevap cache'ini BYPASS eder (kişisel veri paylaşılmaz).
+    # Ek parametreler YALNIZ bayrak açıkken verilir: kapalıyken çağrı (ve modele
+    # giden yük) eskisinin birebir aynısı.
+    ek_param: dict = {}
+    if _bayrak(GECMIS_BAYRAK):
+        gecmis = gecmis_hazirla(req.history, gercek_ad, takma)
+        if gecmis:
+            ek_param["gecmis"] = gecmis
+            onceki = [m["content"] for m in gecmis if m["role"] == "user"]
+            if onceki:
+                ek_param["onceki_soru"] = onceki[-1]
+    if sor_baglam.acik_mi():
+        ek_param["sistem_eki"] = sor_baglam.SISTEM_EKI
+
     _t0 = time.perf_counter()
     soru = takma_ad.adi_gizle(req.message, gercek_ad, takma)
-    r = chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx)
+    r = chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx, **ek_param)
     r["cevap"] = takma_ad.adi_geri_koy(r["cevap"], takma, gercek_ad)
     _sure_ms = int((time.perf_counter() - _t0) * 1000)
 
@@ -138,10 +189,11 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     db.commit()
 
     # KVKK: bebek verisi İÇERİĞİ loglanmaz — yalnız bağlamın eklenip eklenmediği.
-    logger.info("chat: user=%s q_len=%d a_len=%d cached=%s katman=%s skor=%s bebek=%s",
+    logger.info("chat: user=%s q_len=%d a_len=%d cached=%s katman=%s skor=%s bebek=%s "
+                "gecmis=%d",
                 user.id, len(req.message), len(r["cevap"]), r["cache_hit"],
                 layer, f"{top_score:.3f}" if top_score is not None else "-",
-                "var" if ctx else "yok")
+                "var" if ctx else "yok", r.get("gecmis_sayisi", 0))
 
     sources = None
     if r["kaynaklar"]:
