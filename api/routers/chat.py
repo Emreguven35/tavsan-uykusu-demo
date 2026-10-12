@@ -151,7 +151,8 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
         # tablosundan) — blok bağlama, aynı değerler doğrulamaya. Blokta ad yok.
         if ctx and (sor_kural.blok_acik_mi() or sor_kural.dogrulama_acik_mi()):
             try:
-                kural = sor_kural.kurallar(sor_baglam.gun_durumu(db, baby), baby)
+                kural = sor_kural.kurallar(sor_baglam.gun_durumu(db, baby), baby,
+                                           soru=req.message)    # yalnız yatış tespiti
                 if kural and sor_kural.blok_acik_mi():
                     ctx = ctx + "\n" + kural["blok"]
             except Exception:

@@ -347,8 +347,12 @@ check("V) 'ikinci uyanmada 6-7, üçüncüde 8-9 dakika' → 4 sayı ihlali + y�
       len([r for r, _ in _v67 if r != "yon"]) == 4 and ("yon", 0.0) in _v67, _v67)
 _kg = ("- **1. gündüz uykusu:** Dışarıdan 10 dakika bekleyin, sonra içeri girin ve beşiğin "
        "yanında oturup toplam 35 dakika daha bekleyin")
+def _sayisal(v):          # yatış kuralını ayrı test ediyoruz
+    return [x for x in v if x[0] != "yatis_dis"]
+
+
 check("V) 'Dışarıdan 10 … 35 dakika': 2. gün gündüzünde uygun, 1. günde ihlal",
-      ihlal(_kg, k_g2g) == [] and set(r for r, _ in ihlal(_kg, k_g1)) == {"dis", "ic"},
+      _sayisal(ihlal(_kg, k_g2g)) == [] and set(r for r, _ in _sayisal(ihlal(_kg, k_g1))) == {"dis", "ic"},
       (ihlal(_kg, k_g2g), ihlal(_kg, k_g1)))
 check("V) Aynı cümle 02:30'da (sabah 3. gün): 10/35 ihlal", set(r for r, _ in ihlal(_kg, k_g2)) == {"dis", "ic"},
       ihlal(_kg, k_g2))
@@ -570,11 +574,65 @@ check("V) Düzelt: 'aynı gece … planınızın gece bölümüne bakın' varsa 
 check("V) 'ör.' / 'vb.' kısaltması cümleyi bölmez",
       len(sor_kural._cumleler("Kısa bir rutin yapın — ör. perde kapatmak, masaj vb. şeyler. Sonra yatırın.")) == 2)
 check("V) Kısa uyku eşiği bağlamı yoksa 60 dış bekleme sayılmaz: 'dışarıda 60 dakika bekleyin' ihlal",
-      ihlal("Dışarıda 60 dakika bekleyin.", k_g2g) == [("dis", 60.0)])
+      _sayisal(ihlal("Dışarıda 60 dakika bekleyin.", k_g2g)) == [("dis", 60.0)])
 check("V) Mod: tanımsız/kapali → kapali; izle/duzelt/yeniden; eski '1'/'true' → duzelt",
       [(_mod_dene(v)) for v in (None, "kapali", "izle", "duzelt", "yeniden", "1", "true", "abc")]
       == ["kapali", "kapali", "izle", "duzelt", "yeniden", "duzelt", "duzelt", "kapali"])
 
+
+# --- 2026-10-12 c: yatış ↔ gece uyanması, mola tanımı, saatli süreler, aşama geçişi
+_k_yat, _ = kural_al(BID, G.replace(hour=20, minute=35) + timedelta(days=1))   # 3. gün, yatış saati
+_k_gece = k_g2                                                                 # 02:30, gece uyanması
+check("K) Yatış: saat (gece yatışından sonraki 3 sa) ve soru sözcükleriyle; uyanma sorusu yatış değil",
+      _k_yat["yatis"] and not _k_gece["yatis"]
+      and sor_kural.yatis_mi("Bebeği yatırdım, ağlıyor", {"dk": 120, "sabah_once": True}, [])
+      and not sor_kural.yatis_mi("Gece uyandı, ne yapayım?", {"dk": 20 * 60 + 35, "sabah_once": False},
+                                 [{"type": "sleep", "start_minute": 20 * 60}]))
+check("K) Blokta YATIŞ ve GECE UYANMASI ayrı; yatışta dışarıda bekleme YOK",
+      "- YATIŞ (gece yatışı ve gündüz uykuları; bebeği yatırırken ve uykuya dalarken): annenin yeri odada, "
+      "beşiğin yanında (sandalyede ya da ayakta); yatışta DIŞARIDA BEKLEME YOK." in blok2
+      and "- GECE UYANMASI (bebek uyuduktan sonra gece uyanırsa; yatışta değil): önce dışarıda bekle" in blok2,
+      blok2)
+check("K) Yatış saatinde blok 'Soru YATIŞLA ilgili' der; 02:30'da demez",
+      "Soru YATIŞLA ilgili görünüyor" in _k_yat["blok"] and "Soru YATIŞLA" not in blok2)
+check("K) Gün 13 (yatır-çık) yatışı: dış bekleme dizisi yatışta",
+      "yatır-çık: dışarıda 5 → 10 → 15 → 20 dk bekleyip kısa girip çık." in k_g13["blok"], k_g13["blok"])
+check("K) Rutin molası tanımı tablodan: bebekle odada, beslenme yok; anne molası değil",
+      "- Rutin molası nedir: bebekle odada yapılan kısa bir uyku rutinidir (oda içinde; rutinde beslenme "
+      "yok (mama, meme, süt, sıvı yok)); annenin dinlenme arası DEĞİLDİR, anne odadan çıkmaz." in blok2, blok2)
+check("K) Aşama geçişi notu (ağlama ortalaması / süre kovaları) blokta YOK; yalnız takvim satırı",
+      all(w not in b.lower() for b in (blok2, _k_yat["blok"], k_g5["blok"])
+          for w in ("ortalama", "kova", "aşama geçişi", "1 hafta")), blok2)
+check("V) Yatış (20:35): 'önce dışarıda bekleyin' ihlal; gece uyanması / kısa gündüz bağlamı uygun; "
+      "02:30'da aynı cümle uygun",
+      ihlal("Ağlama itiraz niteliğindeyse önce dışarıda bekleyin.", _k_yat) == [("yatis_dis", 0.0)]
+      and ihlal("Gece uyanırsa önce dışarıda bekleyin.", _k_yat) == []
+      and ihlal("Uyku 60 dakikanın altında kalırsa dışarıda bekleyin, sonra içeri girin.", _k_yat) == []
+      and ihlal("Yatışta dışarıda beklemeyin.", _k_yat) == []
+      and ihlal("Ağlama itiraz niteliğindeyse önce dışarıda bekleyin.", _k_gece) == [])
+_m, _d, _c = sor_kural.duzelt_ayrinti("Ağlarsa önce dışarıda bekleyin. Sonra beşiğin yanına geçin.", _k_yat)
+check("V) Düzelt: yatışta dış bekleme cümlesi yatış karşılığıyla değişir",
+      _m.startswith("Yatışta dışarıda beklemezsiniz, odada, beşiğin yanında") and (_d, _c) == (1, 0), _m)
+check("V) Yatır-çık aşamasında yatışta dışarıda bekleme uygun",
+      ihlal("Önce dışarıda bekleyin.", dict(k_g13, yatis=True)) == [])
+check("V) Mola anne molası gibi: '15 dakikalık rutin molası alın: odadan çıkın, yüzünüzü yıkayın' ihlal",
+      ("mola_tanimi", 0.0) in ihlal("15 dakikalık rutin molası alın: odadan çıkın, yüzünüzü yıkayın, su için.",
+                                    _k_yat)
+      and ihlal("15 dakikalık rutin molası verin; beslenme yok.", _k_yat) == [])
+check("V) Saatli süre: '1-1,5 saat uyanıklık' (bant 3–4 sa) ihlal; '3-4 saat' ve '3,5 saat' uygun",
+      ihlal("Yaşına uygun uyanıklık süresi 1-1,5 saat civarı.", k_g2g) == [("saat_sure", 60.0), ("saat_sure", 90.0)]
+      and ihlal("Uyanıklık penceresi 3-4 saat.", k_g2g) == []
+      and ihlal("Uyanıklık penceresi üç buçuk saat.", k_g2g) == [])
+check("V) Saatli süre: '2 saat 30 dakika' tek süre (150 dk) olarak; dakika kısmı ayrıca sayılmaz",
+      ihlal("Uyanık kalma süresi 2 saat 30 dakika olsun.", k_g2g) == [("saat_sure", 150.0)]
+      and ihlal("Uyanık kalma süresi 3 saat 30 dakika olsun.", k_g2g) == [])
+check("V) Saatli süre: çizelge süreleri (gece uykusu 11-12 sa) ve saat (09:30) karışmaz",
+      ihlal("Gece uykusu 11-12 saat sürer.", k_g2g) == [] and ihlal("Saat 2'de uyutun.", k_g2g) == [])
+check("V) Saatli süre karşılığı yaş bandından; kendi doğrulamasından geçer",
+      k_g2g["karsilik"]["saat_sure"] == "Bu yaşta uyanıklık penceresi 3–4 saattir."
+      and ihlal(k_g2g["karsilik"]["saat_sure"], k_g2g) == [])
+check("V) Yeni karşılıklar (yatis_dis, mola_tanimi) kendi doğrulamasından geçer",
+      all(ihlal(k["karsilik"][r], k) == [] for k in (_k_yat, k_g2g, k_g8) for r in ("yatis_dis", "mola_tanimi")))
 
 # =============================================================================
 # F — sohbet akışı (sahte model)
