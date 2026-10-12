@@ -23,6 +23,11 @@ Kapsam:
       eğitim ortasında yeniden üretimde "Eğitim sürerken", geçiş adımları yok;
       bekleme ve bayrak kapalı istem bölümü eskisinin aynısı; çizelge, gün
       sayısı ve training_started_at değişmez
+  H8  Okuma anında dönüşüm: eğitim planı döndürülürken metindeki "## Ön
+      Hazırlık" bölümü eğitimin o günkü durumuna göre değişir (ilk gün /
+      sürerken / tamamlandı → bölüm yok); /plans/today, /plans, /plans/{tarih}
+      hepsinde; DB'ye yazılmaz; bayrak kapalıyken metin aynen; "## Eğitim
+      Planı", günler, çizelge değişmez; bekleme planı değişmez
 
 Çalıştırma: python tests/test_hazirlik_kurallari.py
 """
@@ -418,6 +423,105 @@ check("H7g) Yeniden üretim: training_started_at ve gün sayısı değişmedi, �
 check("H7h) egitim_durumu: bekleme → None",
       plan_service.egitim_durumu(None, {"uygun_mu": False}, BUGUN) is None, "")
 bayrak(False)
+
+# =============================================================================
+# H8 — okuma anında "Ön Hazırlık" dönüşümü
+# =============================================================================
+_ESKI_BOLUM = ("## Ön Hazırlık\n\nEğitime başlamadan önce şunları yapın; 1-3 gün "
+               "içinde hazırlanabilirsiniz.\n\n### 1. Destek\nEğitimden önce "
+               "sallamayı azaltın.\n\n---\n\n")
+_h = hazirlik.hazirlik_bolumunu_degistir
+_ornek = ("## Bebek Profili Özeti\nx\n\n" + _ESKI_BOLUM
+          + "## Günlük Program\ny\n\n## Eğitim Planı\n\n### Gün 1\nÖn Hazırlık yok\n")
+check("H8a) Birim: bölüm değişir, öncesi/sonrası ve Eğitim Planı aynı",
+      _h(_ornek, "## Eğitim sürerken\n\n- a\n\n")
+      == _ornek.replace(_ESKI_BOLUM, "## Eğitim sürerken\n\n- a\n\n"), "")
+check("H8a) Birim: '' → bölüm kaldırılır; bölüm yoksa metin aynı",
+      "Ön Hazırlık\n" not in _h(_ornek, "") and _h("## A\nb\n", "x") == "## A\nb\n", "")
+_sonra = "## Eğitim Planı\n\n### Gün 1\nz\n\n## Ön Hazırlık\nq\n"
+check("H8a) Birim: Eğitim Planı'ndan SONRAKİ hazırlık başlığına dokunulmaz",
+      _h(_sonra, "X") == _sonra, "")
+
+
+def plan_metni(bid: str, md: str | None = None) -> str:
+    """Bebeğin bugünkü (son) planının DB'deki markdown'ı; `md` verilirse yazar."""
+    db = SessionLocal()
+    try:
+        p_ = (db.query(SleepPlan).filter(SleepPlan.baby_id == uuid.UUID(bid))
+              .order_by(SleepPlan.plan_date.desc()).first())
+        if md is not None:
+            c_ = dict(p_.content)
+            c_["markdown"] = md
+            p_.content = c_
+            db.commit()
+        return p_.content["markdown"]
+    finally:
+        db.close()
+
+
+def bebek_tarih(bid: str, **alanlar) -> None:
+    db = SessionLocal()
+    try:
+        b_ = db.get(Baby, uuid.UUID(bid))
+        for k, v in alanlar.items():
+            setattr(b_, k, v)
+        db.commit()
+    finally:
+        db.close()
+
+
+_md_db = plan_metni(B_EGITIM)
+_eski_md = hazirlik.hazirlik_bolumunu_degistir(_md_db, _ESKI_BOLUM)
+plan_metni(B_EGITIM, _eski_md)                       # eski (LLM) biçimli metin
+bayrak(False)
+_t_kapali = bugun(B_EGITIM)
+check("H8b) Bayrak kapalı: metin DB'deki gibi aynen",
+      _t_kapali["content"]["markdown"] == _eski_md, "")
+bayrak(True)
+bebek_tarih(B_EGITIM, training_started_at=BUGUN - timedelta(days=4), training_completed_at=None)
+_t_sur = bugun(B_EGITIM)
+_m_sur = _t_sur["content"]["markdown"]
+_ep = lambda m: m[m.find("## Eğitim Planı"):]
+_yeni_bolum = hazirlik._BOLUM_RE.search(_m_sur)
+_yeni_bolum = _yeni_bolum.group(0) if _yeni_bolum else ""
+check("H8c) Eğitim sürüyor: '## Eğitim sürerken', bölümde eski ifade ve geçiş adımı yok",
+      _yeni_bolum.startswith("## Eğitim sürerken") and "## Ön Hazırlık" not in _m_sur
+      and not any(x in _yeni_bolum for x in ("başlamadan önce", "1-3 gün", "Eğitimden önce",
+                                              "Emzirerek uyutmayı bırak", "Önce beşiğe geç"))
+      and "**Beslenme uykudan en az 1 saat önce bitsin** (Eğitim boyunca)" in _yeni_bolum,
+      _yeni_bolum[:400])
+check("H8c) Bölüm DIŞINDAKİ metin birebir aynı (yalnız bölüm değişti)",
+      _m_sur.replace(_yeni_bolum, _ESKI_BOLUM, 1) == _eski_md, "")
+check("H8d) Eğitim Planı ve sonrası, günler, çizelge aynı; DB'ye yazılmadı",
+      _ep(_m_sur) == _ep(_eski_md)
+      and _t_sur["content"].get("days") == _t_kapali["content"].get("days")
+      and _t_sur["content"]["schedule"] == _t_kapali["content"]["schedule"]
+      and plan_metni(B_EGITIM) == _eski_md, "")
+bebek_tarih(B_EGITIM, training_started_at=BUGUN)
+_m_ilk = bugun(B_EGITIM)["content"]["markdown"]
+check("H8e) Eğitim bugün başladı: '## Eğitimin ilk günü', ilk gün metinleri",
+      "## Eğitimin ilk günü" in _m_ilk
+      and "Bugünden itibaren emzirerek değil sallayarak uyut" in _m_ilk
+      and "başlamadan önce" not in _m_ilk, _m_ilk[:400])
+bebek_tarih(B_EGITIM, training_started_at=BUGUN - timedelta(days=4))
+with saat_sabitle(SIMDI):
+    _liste = client.get(f"/api/v1/plans?baby_id={B_EGITIM}", headers=H).json()
+    _tarihli = client.get(f"/api/v1/plans/{BUGUN}?baby_id={B_EGITIM}", headers=H).json()
+check("H8f) /plans ve /plans/{tarih} de dönüşmüş metni veriyor",
+      "## Eğitim sürerken" in _liste[0]["content"]["markdown"]
+      and "## Eğitim sürerken" in _tarihli["content"]["markdown"], "")
+bebek_tarih(B_EGITIM, training_completed_at=BUGUN - timedelta(days=1))
+_m_bit = bugun(B_EGITIM)["content"]["markdown"]
+check("H8g) Eğitim tamamlandı: hazırlık bölümü hiç yok, Eğitim Planı aynı",
+      "## Ön Hazırlık" not in _m_bit and "## Eğitim sürerken" not in _m_bit
+      and "## Eğitimin ilk günü" not in _m_bit and _ep(_m_bit) == _ep(_eski_md), "")
+bebek_tarih(B_EGITIM, training_completed_at=None)
+_m_bek_db = plan_metni(B_BEKLEME)
+check("H8h) Bekleme planı: metin DB'deki gibi aynen",
+      bugun(B_BEKLEME)["content"]["markdown"] == _m_bek_db, "")
+bayrak(False)
+check("H8i) Bayrak tekrar kapalı: eski metin aynen geri",
+      bugun(B_EGITIM)["content"]["markdown"] == _eski_md, "")
 
 plan_generator.plan_uret = _eski_uret
 check("Z) Canlı LLM çağrısı yapılmadı", canli_cagri_sayisi() == 0, canli_cagri_sayisi())

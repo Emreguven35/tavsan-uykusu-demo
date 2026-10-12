@@ -598,6 +598,34 @@ def istem_profili(profile: dict, param: dict, takma: str | None,
     return out
 
 
+def hazirlik_bolumunu_tazele(content: dict | None, baby: Baby | None,
+                             gun: date) -> dict | None:
+    """HAZIRLIK_KURALLARI — eğitim planının metnindeki hazırlık bölümünü `gun`ün
+    eğitim durumuna göre değiştir (okuma anında, DB'ye YAZMAZ).
+
+      eğitim `gun` başladı      → "## Eğitimin ilk günü" + ilk gün listesi
+      eğitim sürüyor (2. gün+)  → "## Eğitim sürerken" + eğitim boyunca geçerliler
+      eğitim tamamlandı         → bölüm kaldırılır
+    Bekleme/yenidoğan planı, başlangıcı olmayan ya da ileri tarihli eğitim,
+    doğum tarihi olmayan bebek: içerik aynen döner."""
+    if (not content or baby is None or baby.birth_date is None
+            or tip_turet(content) != TYPE_EGITIM or not content.get("markdown")):
+        return content
+    ts, bitti = baby.training_started_at, baby.training_completed_at
+    if bitti is not None and bitti <= gun:
+        yeni = ""
+    elif ts is None or ts > gun:
+        return content
+    else:
+        durum = "ilk_gun" if ts == gun else "suruyor"
+        hafta = etkin_dogum_haftasi(baby, content.get("dogum_haftasi"))
+        yas = hesapla_yas_ay(baby.birth_date.isoformat(), hafta, bugun=gun)
+        yeni = hazirlik.egitim_bolumu_markdown(baby, yas["duzeltilmis_ay"], durum)
+    c = dict(content)
+    c["markdown"] = hazirlik.hazirlik_bolumunu_degistir(content["markdown"], yeni)
+    return c
+
+
 def egitim_durumu(baby: Baby, param: dict, bugun: date) -> str | None:
     """Üretilen plan için eğitim durumu: None (bekleme — eğitim bugün
     uygulanmıyor), "ilk_gun" (eğitim bugün başlıyor: ilk plan, bekleme→eğitim

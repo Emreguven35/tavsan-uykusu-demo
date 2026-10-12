@@ -57,6 +57,15 @@ def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
     except Exception:
         logger.exception("Zamana bağlı alanlar tazelenemedi (plan=%s) — "
                          "saklanan içerik dönüyor", plan.id)
+    # HAZIRLIK_KURALLARI — metindeki "Ön Hazırlık" bölümü eğitimin o günkü
+    # durumuna göre (okuma anında; DB'ye yazılmaz). Aynı süsleme kuralı.
+    if hazirlik.acik_mi():
+        try:
+            resp.content = plan_service.hazirlik_bolumunu_tazele(
+                resp.content, db.get(Baby, plan.baby_id), referans or plan.plan_date)
+        except Exception:
+            logger.exception("Hazırlık bölümü dönüştürülemedi (plan=%s) — "
+                             "saklanan metin dönüyor", plan.id)
     icerik, kilitli = erisim.plan_icerigi_kilitle(resp.content or {}, premium)
     if kilitli:
         resp.content = icerik

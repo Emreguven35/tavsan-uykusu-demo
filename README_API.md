@@ -852,6 +852,14 @@ Kapalı gelir; kapalıyken hiçbir yanıt değişmez. Açıkken:
   eğitim ortasında yeniden üretimde (`training_started_at` < bugün)
   `## Eğitim sürerken` (geçiş adımları yok). Bekleme planında `## Ön Hazırlık`
   aynen kalır. Geçiş adımları listesi: `hazirlik.GECIS_ADIMLARI`.
+- **Okuma anında dönüşüm:** plan döndüren her uçta (`/plans/today`, `/plans`,
+  `/plans/{tarih}`, üretim yanıtları) eğitim planının metnindeki hazırlık
+  bölümü (`## Ön Hazırlık`, ya da yeni planlarda `## Eğitimin ilk günü` /
+  `## Eğitim sürerken`) o günün eğitim durumuna göre deterministik bölümle
+  değişir: eğitim o gün başladıysa `## Eğitimin ilk günü`, sürüyorsa
+  `## Eğitim sürerken`, tamamlandıysa bölüm hiç gösterilmez. DB'ye yazılmaz;
+  `## Eğitim Planı` ve sonrası, `days`, `schedule` değişmez. Bekleme/yenidoğan
+  planı değişmez. Metinler yalnız `api/services/hazirlik.py`'den.
 
 ### Bitişi bilinmeyen kayıt (v2.8.2)
 

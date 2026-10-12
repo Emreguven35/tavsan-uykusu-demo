@@ -26,6 +26,7 @@ Bayrak kapalıyken hiçbiri çağrılmaz: davranış bugünkünün aynısı.
 """
 from __future__ import annotations
 
+import re
 from datetime import date
 
 from api.config import _bayrak
@@ -255,6 +256,47 @@ def on_hazirlik_listesi(baby, yas_ay: float | None,
               "aksiyon": a["aciklama"]} for a in adimlar]
             + [{"kimlik": u["kimlik"], "konu": u["baslik"], "sure": "Güvenlik uyarısı",
                 "aksiyon": u["aciklama"]} for u in h["uyarilar"]])
+
+
+# ---------------------------------------------------------------------------
+# Okuma anında plan metni dönüşümü (2026-10-12)
+# ---------------------------------------------------------------------------
+# Eğitimdeki planların metnindeki yapay zekâ yazımı "## Ön Hazırlık" bölümü
+# eğitim öncesine ait ("Eğitime başlamadan önce…", "1-3 gün içinde…"). Plan
+# DÖNDÜRÜLÜRKEN (plans._plan_yaniti) bu bölüm eğitimin o günkü durumuna göre
+# buradaki kaynaklardan kurulan deterministik bölümle değişir; DB'ye yazılmaz,
+# bayrak kapanınca saklanan metin aynen döner. Yeni planların (4026d3c)
+# "Eğitimin ilk günü" / "Eğitim sürerken" bölümleri de aynı yolla günün
+# durumuna çekilir. "## Eğitim Planı" ve sonrası ASLA değişmez.
+_BOLUM_RE = re.compile(
+    r"^##[ \t]+(?:Ön Hazırlık|Eğitimin İlk Günü|Eğitimin ilk günü|Eğitim Sürerken|"
+    r"Eğitim sürerken)\b[^\n]*\n.*?(?=^#{1,2}[ \t]|\Z)",
+    re.M | re.S)
+_EGITIM_PLANI_RE = re.compile(r"^#{1,2}[ \t]+Eğitim Planı", re.M | re.I)
+
+
+def egitim_bolumu_markdown(baby, yas_ay: float | None, durum: str) -> str:
+    """"Eğitimin ilk günü" / "Eğitim sürerken" bölümü — metinler yalnız bu
+    modülün kaynaklarından (ADIM_METINLERI, ILK_GUN_METINLERI, UYARI_METINLERI)."""
+    satirlar = [f"- **{h['konu']}** ({h['sure']}): {h['aksiyon']}"
+                for h in on_hazirlik_listesi(baby, yas_ay, durum)]
+    return f"## {EGITIM_DURUMU_BOLUM[durum]}\n\n" + "\n".join(satirlar) + "\n\n"
+
+
+def hazirlik_bolumunu_degistir(markdown: str, yeni: str) -> str:
+    """İlk hazırlık bölümünü `yeni` ile değiştir ("" → bölümü kaldır).
+
+    Yalnız "## Eğitim Planı" başlığından ÖNCEKİ bölüm ele alınır; bulunmazsa
+    metin aynen döner."""
+    if not markdown:
+        return markdown
+    m = _BOLUM_RE.search(markdown)
+    if m is None:
+        return markdown
+    ep = _EGITIM_PLANI_RE.search(markdown)
+    if ep is not None and m.start() > ep.start():
+        return markdown
+    return markdown[:m.start()] + yeni + markdown[m.end():]
 
 
 def egitim_oncesi_karti(baby, content: dict | None, bugun: date) -> dict | None:
