@@ -53,7 +53,7 @@ from api.db import Base, SessionLocal, engine               # noqa: E402
 import api.models                                           # noqa: E402,F401
 from api.main import app                                    # noqa: E402
 from api.models import ApiUsage, Baby, SleepLog, SleepPlan, User  # noqa: E402
-from api.services import notifier, plan_adapter, sor_baglam, sor_kural  # noqa: E402
+from api.services import notifier, plan_adapter, sor_baglam, sor_kural, yontem_kart  # noqa: E402
 from api.services.security import hash_password             # noqa: E402
 from api.zaman import TR, bugun_tr, saat_sabitle            # noqa: E402
 from engine import chatbot                                  # noqa: E402
@@ -132,14 +132,23 @@ check("C) Build 28: baslik 'GECE UYANIRSA · Beşik yanı'", k.get("baslik") == 
 check("C) Build 28: resist_minutes / routine_minutes aynen",
       k.get("resist_minutes") == 45 and k.get("routine_minutes") == 15, k)
 adim = [a["metin"] for a in k.get("adimlar") or []]
-check("C) Adımlar: dışarıda bekle → içeride 45 dk → 15 dk rutin (beslenme yok) → 3 kez → destekle uyut",
-      len(adim) == 5 and "dışarıda bekleyin" in adim[0] and "45 dakika" in adim[1]
-      and "15 dakikalık" in adim[2] and "beslenme olmasın" in adim[2]
-      and "en fazla 3 kez" in adim[3] and "destek vererek uyutun" in adim[4], adim)
-check("C) Son adım tablodaki sonuç: 'o gün başarısız sayılır'; tabloda olmayan 'yarın devam' yok",
-      adim[4] == "Yine uyumazsa mecburen destek vererek uyutun; o gün başarısız sayılır."
-      and "yarın" not in adim[4], adim[4])
-check("C) İlk bekleme (bekleyen) için sayı YOK", not re.search(r"\d", adim[0]), adim[0])
+check("C) 2. gün (2. gece) adımlar: dışarıda 10 dk (+1/uyanma) → içeride 45 dk → 15 dk rutin → uyuyana kadar",
+      len(adim) == 5
+      and adim[0] == "Önce odaya girmeden dışarıda 10 dakika bekleyin; aynı gece yeniden uyanırsa her "
+                     "seferinde 1 dakika daha uzun bekleyin."
+      and "45 dakika" in adim[1] and "15 dakikalık" in adim[2] and "beslenme olmasın" in adim[2]
+      and adim[3] == "Sonra yeniden 45 dakika deneyin.", adim)
+check("C) 2. gece son adım: destekle uyutma YOK, döngü uyuyana kadar (İlayda 12 Ekim)",
+      adim[4] == "Uyumazsa 15 dakika rutin ve 45 dakika deneme döngüsünü bebek uyuyana kadar "
+                 "sürdürün; bu gece destek vererek uyutma yok.", adim[4])
+H1, BID1 = hesap(egitim_gunu_bugun=1)
+k1 = bugunku(H1, BID1, "1.0.0+28")["night_wake_protocol"]
+a1 = [a["metin"] for a in k1["adimlar"]]
+check("C) 1. gece: dışarıda 5 dk; en fazla 3 kez; son adım destekle uyut, o gün başarısız (tablo)",
+      a1[0].startswith("Önce odaya girmeden dışarıda 5 dakika bekleyin")
+      and "en fazla 3 kez" in a1[3]
+      and a1[4] == "Yine uyumazsa mecburen destek vererek uyutun; o gün başarısız sayılır."
+      and "yarın" not in a1[4], a1)
 check("C) Beşik yanı yöntemi: pat-pat, histerik değilse kucak yok",
       "pat-pat" in adim[1] and "kucağa almayın" in adim[1], adim[1])
 check("C) Saklanan plan DEĞİŞMEDİ (okuma anında)",
@@ -147,10 +156,12 @@ check("C) Saklanan plan DEĞİŞMEDİ (okuma anında)",
                    .content["night_wake_protocol"]))(SessionLocal()) == plan_adapter.NIGHT_WAKE_PROTOCOL)
 H3, BID3 = hesap(egitim_gunu_bugun=8)             # kapı aşaması
 k8 = bugunku(H3, BID3, "1.0.0+30")["night_wake_protocol"]
-check("C) Kapı aşaması (temas kuralı bekliyor): başlık 'Kapı', yöntemde sayı yok, temas tarifi yok",
+check("C) Kapı aşaması (8. gece): dışarıda 40 dk; içeride sesle sakinleştir, yalnız histerikte temas",
       k8["baslik"] == "GECE UYANIRSA · Kapı"
-      and k8["adimlar"][1]["metin"] == "Sonra içeri girin, bu aşamanın yöntemiyle 45 dakika uyutmayı deneyin."
-      and not re.search(r"\d", k8["adimlar"][0]["metin"]), k8["adimlar"][:2])
+      and k8["adimlar"][0]["metin"].startswith("Önce odaya girmeden dışarıda 40 dakika bekleyin")
+      and k8["adimlar"][1]["metin"] == "Sonra içeri girin, sesle sakinleştirip çıkın; yalnız histerik "
+                                       "(nefes nefese) ağlamada temas edin; böyle 45 dakika deneyin.",
+      k8["adimlar"][:2])
 H4, BID4 = hesap(egitim_gunu_bugun=5)
 k5 = bugunku(H4, BID4, "1.0.0+28")["night_wake_protocol"]
 check("C) Oda ortası: temassız pış-pış", k5["baslik"].endswith("Oda ortası")
@@ -730,6 +741,231 @@ check("V) Plan bloğu yok: yatışa ≥150 dk kalabiliyorsa 60 uygun; kalamıyor
       and all(ihlal(k["karsilik"]["kestirme"], k) == [] for k in (_kyok_uzun, _kyok_kisa)))
 check("V) Yeni karşılıklar (yatis_dis, mola_tanimi) kendi doğrulamasından geçer",
       all(ihlal(k["karsilik"][r], k) == [] for k in (_k_yat, k_g2g, k_g8) for r in ("yatis_dis", "mola_tanimi")))
+
+# =============================================================================
+# İ — İlayda 12 Ekim (tablo v0.4): Sor bloğu ve doğrulayıcı YONTEM_TABLOSU AÇIKKEN
+#     (kapalıyken yukarıdaki K/V testleri v0.3 davranışını kilitliyor)
+# =============================================================================
+os.environ["YONTEM_TABLOSU"] = "1"
+_, B10 = hesap(egitim_gunu_bugun=10)
+y_g2, _ = kural_al(BID, G.replace(hour=2, minute=30) + timedelta(days=1))   # 2. gece
+y_g1, _ = kural_al(B1, G.replace(hour=2, minute=30) + timedelta(days=1))    # 1. gece
+y_g2g, _ = kural_al(BID, G.replace(hour=14))                               # 2. gün gündüz
+y_g5, _ = kural_al(BID4, G.replace(hour=14))
+y_g8, _ = kural_al(B8, G.replace(hour=14))
+y_g10, _ = kural_al(B10, G.replace(hour=14))
+check("İ) 2. gece bloğu: dışarıda 10 dk, gece içi +1 (10 → 11 → 12), uyuyana kadar, destek yok, bekleyen satırı yok",
+      "önce dışarıda 10 dk bekle (eğitimin 2. gecesi: 1. gece 5 dk, her gece +5 dk); aynı gece her yeni "
+      "uyanmada bir öncekinden +1 dk (ör. 10 → 11 → 12)" in y_g2["blok"]
+      and "bebek uyuyana kadar döngüyü tekrarla (destekle uyutma yok)" in y_g2["blok"]
+      and "Bu gece eğitimin 2. gecesi: destek vererek uyutma YOK." in y_g2["blok"]
+      and "Kararı bekleyen konular" not in y_g2["blok"]
+      and "aynı gecenin uyanmaları için değil" not in y_g2["blok"], y_g2["blok"])
+check("İ) 1. gece bloğu: dışarıda 5 dk, en fazla 3 kez sonra destekle uyut (yalnız destek gecesi)",
+      "önce dışarıda 5 dk bekle" in y_g1["blok"]
+      and "en fazla 3 kez, sonra mecburen destek verip uyutulur; o gün başarısız sayılır." in y_g1["blok"]
+      and "Bu kural YALNIZ destek gecesinde" in y_g1["blok"], y_g1["blok"])
+check("İ) Gece bekleme sayıları: 2. gecede 10/11/12 uygun, 20 ihlal; 1. gecede 5 uygun",
+      ihlal("Dışarıda 10 dakika bekleyin.", y_g2) == []
+      and ihlal("İkinci uyanmada 11 dakika, üçüncüde 12 dakika bekleyin.", y_g2) == []
+      and ihlal("İkinci uyanmada 20 dakika bekleyin.", y_g2) == [("gece_uyanma", 20.0)]
+      and ihlal("Dışarıda 5 dakika bekleyin.", y_g1) == [],
+      [ihlal("İkinci uyanmada 20 dakika bekleyin.", y_g2), ihlal("Dışarıda 5 dakika bekleyin.", y_g1)])
+check("İ) Yön: 'aynı gece her uyanmada 1 dakika artar' artık uygun; 'azalır' ihlal",
+      ihlal("Aynı gece her uyanmada bekleme 1 dakika artar.", y_g2) == []
+      and ihlal("Aynı gece her uyanmada bekleme süresi azalır.", y_g2) == [("yon", 0.0)])
+_dst = "3 denemeden sonra da uyumazsa destek vererek uyutun."
+check("İ) Destek gecesi: 2. gecede 'destek vererek uyutun' ihlal, 1. gecede uygun; karşılık döngü",
+      ihlal(_dst, y_g2) == [("destek_gecesi", 0.0)] and ihlal(_dst, y_g1) == []
+      and sor_kural.duzelt(_dst, y_g2) == y_g2["karsilik"]["destek_gecesi"]
+      and "uyuyana kadar" in y_g2["karsilik"]["destek_gecesi"]
+      and ihlal(y_g2["karsilik"]["destek_gecesi"], y_g2) == [],
+      (ihlal(_dst, y_g2), sor_kural.duzelt(_dst, y_g2)))
+check("İ) 'İlk gece' tek yerden: seans.destek_gecesi_egitim_gunleri listesi kartı ve Sor'u yönetir",
+      yontem_kart.destek_gecesi_mi(1) and not yontem_kart.destek_gecesi_mi(2)
+      and y_g1["destek_gecesi"] is True and y_g2["destek_gecesi"] is False)
+check("İ) Kısa gündüz 5. gün: 25+20; 10. gün: hepsi dışarıda",
+      "dışarıda 25 dk bekle, sonra içeride 20 dk dene (toplam 45 dk)" in y_g5["blok"]
+      and ihlal("Kısa gündüz uykusunda dışarıda 25 dakika bekleyip içeride 20 dakika deneyin.", y_g5) == []
+      and set(r for r, _ in ihlal("Kısa gündüz uykusunda dışarıda 10 dakika bekleyin.", y_g5)) == {"dis"}
+      and "45 dk'nın hepsi dışarıda geçer (içeride deneme yok)" in y_g10["blok"],
+      (y_g5["blok"], y_g10["blok"]))
+check("İ) Kapı aşaması (8. gün) içeride: histerikse temas; değilse temas/kucak yok, sesle sakinleştirip çık",
+      "İçerideyken: histerik (nefes nefese) ağlamada temas var; değilse temas ve kucak yok, sesle "
+      "sakinleştirip çık." in y_g8["blok"], y_g8["blok"])
+check("İ) Kucak: histerikte serbest; 2. gün 'anne dayanamazsa' notu, 8. gün 'kucak YOK'; aralık sayısı yok",
+      "Kucak: histerik ağlamada her gün serbest. Histerik değilse önerilmez; ilk günlerde anne "
+      "dayanamazsa kucağa alabilir, ama eğitimin uzayacağını söyle." in y_g2g["blok"]
+      and "8. günden itibaren histerik ağlama yoksa kucak YOK" in y_g8["blok"]
+      and "0,5 → 1" not in y_g2g["blok"]
+      and set(r for r, _ in ihlal("Kucağa alma aralıkları 30 saniye, 1 dakika, 1,5 dakika, 2 dakika.",
+                                  y_g2g)) == {"kucak"},
+      ihlal("Kucağa alma aralıkları 30 saniye, 1 dakika, 1,5 dakika, 2 dakika.", y_g2g))
+check("İ) Beyaz gürültü 50–60 dB: blokta; 70-80 ihlal, 50-60 uygun",
+      "- Beyaz gürültü: 50–60 dB (70–80 dB çok yüksek)." in y_g2g["blok"]
+      and ihlal("Beyaz gürültüyü 70-80 desibelde açın.", y_g2g) == [("db", 70.0), ("db", 80.0)]
+      and ihlal("Beyaz gürültü 50-60 dB olsun.", y_g2g) == []
+      and ihlal(y_g2g["karsilik"]["db"], y_g2g) == [])
+check("İ) Poşet: odayı poşetle bölme ihlal; cama karartma poşeti uygun",
+      ihlal("Odayı bölmek için tavana çöp poşeti asın.", y_g2g) == [("poset", 0.0)]
+      and ihlal("Odayı karartmak için poşeti cama yapıştırın.", y_g2g) == []
+      and "odayı poşetle bölmeyi ÖNERME (güvenlik)" in y_g2g["blok"]
+      and ihlal(y_g2g["karsilik"]["poset"], y_g2g) == [])
+os.environ.pop("YONTEM_TABLOSU", None)
+_k_kapali, _ = kural_al(BID, G.replace(hour=2, minute=30) + timedelta(days=1))
+check("İ) YONTEM_TABLOSU kapalıyken Sor bloğu v0.3: bekleyen satırı, kucak aralıkları, poşet/dB kuralı yok",
+      _k_kapali["blok"] == blok2 and ihlal("Beyaz gürültüyü 70-80 desibelde açın.", k_g2g) == []
+      and ihlal("Odayı bölmek için tavana çöp poşeti asın.", k_g2g) == []
+      and ihlal("3 denemeden sonra da uyumazsa destek vererek uyutun.", k_g2) == [],
+      _k_kapali["blok"][:300])
+
+# --- Plan üretici (4) ve mevcut planlar (5) ----------------------------------
+from engine.parameter_engine import bekleme_sureleri_planla as _bsp
+_eski_kg = _bsp("13_gun_dirençli")["kisa_gunduz_uykusu"]
+os.environ["YONTEM_TABLOSU"] = "1"
+_yeni_kg = _bsp("13_gun_dirençli")["kisa_gunduz_uykusu"]
+os.environ.pop("YONTEM_TABLOSU", None)
+check("İ) Plan üretici: kapalıyken eski '1 → 1,5 → 2'; açıkken 5+40/10+35/15+30, sonra +5, 9. günden hepsi dışarıda",
+      "1 dakika → 1,5 dakika → 2 dakika" in _eski_kg
+      and _yeni_kg.startswith("Gün 1: dış 5 dk + iç 40 dk. Gün 2: 10+35. Gün 3: 15+30.")
+      and "Gün 4: 20+25" in _yeni_kg and "Gün 8: 40+5" in _yeni_kg
+      and "Gün 9'dan itibaren 45 dk'nın hepsi dışarıda" in _yeni_kg and "1,5" not in _yeni_kg, _yeni_kg)
+_P1 = ("### Gün 1-3: Beşik yanı\n\n**Bu gün kısa gündüz uykusu olursa:** Dışarıda **1 dakika** bekleyin. "
+       "Toplam ~45 dakika.\n\n**Bu gün yoğun direnç olursa (B Planı):** 45 dakika direnç.")
+_P2 = ("### Gün 4-6: Oda ortası\n\n#### Bu günlerde kısa gündüz uykusu olursa\n[BEBEK] 60 dakikadan az "
+       "uyursa kapıya çıkın, **1,5 dakika** dışarıda bekleyin, sonra içeri girin.\n\n#### Bu günlerde yoğun "
+       "direnç olursa\n45 dakika.")
+_GENEL = ("**Kucağa alma bekleme süreleri:** 30 saniye → 1 dakika → 1.5 dakika → 2 dakika diye artış\n\n"
+          "**Kısa gündüz uykusu uzatma:** Dış bekleme kademesi: 1 dakika → 1,5 dakika → 2 dakika (toplam ~45 dk).\n")
+_icerik = {"plan_secimi": {"tip": "13_gun_dirençli", "gunler": 13},
+           "markdown": _P1 + "\n\n" + _P2 + "\n\n" + _GENEL,
+           "days": [{"start": 1, "end": 3, "label": "Gün 1-3", "markdown": _P1},
+                    {"start": 4, "end": 6, "label": "Gün 4-6", "markdown": _P2}]}
+_bb = SimpleNamespace(training_started_at=BUGUN, training_completed_at=None)
+_c, _deg = yontem_kart.kisa_gunduz_plan_duzelt(_icerik, _bb)
+check("İ) Plan düzeltme: gün 1-3 '1 dakika' → 5 (5+40, 10+35, 15+30); diğer cümle aynen",
+      "Dışarıda **5 dakika** (1. gün 5+40, 2. gün 10+35, 3. gün 15+30; dış + iç toplam 45 dakika) bekleyin."
+      in _c["days"][0]["markdown"] and "Toplam ~45 dakika." in _c["days"][0]["markdown"]
+      and "**1 dakika**" not in _c["days"][0]["markdown"], _c["days"][0]["markdown"])
+check("İ) Plan düzeltme: gün 4-6 '1,5 dakika' → 20 (20+25, 25+20, 30+15); cümlenin geri kalanı aynen",
+      "[BEBEK] 60 dakikadan az uyursa kapıya çıkın, **20 dakika** (4. gün 20+25, 5. gün 25+20, 6. gün 30+15; "
+      "dış + iç toplam 45 dakika) dışarıda bekleyin, sonra içeri girin." in _c["days"][1]["markdown"],
+      _c["days"][1]["markdown"])
+check("İ) Plan düzeltme: markdown'da da aynı değişiklik; kucak satırına DOKUNULMAZ; genel satır genel kuralla",
+      _c["days"][0]["markdown"] in _c["markdown"] and _c["days"][1]["markdown"] in _c["markdown"]
+      and "30 saniye → 1 dakika → 1.5 dakika → 2 dakika diye artış" in _c["markdown"]
+      and "4. günden itibaren her gün 5 dakika artar" in _c["markdown"]
+      and len(_deg) == 3 and _icerik["days"][0]["markdown"] == _P1, (len(_deg), _c["markdown"][-300:]))
+_H = "**Bu gün kısa gündüz uykusu olursa:** "
+_bicim = [  # canlı planlardaki biçimler (sentetik yeniden yazım; metin kopyalanmadı)
+    (_H + "Dışarıda 1 dakika bekleyin → 1,5 dakika → 2 dakika şeklinde kademeli artırın.", 1, 3,
+     "Dışarıda **5 dakika** (1. gün 5+40, 2. gün 10+35, 3. gün 15+30; dış + iç toplam 45 dakika) bekleyin."),
+    (_H + "Odanın dışında **1 dakika** bekleyin; ardından **1,5 dakika**, **2 dakika** diye artırın.", 4, 6,
+     "Odanın dışında **20 dakika** (4. gün 20+25, 5. gün 25+20, 6. gün 30+15; dış + iç toplam 45 dakika) bekleyin."),
+    (_H + "Kapının dışında **1 dakika** → **1,5 dakika** → **2 dakika** bekleyin.", 7, 9,
+     "Kapının dışında **35 dakika** (7. gün 35+10, 8. gün 40+5, 9. gün 45 (hepsi dışarıda); dış + iç toplam "
+     "45 dakika) bekleyin."),
+    (_H + "Dışarıda **2 dakika** bekleyin.", 10, 12,
+     "Dışarıda **45 dakika** (10–12. gün: 45 dakikanın hepsi dışarıda, içeride deneme yok) bekleyin."),
+    (_H + "**2 dakika** kapı dışında bekleyin.", 13, 13,
+     "**20 dakika** (sonra içeri girip 'uyku bitmedi' deyip çıkın, 25 dakika daha dışarıda) kapı dışında bekleyin."),
+    (_H + "Erken uyanırsa odadan çıkın, **1 dakika** bekleyin. Toplam ~45 dakika. İlk bekleme 1 dakika, sonraki "
+          "1,5 dakika, devamı 2 dakika olacak şekilde artırın.", 1, 3,
+     "Erken uyanırsa odadan çıkın, **5 dakika** (1. gün 5+40, 2. gün 10+35, 3. gün 15+30; dış + iç toplam 45 "
+     "dakika) bekleyin. Toplam ~45 dakika. Dışarıdaki süre dolunca içeri girin."),
+    (_H + "Erken uyanmada: **1 dakika** → **1,5 dakika** → **2 dakika** bekleyin.", 4, 6,
+     "Erken uyanmada: **20 dakika** (4. gün 20+25, 5. gün 25+20, 6. gün 30+15; dış + iç toplam 45 dakika) "
+     "bekleyin."),
+    (_H + "Uyanırsa kapıyı kapalı tutun, **1 dakika** bekleyin.", 1, 3,
+     "Uyanırsa kapıyı kapalı tutun, **5 dakika** (1. gün 5+40, 2. gün 10+35, 3. gün 15+30; dış + iç toplam "
+     "45 dakika) bekleyin."),
+    (_H + "Kapı önünde 1 dakika bekleyin. Hâlâ ağlıyorsa 1,5 dakika, ardından 2 dakika bekleyin.", 1, 3,
+     "Kapı önünde **5 dakika** (1. gün 5+40, 2. gün 10+35, 3. gün 15+30; dış + iç toplam 45 dakika) bekleyin. "
+     "Dışarıdaki süre dolunca içeri girin."),
+    (_H + "\n1. Odanın dışında **1 dakika bekleyin.**\n2. Devam ederse **1,5 dakika**, ardından **2 dakika** "
+          "bekleyin.\n", 1, 3,
+     "\n1. Odanın dışında **5 dakika (1. gün 5+40, 2. gün 10+35, 3. gün 15+30; dış + iç toplam 45 dakika) "
+     "bekleyin.**\n2. Dışarıdaki süre dolunca içeri girin.\n"),
+]
+_bicim_sonuc = [yontem_kart.kisa_gunduz_paragraf_duzelt(m, a, b_)[0] for m, a, b_, _ in _bicim]
+check("İ) Plan düzeltme biçimleri: bölünmüş zincir, kalın öğeli zincir, 'ardından … diye artırın', 10-12, 13",
+      all(r == _H + beklenen for r, (_, _, _, beklenen) in zip(_bicim_sonuc, _bicim)), _bicim_sonuc)
+_P79 = "### Gün 7-9\n\n" + _bicim[2][0]
+_cc, _dd = yontem_kart.kisa_gunduz_plan_duzelt(
+    {"plan_secimi": {"gunler": 13}, "markdown": _P79 + "\n\n**Kısa gündüz uykusu uzatma:** Dış bekleme "
+     "kademesi: 1 dakika → 1,5 dakika → 2 dakika.\n", "days": [{"start": 7, "end": 9, "markdown": _P79}]}, _bb)
+check("İ) Plan düzeltme: gün bloğu genel geçişte İKİNCİ KEZ işlenmez (2 değişiklik, gün bloğu aynen)",
+      len(_dd) == 2 and _cc["days"][0]["markdown"] in _cc["markdown"] and "****" not in _cc["markdown"]
+      and _cc["markdown"].count("35 dakika") == 1, (_dd, _cc["markdown"]))
+check("İ) Plan düzeltme yalnız 13 günlük planda ve eğitimi SÜREN bebekte",
+      yontem_kart.kisa_gunduz_plan_duzelt(dict(_icerik, plan_secimi={"gunler": 6}), _bb)[1] == []
+      and yontem_kart.kisa_gunduz_plan_duzelt(_icerik, SimpleNamespace(
+          training_started_at=BUGUN, training_completed_at=BUGUN))[1] == []
+      and yontem_kart.kisa_gunduz_plan_duzelt(_icerik, SimpleNamespace(
+          training_started_at=None, training_completed_at=None))[1] == [])
+# Çelişen cümleler: ifade "hepsi dışarıda" (ya da 13. gün) diyor ama cümle/ardından gelen
+# cümle "içeri girip devam edin" diyor → cümle tablodan kurulur (yeni kural yok)
+_celiski = [
+    # aynı cümlede (10-12)
+    (_H + "Dışarıda **2 dakika** bekleyin, ardından içeri girin ve **eşik pozisyonundan** devam edin.", 10, 12,
+     "10–12. gün: dışarıda **45 dakika** bekleyin, içeride deneme yok; 45 dakika dolunca uyumadıysa "
+     "bebeği alın."),
+    # aynı cümlede (7-9 karışık: 7-8 içeride deneme var, 9 hepsi dışarıda)
+    (_H + "Kapı dışında **1 dakika** → **1,5 dakika** → **2 dakika** bekleyin, ardından içeri girip kapı "
+          "pozisyonundan devam edin.", 7, 9,
+     "7–8. gün: dışarıda **35 dakika** bekleyin, sonra içeri girip kalan süreyi **kapı** pozisyonundan "
+     "deneyin (7. gün 35+10, 8. gün 40+5; toplam 45 dakika). 9. gün: dışarıda **45 dakika** bekleyin, "
+     "içeride deneme yok; 45 dakika dolunca uyumadıysa bebeği alın."),
+    # aynı cümlede (13): yatır-çık 5→10→15→20 ile devam → tablodaki 'uyumazsa al'
+    (_H + "Dışarıda **2 dakika** bekleyin → içeri girin → **yatır-çık** protokolüyle devam edin "
+          "(5 → 10 → 15 → 20 dakika).", 13, 13,
+     "Dışarıda **20 dakika** bekleyin; sonra içeri girip 'uyku bitmedi' deyip çıkın ve 25 dakika daha "
+     "dışarıda bekleyin; uyumazsa bebeği alın."),
+    # sonraki cümlede (10-12); tabloyla uyumlu 'uyumazsa kaldırın' cümlesi KALIR
+    (_H + "Dışarıda **2 dakika** bekleyin. İçeri girince kapı eşiği pozisyonundan devam edin. "
+          "45 dakika sonunda uyumazsa bebeği kaldırın.", 10, 12,
+     "Dışarıda **45 dakika** (10–12. gün: 45 dakikanın hepsi dışarıda, içeride deneme yok) bekleyin. "
+     "İçeride deneme yok; 45 dakika dolunca uyumadıysa bebeği alın. 45 dakika sonunda uyumazsa bebeği "
+     "kaldırın."),
+    # sonraki cümlede, iki takip cümlesi (13): ilki adım, ikincisi kalkar
+    (_H + "Erken uyanmada: **1 dakika** → **1,5 dakika** → **2 dakika** bekleyin. Ardından içeri girin, kısa temas, çıkın. **Yatır-çık "
+          "pozisyonundan** devam edin.", 13, 13,
+     "Erken uyanmada: **20 dakika** (sonra içeri girip 'uyku bitmedi' deyip çıkın, 25 dakika daha "
+     "dışarıda) bekleyin. Uyumazsa bebeği alın."),
+    # numaralı liste (7-9): madde numarası korunur
+    (_H + "\n1. Kapının dışında **2 dakika** bekleyin.\n2. Odaya girdiğinizde **kapı pozisyonundan** "
+          "beklemeye devam edin.\n", 7, 9,
+     "\n1. Kapının dışında **35 dakika** (7. gün 35+10, 8. gün 40+5, 9. gün 45 (hepsi dışarıda); dış + iç "
+     "toplam 45 dakika) bekleyin.\n2. 7–8. gün: içeri girip kalan süreyi **kapı** pozisyonundan deneyin; "
+     "9. gün: içeride deneme yok; 45 dakika dolunca uyumadıysa bebeği alın.\n"),
+    # gün 4-6: 'içeri girin' doğru (içeride deneme var) → yalnız ifade değişir
+    (_H + "Dışarıda **1,5 dakika** bekleyin. İçeri girince oda ortasından devam edin.", 4, 6,
+     "Dışarıda **20 dakika** (4. gün 20+25, 5. gün 25+20, 6. gün 30+15; dış + iç toplam 45 dakika) "
+     "bekleyin. İçeri girince oda ortasından devam edin."),
+]
+_celiski_sonuc = [yontem_kart.kisa_gunduz_paragraf_duzelt(m, a, b_)[0] for m, a, b_, _ in _celiski]
+for _i, (_r, (_, _a, _b, _bek)) in enumerate(zip(_celiski_sonuc, _celiski)):
+    check(f"İ) Çelişen cümle {_i + 1} (gün {_a}-{_b}): tablodan kurulan cümle", _r == _H + _bek, _r)
+_DEVAM_KALAN = re.compile(r"içeri\s+gir\w*[^.]*devam|devam\s+ed", re.I)
+check("İ) Çelişen cümle: 'hepsi dışarıda'/13. gün olan hiçbir sonuçta 'içeri girip devam' kalmaz",
+      not any(_DEVAM_KALAN.search(r) for r, c in zip(_celiski_sonuc, _celiski) if c[1] >= 7),
+      _celiski_sonuc)
+_p_kapali = bugunku(H, BID, "1.0.0+28")
+bayrak(YONTEM_TABLOSU=True)
+_p_acik = bugunku(H, BID, "1.0.0+28")
+bayrak()
+_db_ = SessionLocal()
+_sakli = _db_.query(SleepPlan).filter(SleepPlan.baby_id == uuid.UUID(BID)).order_by(
+    SleepPlan.created_at.desc()).first().content
+_db_.close()
+_kg_yanlis = re.compile(r"kısa gündüz uykusu olursa[^\n]*\n?[^\n]*1 dakika → 1,5 dakika → 2 dakika", re.I)
+check("İ) /plans/today: kapalıyken metin saklananla aynı; açıkken kısa gündüz paragrafı düzelir, saklanan DEĞİŞMEZ",
+      _p_kapali.get("markdown") == _sakli.get("markdown")
+      and (_sakli.get("plan_secimi") or {}).get("gunler") != 13
+      or (_p_kapali.get("markdown") == _sakli.get("markdown")
+          and not _kg_yanlis.search(_p_acik.get("markdown") or "")
+          and _kg_yanlis.search(_sakli.get("markdown") or "") is not None),
+      ((_sakli.get("plan_secimi") or {}).get("gunler"),))
 
 # =============================================================================
 # F — sohbet akışı (sahte model)

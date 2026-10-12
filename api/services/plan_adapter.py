@@ -1855,6 +1855,11 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
         # KESTIRME_V2 — saati geçmiş planlı uykunun kaydı yoksa gündüz açığı
         # gerçek değildir (anne kaydetmemiş olabilir): şekerleme EKLENMEZ.
         sekerleme_bilgi = None
+    elif kestirme_v2 and kestirme_kaydi is None and _kayitli_gunduz_uykusu(bloklar) < len(yuvalar):
+        # KESTIRME_V2 (İlayda 12 Ekim, 8. soru) — şekerleme yalnız yaşın beklediği
+        # sayıda gündüz uykusu KAYITLIYSA önerilir; günün uykuları henüz bitmeden
+        # (tahmini bloklarla) açık hesaplanmaz.
+        sekerleme_bilgi = None
     else:
         bloklar, sekerleme_bilgi, sek_uyari = _sekerleme_yerlestir(
             bloklar, bant, cursor, ww, yatma_lo, yatma_hi, now_minute)
@@ -1952,6 +1957,11 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
         # v1.6 — bilgi notları (Dikkat kartı DEĞİL): sabah hedefi farkı.
         "notlar": notlar,
     }
+    if kestirme_v2:
+        # KESTIRME_V2 — "Bugünkü uykuları eksik mi kaydettiniz?" bildiriminin
+        # tetiği: saati geçmiş planlı gündüz uykusunun kaydı yok. Bayrak
+        # kapalıyken alan HİÇ eklenmez (yanıt birebir aynı).
+        adaptation["kestirme_kayit_eksik"] = bool(kayit_eksik)
     return {"schedule": schedule, "adaptation": adaptation}
 
 
@@ -2244,6 +2254,13 @@ def _gelecek_notlarini_temizle(cizelge: list[dict], now_minute: int) -> None:
             continue
         if b.get("start_minute") is not None and b["start_minute"] > now_minute:
             b.pop("note", None)
+
+
+def _kayitli_gunduz_uykusu(bloklar: list[dict]) -> int:
+    """Kayıttan gelen gündüz uykusu sayısı (şekerleme hariç)."""
+    return sum(1 for b in bloklar
+               if b.get("type") == "nap" and b.get("kaynak") == "kayit"
+               and b.get("key") != SEKERLEME_KEY)
 
 
 def _gunduz_toplam(bloklar: list[dict]) -> int:

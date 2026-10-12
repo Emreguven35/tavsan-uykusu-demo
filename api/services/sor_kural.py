@@ -120,6 +120,14 @@ _GECE_ICI = re.compile(r"(?:her|sonraki|ikinci|üçüncü|yeni|diğer)\s+(?:\w+\
 _YON = re.compile(r"\bart(?:a|ı|ış|tı)\w*|uzat\w*|uzar\b|\bfazla\w*|çoğal\w*|azal\w*|kısal\w*|"
                   r"kısalt\w*|aynı (?:kal|tut)\w*|bir öncekin\w*", re.IGNORECASE)
 _SURE_BAGLAMI = re.compile(r"bekle|süre", re.IGNORECASE)
+_YON_TERS = re.compile(r"azal\w*|kısal\w*|kısalt\w*|aynı (?:kal|tut)\w*|düşür\w*|daha az bekle", re.IGNORECASE)
+# 2. geceden itibaren destekle uyutma yok (seans.destek_gecesi_egitim_gunleri)
+_DESTEKLE_UYUT = re.compile(r"destek\w*\s+(?:verip|vererek|ile)\s+uyut|eski desteğ\w*|destekle uyut",
+                            re.IGNORECASE)
+_DB = re.compile(r"(?<![\d,.])(\d+)\s*(?:[-–]\s*(\d+)\s*)?(?:dB\b|desibel)", re.IGNORECASE)
+_POSET_BOLME = re.compile(r"poşet", re.IGNORECASE)
+_POSET_BOLME_BAGLAMI = re.compile(r"tavan|as(?:ın|abil|arak|ıl)|böl|ayır|paravan|yatağın üst", re.IGNORECASE)
+_CAM = re.compile(r"\bcam|pencere", re.IGNORECASE)
 
 # --- 3 denemeden sonraki gece: tablo ne diyorsa o; yumuşatma ve suçlama yok ---
 _YUMUSATMA = re.compile(r"başarısızlık değil|başarısız say(?:ıl)?ma(?:z|ması|mak|yın)|"
@@ -161,7 +169,7 @@ _GUN_ADI = re.compile(r"(?<!\w)(pazartesi|salı|çarşamba|perşembe|cumartesi|c
                       re.IGNORECASE)
 # Sayı olmayan ihlal türleri (değer 0)
 METIN_ROLLERI = ("yon", "yumusatma", "suclama", "asama", "gun_adi", "gun_no", "yatis_dis",
-                 "mola_tanimi", "rutin_zamani")
+                 "mola_tanimi", "rutin_zamani", "destek_gecesi", "poset")
 # Rutin başlangıcı uyku saatine denk ya da sonrasında mı: saatin ardındaki
 # (bir sonraki saate kadar) kısımda "rutin … başla", ya da önünde "rutin" ve
 # ardında "başla" ("Rutine 09:30'da başlayın").
@@ -292,7 +300,16 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
     taban = yontem.deger("gece_uyanma.taban_dk")
     artis_std = yontem.deger("gece_uyanma.gunluk_artis_standart_dk")
     artis_min = yontem.deger("gece_uyanma.gunluk_artis_en_az_dk")
-    kucak = [v / 60 for v in yontem.deger("kucak_araligi_sn.dizi")]
+    # İlayda 12 Ekim (tablo v0.4) kuralları YALNIZ YONTEM_TABLOSU açıkken; kapalıyken
+    # Sor bloğu v0.3 davranışında kalır (yeni dolan alanlar bekleyen gibi okunur).
+    from api.services import yontem_kart
+    yeni = yontem_kart.acik_mi()
+    if yeni:
+        kucak: list[float] = []                   # aralık dizisinin bağlamı belirsiz → sayı yok
+    else:
+        _dizi = (yontem.adaylar("kucak_araligi_sn.dizi")[0]["deger"]
+                 if yontem.bekliyor_mu("kucak_araligi_sn.dizi") else yontem.deger("kucak_araligi_sn.dizi"))
+        kucak = [v / 60 for v in _dizi]
     rutin = yontem.deger("seans.rutin_suresi_dk")
     toplam_kg = yontem.deger("kisa_gunduz.seans_toplam_dk")
     geri_dalis = yontem.deger("kisa_gunduz.geri_dalis_esigi_dk")
@@ -328,6 +345,17 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
                     f"{yc_kg['ic']} dk daha dışarıda bekle; uyumazsa al")
         kg_karsilik = (f"Kısa gündüz uykusunda dışarıda {yc_kg['dis']} dakika bekleyin, içeri "
                        f"girip 'uyku bitmedi' deyip çıkın, {yc_kg['ic']} dakika daha bekleyin.")
+    elif yeni:
+        _d, _i = yontem_kart.kisa_gunduz_dis_ic(g_gunduz)  # dış her gün +5, iç = 45 − dış
+        kg_dis, kg_ic = {_d}, ({_i} if _i else set())
+        if _i:
+            kg_metin = f"dışarıda {_d} dk bekle, sonra içeride {_i} dk dene (toplam {toplam_kg} dk)"
+            kg_karsilik = (f"Kısa gündüz uykusunda bugün dışarıda {_d} dakika bekleyip içeride {_i} "
+                           f"dakika deneyin (toplam {toplam_kg} dakika).")
+        else:
+            kg_metin = f"{toplam_kg} dk'nın hepsi dışarıda geçer (içeride deneme yok)"
+            kg_karsilik = (f"Kısa gündüz uykusunda bugün {toplam_kg} dakikanın hepsini dışarıda "
+                           f"bekleyerek geçirin.")
     else:
         kg_dis, kg_ic = set(), set()                         # İlayda kararı bekliyor
         kg_metin = "bekleme süreleri için planına bak"
@@ -339,6 +367,12 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
     # --- Gece içeride yöntem (aşamaya göre; kapı aşamaları bekliyor) ----------
     temas = yontem.deger("gece_uyanma.icerde_temas")
     icerde = temas.get(asama["kod"], "bu aşamanın yöntemiyle (ayrıntı için planına bak)")
+    if yeni and asama["kod"] in ("kapi", "kapi_esigi"):
+        icerde = yontem.deger("gece_uyanma.icerde_temas_kapi")
+    # Bu gecenin ilk beklemesi (1. gece 5, her gece +5) ve gece içi artış (+1)
+    gece_ilk = yontem_kart.gece_ilk_bekleme_dk(g) if yeni else None
+    gece_ici = yontem_kart.gece_ici_artis_dk() if yeni else None
+    destek_gecesi = yontem_kart.destek_gecesi_mi(g) if yeni else True
     icerde_sayili = asama["kod"] == "yatir_cik"                 # "on saniye – bir dakika"
 
     # --- Takvim: gün adlarını model hesaplamaz ---------------------------------
@@ -410,12 +444,18 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
                          f"yatışını geciktirmiyorsa {kestirme_max} dakika olabilir.")
     rutin_yeri = akis.get("5_rutin_yeri") or "oda içinde"
     yatir_cik_asama = asama["kod"] == "yatir_cik"
-    bekleyen = ["ilk bekleme süresi",
-                "aynı gece içinde bir uyanmadan ötekine bekleme süresinin değişimi"]
-    if 4 <= g_gunduz <= 12:
+    bekleyen = ([] if yeni else
+                ["ilk bekleme süresi",
+                 "aynı gece içinde bir uyanmadan ötekine bekleme süresinin değişimi"])
+    if not yeni and 4 <= g_gunduz <= 12:
         bekleyen.append("kısa gündüz uykusundaki dışarıda/içeride bekleme süreleri")
-    if asama["kod"] in ("kapi", "kapi_esigi"):
+    if not yeni and asama["kod"] in ("kapi", "kapi_esigi"):
         bekleyen.append("bu aşamada içeride temasın nasıl olacağı")
+    gece_diger = sonrasi.get("gece_diger") or ""
+    kucak_kural = yontem.deger("kucak_araligi_sn.kural") if yeni else {}
+    db = yontem.deger("hazirlik.beyaz_gurultu_db") if yeni else {}
+    sonrasi_gece = sonrasi["gece"] if destek_gecesi else gece_diger
+    gdh = int(app_gun if not d["sabah_once"] else g)
 
     satirlar = [
         f"BUGÜNÜN KURALLARI (süre ve sayıları YALNIZ buradan al; burada olmayan süre için "
@@ -434,27 +474,53 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
            f"annenin yeri {yer}; yatışta DIŞARIDA BEKLEME YOK. ")
         + f"{deneme} dk dene → uyumazsa {mola} dk rutin molası (çok dirençli "
         f"bebekte {mola_max} dk) → yeniden {deneme} dk; en fazla {tekrar} kez. {tekrar} kez "
-        f"sonra gece: {sonrasi['gece']}; gündüz: {sonrasi['gunduz']}.",
+        f"sonra gece: {sonrasi_gece}; gündüz: {sonrasi['gunduz']}.",
         f"- Rutin molası nedir: bebekle odada yapılan kısa bir uyku rutinidir ({rutin_yeri}); "
         f"annenin dinlenme arası DEĞİLDİR, anne odadan çıkmaz.",
-        f"- {tekrar} denemeden sonra da uyumayan GECE için tablodaki kural: {sonrasi['gece']}. "
-        f"Bunu aynen söyle: yumuşatma ('başarısızlık değil', 'ilk günler esnek' gibi deme), "
-        f"anneyi suçlama, tabloda olmayan bir sonuç (ör. ertesi günün nasıl değişeceği) ekleme.",
-        f"- GECE UYANMASI (bebek uyuduktan sonra gece uyanırsa; yatışta değil): önce dışarıda "
-        f"bekle (ilk bekleme süresi ve aynı gece içindeki "
-        f"bekleme süreleri için planına bak); sonra içeri gir ve {akis['3_deneme_dk']} dk dene; "
-        f"uyumazsa odada {akis['4_rutin_dk']} dk rutin (beslenme yok); en fazla "
-        f"{akis['6_tekrar_en_fazla']} kez. İçerideyken: {icerde}. "
-        f"Bekleme günden güne standart +{artis_std} dk, "
-        f"çok dirençli bebekte en az +{_sayi(artis_min * 60)} sn artar; önceki günle aynı ya "
-        f"da daha az olamaz; asla {taban} dk altına inmez. Bu artış kuralı GÜNDEN GÜNEdir, "
-        f"aynı gecenin uyanmaları için değil.",
-        f"- Kararı bekleyen konular ({'; '.join(bekleyen)}): sayı da YÖN de söyleme. 'Aynı "
-        f"gece her uyanmada bekleme artar / azalır / aynı kalır' DEME; yalnız 'bunun için "
-        f"planınıza bakın' de.",
+        (f"- {tekrar} denemeden sonra da uyumayan GECE için tablodaki kural: {sonrasi['gece']}. "
+         f"Bunu aynen söyle: yumuşatma ('başarısızlık değil', 'ilk günler esnek' gibi deme), "
+         f"anneyi suçlama, tabloda olmayan bir sonuç (ör. ertesi günün nasıl değişeceği) ekleme."
+         + (f" Bu kural YALNIZ destek gecesinde (eğitimin {g}. gecesi bu gece)." if yeni else "")
+         if destek_gecesi else
+         f"- Bu gece eğitimin {g}. gecesi: destek vererek uyutma YOK. {tekrar} denemeden sonra da "
+         f"uyumazsa {gece_diger}. Destekle uyutma yalnız destek gecesinde (ilk gece); anneye "
+         f"'destek verip uyutun' DEME. Yumuşatma ve suçlama yok."),
+        (f"- GECE UYANMASI (bebek uyuduktan sonra gece uyanırsa; yatışta değil): önce dışarıda "
+         f"{gece_ilk} dk bekle (eğitimin {g}. gecesi: 1. gece "
+         f"{yontem_kart.gece_ilk_bekleme_dk(1)} dk, her gece +{artis_std} dk); aynı gece her yeni "
+         f"uyanmada bir öncekinden +{gece_ici} dk (ör. {gece_ilk} → {gece_ilk + gece_ici} → "
+         f"{gece_ilk + 2 * gece_ici}). Sonra içeri gir ve {akis['3_deneme_dk']} dk dene; uyumazsa odada "
+         f"{akis['4_rutin_dk']} dk rutin (beslenme yok); "
+         + (f"en fazla {akis['6_tekrar_en_fazla']} kez, sonra {sonrasi['gece']}. " if destek_gecesi else
+            f"bebek uyuyana kadar döngüyü tekrarla (destekle uyutma yok). ")
+         + f"İçerideyken: {icerde}. Bekleme önceki geceden az ya da aynı olamaz; asla {taban} dk "
+         f"altına inmez."
+         if yeni else
+         f"- GECE UYANMASI (bebek uyuduktan sonra gece uyanırsa; yatışta değil): önce dışarıda "
+         f"bekle (ilk bekleme süresi ve aynı gece içindeki "
+         f"bekleme süreleri için planına bak); sonra içeri gir ve {akis['3_deneme_dk']} dk dene; "
+         f"uyumazsa odada {akis['4_rutin_dk']} dk rutin (beslenme yok); en fazla "
+         f"{akis['6_tekrar_en_fazla']} kez. İçerideyken: {icerde}. "
+         f"Bekleme günden güne standart +{artis_std} dk, "
+         f"çok dirençli bebekte en az +{_sayi(artis_min * 60)} sn artar; önceki günle aynı ya "
+         f"da daha az olamaz; asla {taban} dk altına inmez. Bu artış kuralı GÜNDEN GÜNEdir, "
+         f"aynı gecenin uyanmaları için değil."),
+        *([f"- Kararı bekleyen konular ({'; '.join(bekleyen)}): sayı da YÖN de söyleme. 'Aynı "
+           f"gece her uyanmada bekleme artar / azalır / aynı kalır' DEME; yalnız 'bunun için "
+           f"planınıza bakın' de."] if bekleyen else []),
         f"- Kısa gündüz uykusu ({g_gunduz}. günün gündüz uykuları; uyku"
         f"{f' {kisa_esik} dk' if kisa_esik else ''} altında kalırsa): {kg_metin}. Bebek {geri_dalis} dk ve üzeri geri uyursa uzatma biter.",
-        f"- Kucağa alma aralıkları: {' → '.join(_sayi(v) for v in kucak)} dk.",
+        (f"- Kucak: histerik ağlamada her gün serbest. Histerik değilse önerilmez"
+         + (f"; ilk günlerde anne dayanamazsa kucağa alabilir, ama eğitimin uzayacağını söyle"
+            if gdh <= int(kucak_kural["histerik_degilken_kucak_son_gun"]) else
+            f"; {int(kucak_kural['histerik_degilken_kucak_son_gun']) + 1}. günden itibaren histerik "
+            f"ağlama yoksa kucak YOK")
+         + ". Kucak için süre ya da aralık sayısı VERME."
+         if yeni else
+         f"- Kucağa alma aralıkları: {' → '.join(_sayi(v) for v in kucak)} dk."),
+        *([f"- Beyaz gürültü: {db['en_az']}–{db['en_fazla']} dB (70–80 dB çok yüksek).",
+           "- Oda bölme: perde, kumaş paravan ya da sabit duran mobilya öner; odayı poşetle bölmeyi "
+           "ÖNERME (güvenlik). Cama karartma poşeti olabilir."] if yeni else []),
         f"- Rutin süresi: {rutin['en_az']}–{rutin['en_fazla']} dk. Rutin uyku saatinden ÖNCE biter: "
         f"başlangıcı = uyku saati − rutin süresi; uyku saatinde ya da sonrasında rutine başlatma."
         + (f" Bugün: {rutin_saatleri}." if rutin_saatleri else ""),
@@ -477,7 +543,8 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
         "kucak": set(kucak),
         "rutin": ("aralik", rutin["en_az"], rutin["en_fazla"]),
         "artis": ("aralik", artis_min, artis_std),
-        "gece_uyanma": {taban, akis["3_deneme_dk"], akis["4_rutin_dk"]},
+        "gece_uyanma": {taban, akis["3_deneme_dk"], akis["4_rutin_dk"]}
+                       | ({gece_ici} if yeni else set()),
         "dis": kg_dis,
         "ic": kg_ic | ({1} if icerde_sayili else set()),
         "yatir_cik": yc_izinli,
@@ -534,15 +601,23 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
             serbest |= {float(x) for x in v}
 
     karsilik = {
-        "gece_uyanma": (f"Gece uyandığında önce dışarıda bekleyin (süre için planınıza bakın); "
-                        f"sonra içeri girip {akis['3_deneme_dk']} dakika deneyin, uyumazsa odada "
-                        f"{akis['4_rutin_dk']} dakikalık rutin yapın; en fazla "
-                        f"{akis['6_tekrar_en_fazla']} kez."),
+        "gece_uyanma": ((f"Bu gece uyandığında önce dışarıda {gece_ilk} dakika bekleyin (aynı gece her yeni "
+                         f"uyanmada {gece_ici} dakika daha); sonra içeri girip {akis['3_deneme_dk']} dakika "
+                         f"deneyin, uyumazsa odada {akis['4_rutin_dk']} dakikalık rutin yapın"
+                         + (f"; en fazla {akis['6_tekrar_en_fazla']} kez." if destek_gecesi else
+                            "; bebek uyuyana kadar sürdürün."))
+                        if yeni else
+                        (f"Gece uyandığında önce dışarıda bekleyin (süre için planınıza bakın); "
+                         f"sonra içeri girip {akis['3_deneme_dk']} dakika deneyin, uyumazsa odada "
+                         f"{akis['4_rutin_dk']} dakikalık rutin yapın; en fazla "
+                         f"{akis['6_tekrar_en_fazla']} kez.")),
         "dis": kg_karsilik, "ic": kg_karsilik,
         "seans": (f"Uyumazsa {deneme} dakika deneyin, sonra {mola} dakika rutin molası verin "
                   f"(çok dirençli bebekte {mola_max} dakika) ve yeniden deneyin; en fazla {tekrar} kez."),
         "mola": None, "tekrar": None,
-        "kucak": f"Kucağa alma aralıkları {' → '.join(_sayi(v) for v in kucak)} dakika diye artar.",
+        "kucak": ("Kucak histerik ağlamada her gün serbesttir; histerik değilse önerilmez."
+                  if yeni else
+                  f"Kucağa alma aralıkları {' → '.join(_sayi(v) for v in kucak)} dakika diye artar."),
         "rutin": f"Rutin en az {rutin['en_az']}, en fazla {rutin['en_fazla']} dakika sürsün.",
         "artis": (f"Bekleme süresi günden güne standart olarak {artis_std} dakika, çok dirençli "
                   f"bebekte en az {_sayi(artis_min * 60)} saniye artar."),
@@ -553,7 +628,14 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
     karsilik["mola"] = karsilik["tekrar"] = karsilik["seans"]
     karsilik["motivasyon"] = "Ağlama sabit kalmaz, her gün azalır."
     karsilik["yon"] = "Aynı gece içindeki bekleme süreleri için planınıza bakın."
-    karsilik["yumusatma"] = f"{tekrar} denemeden sonra da uyumazsa o gece {sonrasi['gece']}."
+    karsilik["yumusatma"] = (f"{tekrar} denemeden sonra da uyumazsa o gece {sonrasi['gece']}."
+                             if destek_gecesi else
+                             f"Bu gece destek vererek uyutma yok; {tekrar} denemeden sonra da uyumazsa {gece_diger}.")
+    karsilik["destek_gecesi"] = karsilik["yumusatma"] if not destek_gecesi else None
+    karsilik["db"] = (f"Beyaz gürültü {db['en_az']}–{db['en_fazla']} desibel olmalı; 70–80 çok yüksek."
+                      if yeni else None)
+    karsilik["poset"] = ("Odayı bölmek için perde, kumaş paravan ya da sabit duran bir mobilya kullanın; "
+                         "poşeti yalnız cama yapıştırarak karartma için kullanabilirsiniz." if yeni else None)
     karsilik["asama"] = f"Bugün {asama['ad']} aşamasındasınız; yeriniz: {yer}."
     karsilik["yatis_dis"] = (f"Yatışta dışarıda beklemezsiniz, {yer} kalırsınız; dışarıda bekleme "
                              f"yalnız gece uyanmasında ve kısa gündüz uykusunu uzatırken var.")
@@ -587,6 +669,10 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
             "izinli": izinli, "serbest": serbest, "turev": turev, "taban": float(taban),
             "takvim": takvim_d, "izler": izler, "kisa_esik": kisa_esik,
             "geri_dalis": float(geri_dalis), "yatis": yatis, "uyku_baslari": uyku_baslari,
+            "yeni": yeni, "destek_gecesi": destek_gecesi,
+            "gece_bekleme": ({float(gece_ilk + k * gece_ici) for k in range(0, 5)}   # en çok 5 uyanma
+                             | {float(yontem_kart.gece_ilk_bekleme_dk(g - 1))} if yeni else set()),
+            "db_aralik": (float(db["en_az"]), float(db["en_fazla"])) if yeni else None,
             "saat_araliklari": {a: tuple(float(x) for x in (bant or {}).get(a))
                                 for a in ("uyaniklik_penceresi_dk", "gece_uykusu_dk",
                                           "toplam_gunluk_uyku_dk", "gunduz_uyku_toplam_dk")
@@ -606,6 +692,8 @@ def _gece_akisi_uygun(rol: str, dk: float, kural: dict, cumle: str) -> bool:
     """Gece akışı: içeride deneme / odada rutin süreleri serbest; taban yalnız
     "en az / altına inme" kalıbıyla (ilk bekleme süresi İlayda kararı bekliyor)."""
     akis = kural["izinli"]["gece_uyanma"] - {kural["taban"]}
+    if _icinde(dk, kural.get("gece_bekleme") or ()):       # bu gecenin bekleme dizisi (5g, +1 …)
+        return True
     if abs(dk - kural["taban"]) < _TOL:
         return _taban_ifadesi(cumle, kural["taban"])
     return rol != "dis" and _icinde(dk, akis)          # "dışarıda 45 dk bekle" gece akışı değil
@@ -723,7 +811,11 @@ def _metin_ihlalleri(cumle: str, kural: dict, onceki: str = "") -> list[tuple[st
     out: list[tuple[str, float]] = []
     # Bekleyen alanda yön ("aynı gece her uyanmada bekleme artar")
     temiz = re.sub(r"\b(?:en|birden) fazla", " ", cumle, flags=re.IGNORECASE)
-    if _GECE_ICI.search(temiz) and not re.search(r"günden güne", temiz, re.IGNORECASE):
+    if kural.get("yeni"):
+        # +1 dk artış artık kural; yalnız ters yön (azalır / aynı kalır) ihlal
+        if _GECE_ICI.search(temiz) and _YON_TERS.search(temiz) and _SURE_BAGLAMI.search(temiz):
+            out.append(("yon", 0.0))
+    elif _GECE_ICI.search(temiz) and not re.search(r"günden güne", temiz, re.IGNORECASE):
         for m in _YON.finditer(temiz):
             if _SURE_BAGLAMI.search(temiz[max(0, m.start() - 50):m.end() + 50]):
                 out.append(("yon", 0.0))
@@ -766,6 +858,24 @@ def _metin_ihlalleri(cumle: str, kural: dict, onceki: str = "") -> list[tuple[st
     if (re.search(r"mola", cumle, re.IGNORECASE) and _MOLA_ANNE.search(cumle)
             and not re.search(r"\bdeğil", cumle, re.IGNORECASE)):   # "siz dinlenin diye değil" doğru tanım
         out.append(("mola_tanimi", 0.0))
+    if kural.get("yeni"):
+        # 2. geceden itibaren "destek verip uyutun" yok (gündüz cümlesi hariç)
+        if (not kural.get("destek_gecesi") and _DESTEKLE_UYUT.search(cumle)
+                and not _GUNDUZ.search(cumle)
+                and not re.search(r"\b(?:yok|yoktur|değil|olmaz|yalnız (?:ilk|1\.))", cumle, re.IGNORECASE)):
+            out.append(("destek_gecesi", 0.0))
+        # Beyaz gürültü dB
+        lo, hi = kural.get("db_aralik") or (None, None)
+        if lo is not None and re.search(r"beyaz gürültü|ses", cumle, re.IGNORECASE):
+            for m in _DB.finditer(cumle):
+                for v in (m.group(1), m.group(2)):
+                    if v and not (lo - _TOL <= float(v) <= hi + _TOL):
+                        out.append(("db", float(v)))
+        # Odayı poşetle bölme (cama karartma poşeti uygun)
+        if (_POSET_BOLME.search(cumle) and _POSET_BOLME_BAGLAMI.search(cumle)
+                and not (_CAM.search(cumle) and not re.search(r"tavan|böl|ayır|paravan", cumle, re.IGNORECASE))
+                and not re.search(r"poşet\w*[^.]*(?:kullanmayın|önermiyoruz|asmayın|bölmeyin)", cumle, re.IGNORECASE)):
+            out.append(("poset", 0.0))
     # Takvimle çelişen gün adı
     for m in _GUN_ADI.finditer(cumle):
         izin, _ = _gun_adi_beklenen(cumle, m.start(), kural["takvim"])
@@ -830,6 +940,8 @@ _METIN_ACIKLAMA = {
     "yatis_dis": "yatışta dışarıda bekleme (tablo yalnız gece uyanmasında ve kısa gündüz uykusunda öngörür)",
     "mola_tanimi": "rutin molası anne molası gibi anlatıldı (bebekle odada kısa uyku rutinidir)",
     "rutin_zamani": "rutin uyku saatinde ya da sonrasında başlatıldı (rutin uykudan önce biter)",
+    "destek_gecesi": "destekle uyutma yalnız destek gecesinde (ilk gece); bu gece uyuyana kadar döngü",
+    "poset": "odayı poşetle bölme önerildi (güvenlik: perde/paravan/mobilya; poşet yalnız cama)",
 }
 
 
@@ -841,6 +953,8 @@ def duzeltme_notu(ihlaller: list[dict]) -> str:
             parcalar.append(_METIN_ACIKLAMA[rol])
         elif rol == "saat":
             parcalar.append(f"saat: {_ss(int(v))}")
+        elif rol == "db":
+            parcalar.append(f"beyaz gürültü: {_sayi(v)} dB (50–60 olmalı)")
         elif rol == "saat_sure":
             parcalar.append(f"saatli süre: {_sayi(v / 60)} saat")
         elif rol in ("gun", "kez", "hafta"):
