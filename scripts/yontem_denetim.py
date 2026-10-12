@@ -45,6 +45,14 @@ from engine.sayi_rol import KAPSAM_DISI, ROL_SOZCUKLERI, satir_sayilari  # noqa:
 # =============================================================================
 # Tabloyla karşılaştırma
 # =============================================================================
+def _kisa_gunduz_gunleri(g13: dict, bekleyen: set) -> dict[int, tuple[int, int]]:
+    gunler = {g: (g13[f"gun_{g}"]["dis"], g13[f"gun_{g}"]["ic"]) for g in (1, 2, 3)}
+    if "kisa_gunduz.gun_4_12_dis_ic_dk" not in bekleyen:
+        from api.services.yontem_kart import kisa_gunduz_dis_ic
+        gunler.update({g: kisa_gunduz_dis_ic(g) for g in range(4, 13)})
+    return gunler
+
+
 def kurallar() -> dict:
     """Rol → karşılaştırma kuralı. Değerler YALNIZ dolu alanlardan okunur;
     bekleyen alana bağlı durumlar 'bekliyor' döner (karşılaştırılmaz)."""
@@ -56,7 +64,9 @@ def kurallar() -> dict:
           | {yontem.deger("yatir_cik.yirmi_bir_gun_kurali")["en_fazla_dk"]})
     rutin = yontem.deger("seans.rutin_suresi_dk")
     return {
-        "kucak": {"izinli": {v / 60 for v in yontem.deger("kucak_araligi_sn.dizi")}},
+        # v0.4: kucak aralık dizisi bekleyen (bağlamı belirsiz) → karşılaştırılmaz
+        "kucak": ({"izinli": set(), "bekleyen": True} if "kucak_araligi_sn.dizi" in b
+                  else {"izinli": {v / 60 for v in yontem.deger("kucak_araligi_sn.dizi")}}),
         "mola": {"izinli": {yontem.deger("seans.mola_dk"), yontem.deger("seans.mola_en_fazla_dk")}},
         "seans": {"izinli": {yontem.deger("seans.deneme_dk"), yontem.deger("kisa_gunduz.seans_toplam_dk")}},
         "tekrar": {"izinli": {yontem.deger("seans.tekrar_en_fazla")}},
@@ -66,11 +76,12 @@ def kurallar() -> dict:
         "gece_uyanma": {"taban": yontem.deger("gece_uyanma.taban_dk"),
                         "bekleyen": [y for y in ("gece_uyanma.ilk_gece_ilk_bekleme_dk",
                                                   "gece_uyanma.gece_ici_artis_dk") if y in b]},
-        # Kısa gündüz dış/iç: gün 1-3 ve yatır-çık dolu (İlayda), gün 4-12 bekliyor.
-        "dis": {"gun": {g: v["dis"] for g, v in ((1, g13["gun_1"]), (2, g13["gun_2"]), (3, g13["gun_3"]))},
+        # Kısa gündüz dış/iç: gün 1-3 ve yatır-çık dolu (İlayda); gün 4-12 v0.4'te dolu
+        # (dış her gün +5, iç = 45 − dış), bekliyorsa karşılaştırılmaz.
+        "dis": {"gun": {g: v[0] for g, v in _kisa_gunduz_gunleri(g13, b).items()},
                 "yatir_cik": yc_kd["dis"],
                 "bekleyen": "kisa_gunduz.gun_4_12_dis_ic_dk" in b},
-        "ic": {"gun": {g: v["ic"] for g, v in ((1, g13["gun_1"]), (2, g13["gun_2"]), (3, g13["gun_3"]))},
+        "ic": {"gun": {g: v[1] for g, v in _kisa_gunduz_gunleri(g13, b).items()},
                "yatir_cik": yc_kd["ic"],
                "bekleyen": "kisa_gunduz.gun_4_12_dis_ic_dk" in b},
     }
@@ -94,7 +105,8 @@ def sayi_durumu(rol: str, dk: float, k: dict, gun: tuple[int, int] | None = None
         return "bekliyor" if kural["bekleyen"] else "uyumlu"
     if rol in ("dis", "ic"):
         gunluk = set(kural["gun"].values()) | {kural["yatir_cik"]}
-        if gun is not None and gun[1] <= 3:        # gün 1-3 bölümü: o günlerin değerleri
+        if gun is not None and gun[1] <= 12 and all(g in kural["gun"] for g in range(gun[0], gun[1] + 1)):
+            # gün bölümü: yalnız o günlerin değerleri (v0.4'te 4-12 de dolu)
             izinli = {kural["gun"][g] for g in range(gun[0], gun[1] + 1) if g in kural["gun"]}
             return "uyumlu" if dk in izinli else "uyumsuz"
         if gun is not None and gun[0] >= 13:       # yatır-çık
@@ -102,7 +114,9 @@ def sayi_durumu(rol: str, dk: float, k: dict, gun: tuple[int, int] | None = None
         if dk in gunluk:
             return "uyumlu"
         return "bekliyor" if kural["bekleyen"] else "uyumsuz"
-    return "uyumlu" if any(abs(dk - v) < 1e-6 for v in kural["izinli"]) else "uyumsuz"
+    if any(abs(dk - v) < 1e-6 for v in kural["izinli"]):
+        return "uyumlu"
+    return "bekliyor" if kural.get("bekleyen") is True else "uyumsuz"
 
 
 def satir_durumu(durumlar: list[str]) -> str | None:

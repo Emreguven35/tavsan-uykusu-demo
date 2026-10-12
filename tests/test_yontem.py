@@ -76,18 +76,18 @@ check("S) Kaynaksız dolu alan → hata",
 check("S) Onay alanı olmayan dolu alan → hata",
       _hata_var(bozuk(lambda t: t["seans"]["mola_dk"].pop("onay")), "seans.mola_dk: onay alanı yok"))
 check("S) Bekleyen alanda deger → hata",
-      _hata_var(bozuk(lambda t: t["gece_uyanma"]["ilk_gece_ilk_bekleme_dk"].update(deger=25)),
+      _hata_var(bozuk(lambda t: t["kucak_araligi_sn"]["dizi"].update(deger=25)),
                 "bekleyen alanda deger olamaz"))
 check("S) Sorusuz bekleyen alan → hata",
-      _hata_var(bozuk(lambda t: t["gece_uyanma"]["ilk_gece_ilk_bekleme_dk"].pop("soru")), "soru yok"))
+      _hata_var(bozuk(lambda t: t["kucak_araligi_sn"]["dizi"].pop("soru")), "soru yok"))
 check("S) Adaysız ve kaynak notsuz bekleyen alan → hata",
-      _hata_var(bozuk(lambda t: t["gece_uyanma"]["gece_ici_artis_dk"].pop("kaynak_notu")),
+      _hata_var(bozuk(lambda t: t["kucak_araligi_sn"]["dizi"].update(adaylar=[])),
                 "aday yoksa kaynak_notu zorunlu"))
 check("S) Kaynaksız aday → hata",
-      _hata_var(bozuk(lambda t: t["gece_uyanma"]["ilk_gece_ilk_bekleme_dk"]["adaylar"][0].pop("kaynak")),
+      _hata_var(bozuk(lambda t: t["kucak_araligi_sn"]["dizi"]["adaylar"][0].pop("kaynak")),
                 "adaylar[0]: kaynak yok"))
 check("S) Bilinmeyen durum ('onaylandi') → hata",
-      _hata_var(bozuk(lambda t: t["gece_uyanma"]["ilk_gece_ilk_bekleme_dk"].update(durum="onaylandi")),
+      _hata_var(bozuk(lambda t: t["kucak_araligi_sn"]["dizi"].update(durum="onaylandi")),
                 "bilinmeyen durum"))
 check("S) Bilinmeyen bölüm → hata",
       _hata_var(bozuk(lambda t: t.update(uydurma={"x": {"deger": 1}})), "tanınmayan bölüm: uydurma"))
@@ -105,10 +105,9 @@ check("S) Notu olmayan sürüm → hata",
 # =============================================================================
 # B — bekleyen alanlar
 # =============================================================================
-BEKLEYEN = {"gece_uyanma.ilk_gece_ilk_bekleme_dk", "gece_uyanma.gece_ici_artis_dk",
-            "gece_uyanma.icerde_temas_kapi", "gece_uyanma.protokol_karti",
-            "kisa_gunduz.gun_4_12_dis_ic_dk"}
-check("B) bekleyen_alanlar() tam bu 5 alan", set(yontem.bekleyen_alanlar()) == BEKLEYEN,
+# v0.4 (İlayda 12 Ekim): 5 bekleyen alan kapandı; kucak aralık dizisi bağlamı belirsiz → bekleyen
+BEKLEYEN = {"kucak_araligi_sn.dizi"}
+check("B) bekleyen_alanlar() yalnız kucak dizisi (v0.4)", set(yontem.bekleyen_alanlar()) == BEKLEYEN,
       yontem.bekleyen_alanlar())
 for yol in sorted(BEKLEYEN):
     try:
@@ -117,15 +116,40 @@ for yol in sorted(BEKLEYEN):
     except yontem.BekleyenAlanHatasi as e:
         check(f"B) {yol} okunursa BekleyenAlanHatasi", e.yol == yol and yol in str(e)
               and isinstance(e, yontem.YontemTablosuHatasi), str(e))
-check("B) Bekleyen alanların adayları kaynaklı (adaysızlarda kaynak notu var)",
-      all(a.get("kaynak") for y in BEKLEYEN for a in yontem.adaylar(y))
-      and yontem.adaylar("gece_uyanma.gece_ici_artis_dk") == []
-      and yontem.adaylar("gece_uyanma.icerde_temas_kapi") == [], "")
-check("B) İlk gece bekleme adayları: anneye özel (İlayda) / 5 (KB) / 10 (örnek)",
-      [a["deger"] for a in yontem.adaylar("gece_uyanma.ilk_gece_ilk_bekleme_dk")] == ["anneye_ozel", 5, 10])
-check("B) Gün 4-12 kısa gündüz tek aday: kodun 1→1,5→2'si (İlayda kaynağı yok)",
-      yontem.adaylar("kisa_gunduz.gun_4_12_dis_ic_dk")[0]["deger"]["dis_kademe_dk"] == [1, 1.5, 2]
-      and yontem.adaylar("kisa_gunduz.gun_4_12_dis_ic_dk")[0]["kaynak"][0]["tur"] == "kod")
+check("B) Kucak dizisi bekleyen; eski değer kaynaklı aday",
+      yontem.adaylar("kucak_araligi_sn.dizi")[0]["deger"] == [30, 60, 90, 120]
+      and all(a.get("kaynak") for a in yontem.adaylar("kucak_araligi_sn.dizi")))
+
+
+def _kayit4(yol):
+    return [k.get("dosya") for k in yontem.kaynaklar(yol) if str(k.get("dosya", "")).startswith("ilayda-cevaplar-4/")]
+
+
+check("V4) Gece ilk bekleme 5 (1. gece), gece içi +1; kaynak ilayda-cevaplar-4 kayıtları",
+      yontem.deger("gece_uyanma.ilk_gece_ilk_bekleme_dk") == 5 and yontem.deger("gece_uyanma.gece_ici_artis_dk") == 1
+      and any("09.01.45" in d for d in _kayit4("gece_uyanma.ilk_gece_ilk_bekleme_dk"))
+      and any("09.03.55" in d for d in _kayit4("gece_uyanma.gece_ici_artis_dk")))
+check("V4) Kapı/eşik temas: histerikse temas, değilse sesle sakinleştirip çık (09.05.19)",
+      "histerik" in yontem.deger("gece_uyanma.icerde_temas_kapi")
+      and "sesle sakinleştirip çık" in yontem.deger("gece_uyanma.icerde_temas_kapi")
+      and any("09.05.19" in d for d in _kayit4("gece_uyanma.icerde_temas_kapi")))
+check("V4) Kısa gündüz 4-12: dış her gün +5, toplam 45, üst sınır 45 (08.59.23)",
+      yontem.deger("kisa_gunduz.gun_4_12_dis_ic_dk") == {"gunluk_dis_artis_dk": 5, "toplam_dk": 45,
+                                                         "dis_ust_sinir_dk": 45}
+      and any("08.59.23" in d for d in _kayit4("kisa_gunduz.gun_4_12_dis_ic_dk")))
+check("V4) Protokol kartı onaylı; son adım destek gecesi / diğer geceler ayrı (09.05.50)",
+      set(yontem.deger("gece_uyanma.protokol_karti")) >= {"son_destek_gecesi", "son_diger_geceler"}
+      and any("09.05.50" in d for d in _kayit4("gece_uyanma.protokol_karti")))
+check("V4) Destek gecesi tek yerde: seans.destek_gecesi_egitim_gunleri == [1]; diğer geceler uyuyana kadar",
+      yontem.deger("seans.destek_gecesi_egitim_gunleri") == [1]
+      and "uyuyana kadar" in yontem.deger("seans.uc_tekrar_sonrasi")["gece_diger"])
+check("V4) Kucak kuralı, beyaz gürültü 50-60, oda bölme (poşetle değil), kestirme kayıt tamlığı",
+      (yontem.deger("kucak_araligi_sn.kural")["histerik_degilken_kucak_son_gun"] == 7
+       and yontem.deger("hazirlik.beyaz_gurultu_db") == {"en_az": 50, "en_fazla": 60}
+       and yontem.deger("hazirlik.oda_bolme")["poset_ile_bolme"] is False
+       and yontem.deger("hazirlik.oda_bolme")["cam_karartma_poseti"] is True
+       and yontem.deger("kestirme.eksik_kayit_bildirimi")["gunde_en_fazla"] == 1))
+check("V4) Sürüm 0.4 ve notu var", yontem.surum() == "0.4" and "0.4" in yontem.tablo()["surum_notlari"])
 
 # İlayda kaynaklı dolu alanlar (v0.2)
 def _ilayda_kaynakli(yol):
@@ -153,7 +177,6 @@ check("B) Her dolu alanın kaynağı türlü (tur alanı)",
       all(k.get("tur") for b in yontem.BOLUMLER for a in (yontem.tablo()[b] or {}).values()
           if isinstance(a, dict) and "deger" in a for k in a["kaynak"]))
 check("B) Dolu alan okunur", yontem.deger("seans.mola_dk") == 15
-      and yontem.deger("kucak_araligi_sn.dizi") == [30, 60, 90, 120]
       and yontem.deger("gece_uyanma.taban_dk") == 5)
 check("B) Atıf yas_bantlari'ndan çözülür (kopya yok)",
       yontem.deger("asama_gecisi.kural")["asamada_en_fazla_gun"] == 7
@@ -190,9 +213,9 @@ check("K) Merdiven gün aralıkları 1-3/4-6/7-9/10-12/13",
 check("K) Regresyon eşiği ve günü plan_adapter sabitleriyle aynı",
       yontem.deger("regresyon.kendi_donme_esik_dk") == plan_adapter.SELF_SOOTHE_FAIL_MIN
       and yontem.deger("regresyon.devam_gun") == plan_adapter.REGRESYON_45_GUN)
-check("K) Protokol kartı adayı plan_adapter.NIGHT_WAKE_PROTOCOL ile aynı",
-      yontem.adaylar("gece_uyanma.protokol_karti")[0]["deger"]["metin"]
-      == plan_adapter.NIGHT_WAKE_PROTOCOL["aciklama"])
+check("K) Saklanan kart metni (plan_adapter.NIGHT_WAKE_PROTOCOL) kodda aynen; onaylı kart tabloda (okuma anında)",
+      "45 dk bekleyip" in plan_adapter.NIGHT_WAKE_PROTOCOL["aciklama"]
+      and "45 dakika" in yontem.deger("gece_uyanma.protokol_karti")["2"])
 _sab = yontem.deger("bildirim.metin_sablonlari")
 from api.services import notifier                             # noqa: E402
 check("K) once_gunduz şablonu + uyku_once_dk = bugünkü notifier metni",
@@ -226,10 +249,12 @@ ORNEKLER = [
     # parameter_engine 13 gün kısa gündüz (yedek motor plan satırı)
     ("**Bu gün kısa gündüz uykusu olursa:** Dış bekleme kademesi: 1 dakika → 1,5 dakika → 2 dakika "
      "(içeri girince o günün pozisyonundan beklemeye devam, toplam ~45 dk hedefi).",
-     [("dis", 1, "bekliyor"), ("dis", 1.5, "bekliyor"), ("dis", 2, "bekliyor"), ("seans", 45, "uyumlu")]),
+     # v0.4: gün 4-12 dolu → kod dizisi tabloyla çelişir
+     [("dis", 1, "uyumsuz"), ("dis", 1.5, "uyumsuz"), ("dis", 2, "uyumsuz"), ("seans", 45, "uyumlu")]),
     # Kucağa alma satırı (21/21 planda aynı)
     ("**Kucağa alma bekleme süreleri:** 30 saniye → 1 dakika → 1.5 dakika → 2 dakika diye artış",
-     [("kucak", 0.5, "uyumlu"), ("kucak", 1, "uyumlu"), ("kucak", 1.5, "uyumlu"), ("kucak", 2, "uyumlu")]),
+     # v0.4: kucak aralık dizisinin bağlamı belirsiz (İlayda 12 Ekim, 9. soru) → bekliyor
+     [("kucak", 0.5, "bekliyor"), ("kucak", 1, "bekliyor"), ("kucak", 1.5, "bekliyor"), ("kucak", 2, "bekliyor")]),
     # 45 dakika kuralı satırı
     ("**45 dakika kuralı:** 45 dakika denenme + 15-30 dakika rutin molası + 45 dakika daha (uykuya kadar)",
      [("mola", 15, "uyumlu"), ("mola", 30, "uyumlu"), ("seans", 45, "uyumlu"),
@@ -242,7 +267,8 @@ ORNEKLER = [
     # Gece uyanma protokolü
     ("1. uyanma 5 dk, sonra her uyanmada artırarak devam. Ertesi gün bir önceki günün başlangıcının "
      "ÜSTÜNDE başlanır. Asla 5 dk altına inme.",
-     [("gece_uyanma", 5, "bekliyor"), ("gece_uyanma", 5, "bekliyor")]),
+     # v0.4: ilk bekleme ve gece içi artış dolu → taban üstü uyumlu
+     [("gece_uyanma", 5, "uyumlu"), ("gece_uyanma", 5, "uyumlu")]),
     # Yatır-çık (max 20-25 bekliyor)
     ("**Yatır-çık sonrası:** STANDART ilerleme 5 → 10 → 15 → 20 dk. Max 20-25 dk. 21 gün hiç dalmazsa "
      "max 45 dk veya tıbbi yönlendirme.",
@@ -252,11 +278,11 @@ ORNEKLER = [
     # Rapor madde 4b: Haiku cevapları (sentetik)
     ("**Sonraki uyanmalarda:** Her uyanmada bekleme süresi artar. İkinci uyanmada 10 dakika, "
      "üçüncü uyanmada 15 dakika bekleyin.",
-     [("gece_uyanma", 10, "bekliyor"), ("gece_uyanma", 15, "bekliyor")]),
+     [("gece_uyanma", 10, "uyumlu"), ("gece_uyanma", 15, "uyumlu")]),
     ("Gecenin bundan sonraki uyanmalarında ise bekleme süresini artırmaya devam edin — ikinci "
      "uyanmada 6-7 dakika, üçüncüde 8-9 dakika gibi.",
-     [("gece_uyanma", 6, "bekliyor"), ("gece_uyanma", 7, "bekliyor"),
-      ("gece_uyanma", 8, "bekliyor"), ("gece_uyanma", 9, "bekliyor")]),
+     [("gece_uyanma", 6, "uyumlu"), ("gece_uyanma", 7, "uyumlu"),
+      ("gece_uyanma", 8, "uyumlu"), ("gece_uyanma", 9, "uyumlu")]),
     ("- **1. gündüz uykusu (09:30):** Dışarıdan 10 dakika bekleyin, sonra içeri girin ve beşiğin "
      "yanında oturup toplam 35 dakika daha bekleyin (dış+iç = 45 dakika hedef)",
      [("dis", 10, "uyumlu"), ("ic", 35, "uyumlu"), ("seans", 45, "uyumlu")]),
@@ -273,7 +299,7 @@ ORNEKLER = [
     ("- 2. gün: direnç süresi 10 dakikaya düşmüş olmalı", [("basari", 10, "kapsam_disi")]),
     # Sentetik (prod plan kalıbı, metin kopyalanmadı): kısa gündüzde "uyanırsa" gece değildir
     ("Kısa gündüz uykusundan uyanırsa dışarıda 1 dakika → 1,5 dakika → 2 dakika bekleyin.",
-     [("dis", 1, "bekliyor"), ("dis", 1.5, "bekliyor"), ("dis", 2, "bekliyor")]),
+     [("dis", 1, "uyumsuz"), ("dis", 1.5, "uyumsuz"), ("dis", 2, "uyumsuz")]),
     ("Gece uyanırsa 2 dakika bekleyip içeri girin.", [("gece_uyanma", 2, "uyumsuz")]),
     # Saat ve gün numarası süre sayılmaz
     ("Bugün 09:30–10:30 arasında ilk gündüz uykunuzu hedefliyorsunuz; Gün 1-3 beşik yanı.", []),
@@ -295,8 +321,10 @@ check("D) Gün 1-3 bölümünde dış 1 dk → uyumsuz (İlayda: 5/10/15)",
 check("D) Yatır-çık bölümünde dış 20 / iç 25 uyumlu, dış 5 uyumsuz",
       den.sayi_durumu("dis", 20, K, (13, 13)) == "uyumlu" and den.sayi_durumu("ic", 25, K, (13, 13)) == "uyumlu"
       and den.sayi_durumu("dis", 5, K, (13, 13)) == "uyumsuz")
-check("D) Gün 4-12 bölümünde dış 1,5 dk → İlayda bekliyor",
-      den.sayi_durumu("dis", 1.5, K, (4, 6)) == "bekliyor")
+check("D) Gün 4-6 bölümünde dış 1,5 dk uyumsuz; 20/25/30 uyumlu (v0.4: dış her gün +5)",
+      den.sayi_durumu("dis", 1.5, K, (4, 6)) == "uyumsuz"
+      and all(den.sayi_durumu("dis", v, K, (4, 6)) == "uyumlu" for v in (20, 25, 30))
+      and den.sayi_durumu("ic", 25, K, (4, 6)) == "uyumlu")
 check("D) Satır durumu: bir uyumsuz sayı satırı uyumsuz yapar",
       den.satir_durumu(["uyumlu", "bekliyor", "uyumsuz"]) == "uyumsuz"
       and den.satir_durumu(["uyumlu", "bekliyor"]) == "bekliyor"
@@ -344,7 +372,13 @@ for kok in ("api", "engine", "app.py", "pages"):
             _okuyan.append(f.relative_to(ROOT).as_posix())
 check("G) Tabloyu yalnız yontem_kart (YONTEM_TABLOSU) ve sor_kural (SOR_KURAL_BLOGU/"
       "SOR_SAYI_DOGRULAMA) okur",
-      sorted(_okuyan) == ["api/services/sor_kural.py", "api/services/yontem_kart.py"], _okuyan)
+      sorted(_okuyan) == ["api/services/sor_kural.py", "api/services/yontem_kart.py",
+                          "engine/parameter_engine.py"], _okuyan)
+_pe = (ROOT / "engine/parameter_engine.py").read_text(encoding="utf-8")
+check("G) parameter_engine tabloyu yalnız YONTEM_TABLOSU açıkken okur (13 günlük kısa gündüz metni)",
+      re.search(r'if \(os\.getenv\("YONTEM_TABLOSU"\) or ""\)\.strip\(\)\.lower\(\) not in '
+                r'\("1", "true", "yes", "on"\):\s*\n\s*return None\s*\n\s*from engine import yontem', _pe)
+      is not None)
 _plans = (ROOT / "api/routers/plans.py").read_text(encoding="utf-8")
 _notif = (ROOT / "api/services/notifier.py").read_text(encoding="utf-8")
 _chat = (ROOT / "api/routers/chat.py").read_text(encoding="utf-8")
