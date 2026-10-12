@@ -1,24 +1,29 @@
-# Anne Sesi — Ses Verisinin İşlenmesine İlişkin Açık Rıza Metni
+# Açık Rıza Metni — Anne Sesi
 
-> TASLAK — hukuki metin yazılacak. Sürüm: config `KVKK_METIN_SURUMLERI["acik_riza_ses"]`.
-> Ses kaydı biyometrik nitelikte özel kişisel veri sayılabilir; ayrı AÇIK RIZA.
-> Teknik olgular (envanter, 2026-10-07): ham kayıt sunucuda SAKLANMAZ, ses
-> klonlama servisine (ElevenLabs) gönderilir; klon ses paketi üretilir üretilmez
-> silinir; üretilen ninni/masal dosyaları "Sesimi sil" ya da hesap silinene kadar
-> saklanır.
+Son güncelleme: 12 Ekim 2026 · Sürüm: kvkk-2026-10
 
-## 1. Açık rızanın konusu
+Anne Sesi, ninni ve masalları sizin sesinizle seslendirmek için 30 saniyelik bir ses kaydınızı kullanır. Sesinizden üretilen dosyalar sesinizin ayırt edici özelliklerini taşıdığından bu özelliği yalnızca açık rızanızla sunuyoruz. Veri sorumlusu: İlayda Kani ("Tavşan Uykusu").
 
-## 2. İşlenecek veriler
-### 2.1 Ses kaydı (yaklaşık 30 saniye)
-### 2.2 Ses kaydından üretilen ninni ve masal dosyaları
+## İşlenecek bilgiler
 
-## 3. İşleme amacı (Anne Sesi ile ninni ve masal üretimi)
+- 30 saniyelik ses kaydınız
+- Bu kayıttan oluşturulan geçici ses modeli
+- Sesinizle üretilen ninni ve masal ses dosyaları
 
-## 4. Aktarım (ses klonlama hizmet sağlayıcısı, yurt dışı)
+## Nasıl işlenir
 
-## 5. Saklama süresi ve silme ("Sesimi sil")
+1. Ses kaydınız sunucularımızda saklanmadan, geçici bir ses modeli oluşturmak üzere ElevenLabs'e (ABD) iletilir. ElevenLabs hesabımızda, gönderilen ses verilerinin ElevenLabs'in yapay zekâ modellerini eğitmek için kullanılması kapalıdır.
+2. Bu modelle 3 ninni ve 1 masal üretilir. Model, üretim biter bitmez (üretim başarısız olsa da) ElevenLabs'ten silinir; herhangi bir nedenle silinemezse en geç 24 saat içinde otomatik olarak temizlenir.
+3. Üretilen dosyalar yalnız sizin hesabınızda, size özel ve süreli bağlantılarla sunulur; başka kullanıcılarla paylaşılmaz.
 
-## 6. Rızanın geri alınması ve sonuçları
+## Saklama süresi
 
-## 7. Onay beyanı
+Üretilen dosyalar yeni bir kayıt yapana ya da hesabınızı silene kadar saklanır. ElevenLabs'in gizlilik politikasına göre sesle ilgili veriler, yasal bir zorunluluk olmadıkça en fazla 3 yıl saklanır.
+
+## Rızanın geri alınması
+
+Açık rızanızı dilediğiniz zaman tavsanuykusu@hotmail.com adresine yazarak ya da hesabınızı silerek geri alabilirsiniz. Bu durumda sesinizle üretilen dosyalar silinir ve Anne Sesi özelliği kullanılamaz. Geri alma, o tarihe kadar yapılmış işlemleri etkilemez.
+
+## Beyan
+
+Bu metni okudum. Ses kaydımın ve sesimle üretilen dosyaların yukarıdaki amaçla işlenmesine ve geçici ses modelinin oluşturulması için ElevenLabs'e aktarılmasına özgür irademle açık rıza veriyorum. Yalnızca kendi sesimi kaydedeceğimi kabul ediyorum.

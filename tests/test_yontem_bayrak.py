@@ -754,6 +754,17 @@ cev, log = sor(H, BID, ["İkinci uyanmada 10 dakika bekleyin."], an2)
 check("F) kapali (blok açık): blok gider, doğrulama yok",
       len(YUKLER) == 1 and "BUGÜNÜN KURALLARI" in YUKLER[0]["messages"][-1]["content"]
       and "dogrulama=-" in log and cev == "İkinci uyanmada 10 dakika bekleyin.", log)
+# main birleşmesi (v2.8.4): kapanış mesajı (SOR_GECMIS) model çağırmaz; bütün
+# bayraklar açıkken de doğrulama devreye girmez, cevap sabit kapanış metni.
+bayrak(SOR_KURAL_BLOGU=True, SOR_SAYI_DOGRULAMA="duzelt", SOR_BAGLAM_V2=True, SOR_GECMIS=True)
+CEVAPLAR[:] = []
+YUKLER.clear()
+with saat_sabitle(an2):
+    _r = client.post("/api/v1/chat", headers=H, json={"message": "Çok teşekkürler 🙏", "baby_id": BID})
+_log = [m for m in _loglar if m.startswith("chat: ")][-1]
+check("F) Kapanış mesajı (bayraklar açık): model çağrısı yok, doğrulama yok, kapanış metni",
+      _r.status_code == 200 and len(YUKLER) == 0 and "dogrulama=-" in _log
+      and _r.json()["answer"] == chatbot.kapanis_cevabi()["cevap"], (_r.status_code, len(YUKLER), _log))
 bayrak()
 YUKLER.clear()
 cev, log = sor(H, BID, ["İkinci uyanmada 10 dakika bekleyin."], an2)

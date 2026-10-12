@@ -45,6 +45,7 @@ ANTHROPIC_FIYATLARI: dict[str, dict[str, float]] = {
     "claude-haiku-4-5":  {"in": 1.0, "out": 5.0},     # /chat + moderasyon
     "claude-sonnet-4-6": {"in": 3.0, "out": 15.0},    # plan üretimi
     "claude-sonnet-5":   {"in": 3.0, "out": 15.0},
+    "claude-sonnet-5-5": {"in": 2.0, "out": 10.0},    # Sor ölçümü (CHATBOT_MODEL)
     "claude-opus-5":     {"in": 5.0, "out": 25.0},
 }
 # Tabloda olmayan bir model gelirse maliyet sıfır sayılmaz; en pahalı bilinen

@@ -39,6 +39,55 @@ from engine import llm_saglik              # LLM sağlık izleme (pasif katman)
 from engine.config import MODEL_NAME  # noqa: F401 — build_embeddings doc2query re-export
 
 MAX_TOKENS = 1024
+
+# --- Sor modeli ortamdan ayarlanabilir (2026-10-12) --------------------------
+# Tanımsızken bugünkü yük BİREBİR aynı: model CHATBOT_MODEL (claude-haiku-4-5),
+# max_tokens 1024, temperature gönderilmez, thinking gönderilmez.
+#   CHATBOT_MODEL   — model kimliği
+#   SOR_MAX_TOKENS  — tam sayı
+#   SOR_TEMPERATURE — ondalık; model desteklemiyorsa GÖNDERİLMEZ
+#   SOR_DUSUNME     — "kapali": düşünmesi varsayılan açık modellerde kapatılır
+# Ortam her çağrıda okunur (yeniden başlatma yeter; testler değiştirebilir).
+# Sampling parametresi (temperature) varsayılan dışı değerde 400 veren aileler.
+_TEMPERATURE_YOK = ("claude-sonnet-5", "claude-opus-4-7", "claude-opus-4-8",
+                    "claude-opus-5", "claude-fable", "claude-mythos")
+# Düşünmesi varsayılan AÇIK modellerde kapatma biçimi. Sonnet 5.5'te
+# {"type": "disabled"} 400 verir; kapatma "between_tools" iledir. Opus 5.5 ve
+# Fable'da düşünme kapatılamaz (listede yok → gönderilmez). Varsayılanı kapalı
+# olanlarda (Haiku 4.5, Sonnet 4.6, Opus 4.x) hiçbir şey gönderilmez.
+_DUSUNME_KAPATMA = {"claude-sonnet-5-5": {"type": "between_tools"},
+                    "claude-sonnet-5": {"type": "disabled"},
+                    "claude-opus-5": {"type": "disabled"}}
+
+
+def sor_model_ayarlari() -> dict:
+    """messages.create'e giden model/max_tokens + yalnız TANIMLIYSA ek alanlar."""
+    model = (os.getenv("CHATBOT_MODEL") or "").strip() or CHATBOT_MODEL
+    try:
+        max_tokens = int(os.getenv("SOR_MAX_TOKENS") or MAX_TOKENS)
+    except ValueError:
+        max_tokens = MAX_TOKENS
+    ayar: dict = {"model": model, "max_tokens": max_tokens}
+    sicaklik = (os.getenv("SOR_TEMPERATURE") or "").strip()
+    if sicaklik and not model.startswith(_TEMPERATURE_YOK):
+        try:
+            ayar["temperature"] = float(sicaklik)
+        except ValueError:
+            logger.warning("SOR_TEMPERATURE sayı değil, yok sayıldı: %r", sicaklik)
+    if (os.getenv("SOR_DUSUNME") or "").strip().lower() == "kapali":
+        kapat = _DUSUNME_KAPATMA.get(model)
+        if kapat is not None:
+            ayar["thinking"] = dict(kapat)
+    return ayar
+
+
+def cevap_metni(response) -> str:
+    """Yanıttaki METİN bloklarının birleşimi. Düşünme açık modellerde ilk blok
+    `thinking` olabilir; eskiden `content[0].text` okunuyordu (Haiku'da tek
+    blok, sonuç aynı)."""
+    # `type` alanı olmayan blok (eski sahte istemciler) metin sayılır.
+    return "".join(getattr(b, "text", "") or "" for b in (response.content or [])
+                   if getattr(b, "type", "text") == "text")
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 # Embedding modeli: çok dilli, Türkçe destekli, hafif (~470MB, ~118M param).
@@ -1170,10 +1219,64 @@ def _alan_sinyali(soru: str, yas_ay: float | None) -> bool:
             or any(k in low for k in GELISIM_TERIMLERI))
 
 
-def _kapsam_disi_sinyali(soru: str) -> bool:
-    """Soru AÇIKÇA başka bir konuda mı? (mama tarifi, vergi, hava durumu...)"""
+# SOR_GECMIS altında (2026-10-12): ücret/abonelik soruları da kapsam dışı
+# sinyalidir (cevabı metodoloji korpusunda yok; uydurma fiyat riski).
+FIYAT_KOKLERI = ("kaç para", "ücret", "fiyat", "abonelik")
+
+
+def _kapsam_disi_sinyali(soru: str, fiyat: bool = False) -> bool:
+    """Soru AÇIKÇA başka bir konuda mı? (mama tarifi, vergi, hava durumu...)
+
+    `fiyat=True` (yalnız SOR_GECMIS açıkken): ücret/abonelik soruları da."""
     low = tr_lower_safe(soru)
-    return any(k in low for k in KAPSAM_DISI_KOKLERI)
+    return (any(k in low for k in KAPSAM_DISI_KOKLERI)
+            or (fiyat and any(k in low for k in FIYAT_KOKLERI)))
+
+
+# --- Kapanış mesajı (SOR_GECMIS altında, 2026-10-12) -------------------------
+# "Teşekkürler", "sağol" ya da yalnız emoji: bağlam, RAG ve LLM YOK; kısa sabit
+# cevap. Mesajda bu sözcükler DIŞINDA bir şey varsa (ör. "teşekkürler ama hâlâ
+# uyumuyor") kapanış SAYILMAZ, normal akış çalışır.
+KAPANIS_CEVABI = ("Rica ederim, kolay gelsin. Aklınıza takılan bir şey olursa "
+                  "buradayım.")
+_KAPANIS_COKLER = ("teşekkür", "tesekkur", "tşk", "tsk", "sağol", "sagol",
+                   "sağ ol", "sag ol", "eyvallah")
+_KAPANIS_EK_SOZCUKLER = {"çok", "cok", "ederim", "ederiz", "ediyorum", "ler",
+                         "lar", "size", "sizlere", "sana", "ol", "olun", "olsun",
+                         "sağ", "sag", "canım", "canim", "hocam", "çoook", "cooook",
+                         "çokk", "cokk", "bin", "kere", "ya", "de", "da", "iyi",
+                         "geceler", "günler", "akşamlar", "tamam", "tamamdır",
+                         "anladım", "süper", "harika"}
+
+
+def _emoji_mi(ch: str) -> bool:
+    import unicodedata
+    return (unicodedata.category(ch) in ("So", "Sk", "Cs")
+            or 0x1F000 <= ord(ch) <= 0x1FAFF or ch in "\u200d\ufe0f\u20e3")
+
+
+def kapanis_mesaji_mi(metin: str | None) -> bool:
+    """Yalnız teşekkür/vedalaşma sözcükleri ya da yalnız emoji mi?"""
+    if not metin or not metin.strip():
+        return False
+    duz = "".join(" " if (_emoji_mi(c) or not (c.isalnum() or c.isspace())) else c
+                  for c in metin)
+    sozcukler = tr_lower_safe(duz).split()
+    if not sozcukler:                          # yalnız emoji (ve noktalama)
+        return any(_emoji_mi(c) for c in metin)
+    metin_low = " ".join(sozcukler)
+    if not any(k in metin_low for k in _KAPANIS_COKLER):
+        return False
+    return all(any(s.startswith(k.split()[0]) for k in _KAPANIS_COKLER)
+               or s in _KAPANIS_EK_SOZCUKLER for s in sozcukler)
+
+
+def kapanis_cevabi() -> dict:
+    """_cevap_uret ile aynı biçimde sabit kapanış cevabı (LLM yok, cache yok)."""
+    return {"cevap": KAPANIS_CEVABI, "cache_hit": False, "kaynaklar": [],
+            "anahtar": _cache_hash(_cache_norm(KAPANIS_CEVABI), None), "llm": False,
+            "in_chars": 0, "out_chars": len(KAPANIS_CEVABI),
+            "retrieval_layer": "kapanis", "top_score": None, "gecmis_sayisi": 0}
 
 
 def _ebeveynlik_sinyali(soru: str) -> bool:
@@ -1769,7 +1872,8 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
                 gecmis: list[dict] | None = None,
                 onceki_soru: str | None = None,
                 sistem_eki: str | None = None,
-                duzeltme_notu: str | None = None) -> dict:
+                duzeltme_notu: str | None = None,
+                fiyat_kapsam_disi: bool = False) -> dict:
     """RAG cevabını YAPISAL üret — cevapla() ve API katmanı bunu ortak kullanır.
     Döner: {cevap, cache_hit, kaynaklar, anahtar(hash), llm, in_chars, out_chars}.
 
@@ -1780,6 +1884,7 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
       sistem_eki  — SYSTEM_PROMPT'tan sonra ayrı system bloğu.
       duzeltme_notu — SOR_SAYI_DOGRULAMA yeniden üretiminde, önceki cevaptaki
                     kurala aykırı sayıları modele söyleyen kural satırı.
+      fiyat_kapsam_disi — ücret/abonelik soruları kapsam dışı sinyali (SOR_GECMIS).
     Kriz kapısı her durumda YALNIZ o anki soruya bakar.
 
     Akış cevapla() ile BİREBİR aynıdır (davranış korunur): LLM'den ÖNCE cache
@@ -1832,7 +1937,8 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
     top_score = float(_olcum[0].get("_score", 0.0)) if _olcum else 0.0
     katman = _katman_belirle(top_score, _alan_sinyali(arama, yas_ay), bool(bant_blok),
                              ebeveynlik=_ebeveynlik_sinyali(arama),
-                             kapsam_disi=_kapsam_disi_sinyali(soru))
+                             kapsam_disi=_kapsam_disi_sinyali(
+                                 soru, fiyat=fiyat_kapsam_disi))
 
     # FAZ E, KADEME 1: ruhsal sıkıntı ifade eden anne ASLA "bu soru kapsam dışı"
     # cevabı almaz. Duygu ifadesi retrieval skorunu düşürebilir (metodoloji
@@ -1960,10 +2066,10 @@ CEVAP:"""
     client = Anthropic(api_key=api_key)
     # LLM sağlık izleme (pasif katman): hata /health'in "llm" alanını anında
     # "error"a çeker. Akış DEĞİŞMEZ — istisna aynen yukarı gider.
+    ayar = sor_model_ayarlari()
     try:
         response = client.messages.create(
-            model=CHATBOT_MODEL,
-            max_tokens=MAX_TOKENS,
+            **ayar,
             system=system,
             messages=messages,
         )
@@ -1972,7 +2078,13 @@ CEVAP:"""
         raise
     llm_saglik.kaydet_basari()
 
-    answer = response.content[0].text
+    answer = cevap_metni(response)
+    if not answer:
+        # Metin bloğu yok (ör. stop_reason "refusal"). Boş cevap cache'e girmez.
+        logger.warning("Sor: modelden metin gelmedi (stop_reason=%s)",
+                       getattr(response, "stop_reason", None))
+        answer = BOS_CEVAP_MESAJI
+        kisisel = True
     if not kisisel:                         # kişisel cevap PAYLAŞILAN cache'e YAZILMAZ
         _cache_store(soru, yas_bandi, answer)
     # GERÇEK kullanım sayaçları yukarı taşınır (maliyet takibi tahmin ETMEZ —
@@ -1983,7 +2095,11 @@ CEVAP:"""
             "in_chars": len(SYSTEM_PROMPT) + len(user_prompt), "out_chars": len(answer),
             "gecmis_sayisi": len(messages) - 1,
             "retrieval_layer": katman, "top_score": top_score,
-            "model": CHATBOT_MODEL, "usage": _usage_ozet(response)}
+            "model": ayar["model"], "usage": _usage_ozet(response)}
+
+
+BOS_CEVAP_MESAJI = ("Bu soruya şu an cevap veremedim. Sorunuzu biraz farklı "
+                    "anlatarak yeniden sorabilir misiniz?")
 
 
 def _usage_ozet(response) -> dict:

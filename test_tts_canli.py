@@ -17,6 +17,10 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv  # noqa: E402
 load_dotenv()
+# Ses URL'si api.config.get_settings() üzerinden kurulur ve JWT_SECRET ister;
+# yerel .env'de yoksa test burada düşüyordu. Yalnız TEST için sahte değer
+# (tanımlıysa dokunulmaz).
+os.environ.setdefault("JWT_SECRET", "test-secret-en-az-otuz-iki-karakter-uzunlugunda")
 
 from api import tts  # noqa: E402
 

@@ -1,18 +1,39 @@
-# Sağlık Verilerinin İşlenmesine İlişkin Açık Rıza Metni
+# Açık Rıza Metni — Bebeğe ait uyku ve gelişim bilgileri
 
-> TASLAK — hukuki metin yazılacak. Sürüm: config `KVKK_METIN_SURUMLERI["acik_riza_saglik"]`.
-> Özel nitelikli kişisel veri (bebeğin sağlık durumu, uyku düzeni, gelişim) için AÇIK RIZA.
+Son güncelleme: 12 Ekim 2026 · Sürüm: kvkk-2026-10
 
-## 1. Açık rızanın konusu
+Tavşan Uykusu mobil uygulaması ("Uygulama"), veri sorumlusu sıfatıyla İlayda Kani ("Tavşan Uykusu") tarafından sunulmaktadır. Uygulama'nın temel hizmeti olan kişiye özel uyku programının hazırlanabilmesi için, velisi olduğunuz bebeğe ait aşağıdaki bilgilerin işlenmesi gerekir. Bu bilgilerin bir kısmı 6698 sayılı Kişisel Verilerin Korunması Kanunu'nun ("KVKK") 6. maddesi kapsamında sağlık verisi sayılabileceğinden, işleme yalnızca açık rızanıza dayanılarak yapılır.
 
-## 2. İşlenecek özel nitelikli veriler
-### 2.1 Bebeğin sağlık bilgileri (doğum haftası, sağlık sorunları)
-### 2.2 Uyku ve gece uyanma kayıtları
+## İşlenecek bilgiler
 
-## 3. İşleme amacı (kişisel uyku planı ve öneriler)
+- Doğum tarihi, cinsiyet, erken doğum bilgisi ve doğum haftası
+- Boy ve kilo ölçümleri
+- Uyku, uyanma, gece uyanması ve beslenme kayıtları
+- Uyku ortamı, uyku alışkanlıkları ve beslenme şekline ilişkin cevaplarınız
+- Tavşan Uykusu asistanına yazdığınız, bebeğinize ilişkin bilgi içeren sorular
 
-## 4. Aktarım
+## İşleme amaçları
 
-## 5. Rızanın geri alınması ve sonuçları
+- Bebeğinizin yaşına ve uyku düzenine uygun, kişiye özel uyku programını hazırlamak ve her gün güncellemek
+- Günlük uyku planını, hatırlatmaları ve önerileri bebeğinize göre ayarlamak
+- Asistana yönelttiğiniz sorulara bebeğinize uygun yanıt vermek
 
-## 6. Onay beyanı
+## Paylaşım ve yurt dışına aktarım
+
+Bu bilgiler reklam veya pazarlama amacıyla kullanılmaz ve satılmaz. Yalnızca yukarıdaki amaçlarla sınırlı olarak, Uygulama'nın çalışması için hizmet alınan sunucu (Railway, ABD), yapay zekâ (Anthropic, ABD) ve bildirim (Expo, ABD) sağlayıcılarıyla paylaşılır. Yapay zekâ sağlayıcısına e-posta adresiniz ve bebeğinizin doğum tarihi gönderilmez; bebeğinizin adı, sorularınızda geçtiği yerler dahil, geçici bir takma adla değiştirilerek gönderilir. Yalnızca bebeğinizin yaşı, uyku kayıtlarının özeti, program bilgileri ve sorularınız gönderilir. Aktarımın kapsamı ve hukuki dayanağı Aydınlatma Metni'nde açıklanmıştır.
+
+## Saklama süresi
+
+Bilgiler hesabınız açık kaldığı sürece saklanır. Hesabınızı sildiğinizde veya açık rızanızı geri aldığınızda silinir ya da anonim hâle getirilir.
+
+## Rızanın geri alınması
+
+Açık rızanızı dilediğiniz zaman, Uygulama'daki hesap silme seçeneğiyle veya tavsanuykusu@hotmail.com adresine yazarak geri alabilirsiniz. Geri alma, o tarihe kadar yapılmış işlemleri etkilemez. Bu bilgiler işlenmeden kişiye özel uyku programı hazırlanamadığından, rızanızı geri aldığınızda bu hizmet sunulamaz.
+
+## Haklarınız
+
+KVKK'nın 11. maddesindeki haklarınız ve başvuru yolları Aydınlatma Metni'nde yer almaktadır.
+
+## Beyan
+
+Bu metni okudum. Velisi olduğum bebeğime ait yukarıda sayılan bilgilerin, belirtilen amaçlarla işlenmesine ve bu amaçlarla sınırlı olarak hizmet sağlayıcılarla paylaşılmasına özgür irademle açık rıza veriyorum.

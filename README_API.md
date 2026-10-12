@@ -1328,6 +1328,28 @@ loglar; mobil bu durumda `markdown`'a düşmelidir.
 `key`/`start_minute`/`end_minute` dahilidir (kaydırma + bildirim penceresi); mobil
 `time`/`end`/`type`/`title`/`note` alanlarını kullanır.
 
+## 6.4 `/chat` modeli ve kısa yollar (2026-10-12)
+
+**Model ortamdan ayarlanabilir** (tanımsızken bugünkü yük birebir aynı:
+`claude-haiku-4-5`, `max_tokens` 1024, `temperature` gönderilmez):
+- `CHATBOT_MODEL` — model kimliği (ör. `claude-sonnet-4-6`, `claude-sonnet-5-5`).
+- `SOR_MAX_TOKENS` — tam sayı.
+- `SOR_TEMPERATURE` — ondalık; modeli desteklemiyorsa (Sonnet 5.x, Opus 4.7+,
+  Fable) gönderilmez.
+- `SOR_DUSUNME=kapali` — düşünmesi varsayılan açık modellerde kapatır (Sonnet 5.5:
+  `thinking: {type: "between_tools"}`); varsayılanı kapalı modellerde (Haiku 4.5,
+  Sonnet 4.6) hiçbir şey göndermez; Opus 5.5'te kapatılamaz.
+Cevap metni `type: "text"` bloklarından okunur (düşünme bloğu önce gelebilir).
+`/health` `model` alanı etkin modeli gösterir.
+
+**`SOR_GECMIS` açıkken kısa yollar:**
+- Yalnız teşekkür/vedalaşma ("teşekkürler", "sağol", "eyvallah"…) ya da yalnız
+  emoji → bağlam, RAG ve LLM YOK; `answer` sabit: "Rica ederim, kolay gelsin.
+  Aklınıza takılan bir şey olursa buradayım.", `retrieval_layer: "kapanis"`.
+  İçerikli mesaj ("teşekkürler ama hâlâ uyumuyor") normal akışa gider.
+- "kaç para", "ücret", "fiyat", "abonelik" içeren sorular kapsam dışı sinyali alır
+  (genelde `retrieval_layer: "k4"` ve kapsam dışı metni).
+
 ## 6.5 `/chat` bebek log bağlamı (kişiselleştirme)
 
 `ChatReq`'e opsiyonel `baby_id` eklendi. Verildiğinde bebeğin profili + son 3 günün
