@@ -901,6 +901,53 @@ check("İ) Plan düzeltme yalnız 13 günlük planda ve eğitimi SÜREN bebekte"
           training_started_at=BUGUN, training_completed_at=BUGUN))[1] == []
       and yontem_kart.kisa_gunduz_plan_duzelt(_icerik, SimpleNamespace(
           training_started_at=None, training_completed_at=None))[1] == [])
+# Çelişen cümleler: ifade "hepsi dışarıda" (ya da 13. gün) diyor ama cümle/ardından gelen
+# cümle "içeri girip devam edin" diyor → cümle tablodan kurulur (yeni kural yok)
+_celiski = [
+    # aynı cümlede (10-12)
+    (_H + "Dışarıda **2 dakika** bekleyin, ardından içeri girin ve **eşik pozisyonundan** devam edin.", 10, 12,
+     "10–12. gün: dışarıda **45 dakika** bekleyin, içeride deneme yok; 45 dakika dolunca uyumadıysa "
+     "bebeği alın."),
+    # aynı cümlede (7-9 karışık: 7-8 içeride deneme var, 9 hepsi dışarıda)
+    (_H + "Kapı dışında **1 dakika** → **1,5 dakika** → **2 dakika** bekleyin, ardından içeri girip kapı "
+          "pozisyonundan devam edin.", 7, 9,
+     "7–8. gün: dışarıda **35 dakika** bekleyin, sonra içeri girip kalan süreyi **kapı** pozisyonundan "
+     "deneyin (7. gün 35+10, 8. gün 40+5; toplam 45 dakika). 9. gün: dışarıda **45 dakika** bekleyin, "
+     "içeride deneme yok; 45 dakika dolunca uyumadıysa bebeği alın."),
+    # aynı cümlede (13): yatır-çık 5→10→15→20 ile devam → tablodaki 'uyumazsa al'
+    (_H + "Dışarıda **2 dakika** bekleyin → içeri girin → **yatır-çık** protokolüyle devam edin "
+          "(5 → 10 → 15 → 20 dakika).", 13, 13,
+     "Dışarıda **20 dakika** bekleyin; sonra içeri girip 'uyku bitmedi' deyip çıkın ve 25 dakika daha "
+     "dışarıda bekleyin; uyumazsa bebeği alın."),
+    # sonraki cümlede (10-12); tabloyla uyumlu 'uyumazsa kaldırın' cümlesi KALIR
+    (_H + "Dışarıda **2 dakika** bekleyin. İçeri girince kapı eşiği pozisyonundan devam edin. "
+          "45 dakika sonunda uyumazsa bebeği kaldırın.", 10, 12,
+     "Dışarıda **45 dakika** (10–12. gün: 45 dakikanın hepsi dışarıda, içeride deneme yok) bekleyin. "
+     "İçeride deneme yok; 45 dakika dolunca uyumadıysa bebeği alın. 45 dakika sonunda uyumazsa bebeği "
+     "kaldırın."),
+    # sonraki cümlede, iki takip cümlesi (13): ilki adım, ikincisi kalkar
+    (_H + "Erken uyanmada: **1 dakika** → **1,5 dakika** → **2 dakika** bekleyin. Ardından içeri girin, kısa temas, çıkın. **Yatır-çık "
+          "pozisyonundan** devam edin.", 13, 13,
+     "Erken uyanmada: **20 dakika** (sonra içeri girip 'uyku bitmedi' deyip çıkın, 25 dakika daha "
+     "dışarıda) bekleyin. Uyumazsa bebeği alın."),
+    # numaralı liste (7-9): madde numarası korunur
+    (_H + "\n1. Kapının dışında **2 dakika** bekleyin.\n2. Odaya girdiğinizde **kapı pozisyonundan** "
+          "beklemeye devam edin.\n", 7, 9,
+     "\n1. Kapının dışında **35 dakika** (7. gün 35+10, 8. gün 40+5, 9. gün 45 (hepsi dışarıda); dış + iç "
+     "toplam 45 dakika) bekleyin.\n2. 7–8. gün: içeri girip kalan süreyi **kapı** pozisyonundan deneyin; "
+     "9. gün: içeride deneme yok; 45 dakika dolunca uyumadıysa bebeği alın.\n"),
+    # gün 4-6: 'içeri girin' doğru (içeride deneme var) → yalnız ifade değişir
+    (_H + "Dışarıda **1,5 dakika** bekleyin. İçeri girince oda ortasından devam edin.", 4, 6,
+     "Dışarıda **20 dakika** (4. gün 20+25, 5. gün 25+20, 6. gün 30+15; dış + iç toplam 45 dakika) "
+     "bekleyin. İçeri girince oda ortasından devam edin."),
+]
+_celiski_sonuc = [yontem_kart.kisa_gunduz_paragraf_duzelt(m, a, b_)[0] for m, a, b_, _ in _celiski]
+for _i, (_r, (_, _a, _b, _bek)) in enumerate(zip(_celiski_sonuc, _celiski)):
+    check(f"İ) Çelişen cümle {_i + 1} (gün {_a}-{_b}): tablodan kurulan cümle", _r == _H + _bek, _r)
+_DEVAM_KALAN = re.compile(r"içeri\s+gir\w*[^.]*devam|devam\s+ed", re.I)
+check("İ) Çelişen cümle: 'hepsi dışarıda'/13. gün olan hiçbir sonuçta 'içeri girip devam' kalmaz",
+      not any(_DEVAM_KALAN.search(r) for r, c in zip(_celiski_sonuc, _celiski) if c[1] >= 7),
+      _celiski_sonuc)
 _p_kapali = bugunku(H, BID, "1.0.0+28")
 bayrak(YONTEM_TABLOSU=True)
 _p_acik = bugunku(H, BID, "1.0.0+28")

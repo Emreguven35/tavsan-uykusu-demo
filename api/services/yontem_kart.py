@@ -212,6 +212,84 @@ def _kg_dogru_ifade(bas: int | None, bit: int | None) -> str:
             f"{yontem.deger('kisa_gunduz.gun_4_12_dis_ic_dk')['toplam_dk']} dakika)")
 
 
+# Değişen ifade "hepsi dışarıda" (ya da 13. gün yatır-çık) diyor ama cümlenin geri
+# kalanı içeri girip devam etmeyi söylüyorsa cümle kendi içinde çelişir → tamamı
+# tablodan kurulan cümleyle değişir.
+_ICERI_DEVAM = re.compile(r"içeri\s+gir|devam\s+ed|konumuna\s+geç|eşiğine\s+geç|pozisyonunu\s+al",
+                          re.IGNORECASE)
+# Aynı çelişki çoğu planda bir SONRAKİ cümlede: "… bekleyin. İçeri girince kapı eşiği
+# pozisyonundan devam edin." Hemen ardından gelen bu tür cümleler de değişir; süre
+# dolunca bebeği almayı söyleyen (tabloyla uyumlu) cümleler kalır.
+_TAKIP = re.compile(r"içeri\s+gir|odaya\s+gir|girdiğinizde|girince|devam\s+ed|geri\s+dön|"
+                    r"konumuna\s+geç|eşiğine\s+geç|eşiğinize\s+geç|pozisyon\w*\s+(?:al|geç)|"
+                    r"protokol\w*\s+geç", re.IGNORECASE)
+_TAKIP_UYUMLU = re.compile(r"uyumazsa|uyumadıysa|bebeği\s+(?:al|kaldır)|sonlandır", re.IGNORECASE)
+
+
+def _kg_tam_cumle(bas: int, bit: int | None) -> str:
+    """Çelişen cümlenin yerine geçen tam cümle; yalnız tablodaki gündüz kuralı:
+    gün 1-12 kisa_gunduz_dis_ic; süre dolunca kisa_gunduz.yatir_cik_ve_sonrasi_dis_ic_dk
+    ('45 dk dışarıda bekleyip al' / 'uyumazsa al'); içerideki pozisyon merdiven.asamalar."""
+    yc = yontem.deger("kisa_gunduz.yatir_cik_ve_sonrasi_dis_ic_dk")
+    if bas >= 13:
+        return (f"Dışarıda **{yc['dis']} dakika** bekleyin; sonra içeri girip 'uyku bitmedi' deyip "
+                f"çıkın ve {yc['ic']} dakika daha dışarıda bekleyin; uyumazsa bebeği alın.")
+    toplam = yontem.deger("kisa_gunduz.gun_4_12_dis_ic_dk")["toplam_dk"]
+    gunler = list(range(bas, min(bit or bas, 12) + 1))
+    hepsi = [g for g in gunler if kisa_gunduz_dis_ic(g)[1] == 0]
+    icli = [g for g in gunler if kisa_gunduz_dis_ic(g)[1] > 0]
+
+    def _aralik(gs: list[int]) -> str:
+        return f"{gs[0]}–{gs[-1]}. gün" if len(gs) > 1 else f"{gs[0]}. gün"
+    son = (f"{_aralik(hepsi)}: dışarıda **{toplam} dakika** bekleyin, içeride deneme yok; "
+           f"{toplam} dakika dolunca uyumadıysa bebeği alın.")
+    if not icli:
+        return son
+    asama_ = next((a for a in yontem.deger("merdiven.asamalar")
+                   if a["gun"][0] <= icli[0] <= a["gun"][1]), None)
+    yer = f" **{asama_['ad'].lower()}** pozisyonundan" if asama_ else ""
+    parca = ", ".join(f"{g}. gün {kisa_gunduz_dis_ic(g)[0]}+{kisa_gunduz_dis_ic(g)[1]}" for g in icli)
+    return (f"{_aralik(icli)}: dışarıda **{kisa_gunduz_dis_ic(icli[0])[0]} dakika** bekleyin, sonra "
+            f"içeri girip kalan süreyi{yer} deneyin ({parca}; toplam {toplam} dakika). " + son)
+
+
+def _kg_sonraki_adim(bas: int, bit: int | None) -> str:
+    """İfadeden sonraki 'içeri girip devam edin' cümlesinin yerine: aynı tablo kuralının
+    dış süre dolduktan sonraki adımı (dış süre ifadede zaten yazılı)."""
+    if bas >= 13:
+        return "Uyumazsa bebeği alın."
+    toplam = yontem.deger("kisa_gunduz.gun_4_12_dis_ic_dk")["toplam_dk"]
+    gunler = list(range(bas, min(bit or bas, 12) + 1))
+    hepsi = [g for g in gunler if kisa_gunduz_dis_ic(g)[1] == 0]
+    icli = [g for g in gunler if kisa_gunduz_dis_ic(g)[1] > 0]
+    son = f"içeride deneme yok; {toplam} dakika dolunca uyumadıysa bebeği alın."
+    if not icli:
+        return "İ" + son[1:]        # str.upper("i") Türkçe "İ" vermez
+
+    def _aralik(gs: list[int]) -> str:
+        return f"{gs[0]}–{gs[-1]}. gün" if len(gs) > 1 else f"{gs[0]}. gün"
+    asama_ = next((a for a in yontem.deger("merdiven.asamalar")
+                   if a["gun"][0] <= icli[0] <= a["gun"][1]), None)
+    yer = f" **{asama_['ad'].lower()}** pozisyonundan" if asama_ else ""
+    return (f"{_aralik(icli)}: içeri girip kalan süreyi{yer} deneyin; "
+            f"{_aralik(hepsi)}: " + son)
+
+
+def _kg_tam_cumle_yerlestir(cumle: str, tam: str) -> str:
+    """Liste öneki ve satır sonu korunur; cümle dışarıdan açılmış/kapanacak bir kalın
+    içindeyse (tek sayıda '**') yeni cümle kalın işaretsiz girer, dengesi bozulmaz."""
+    onek = _LISTE_ONEKI.match(cumle).group(0)
+    # Paragrafın ilk cümlesi başlığın kuyruğuyla başlar (":** ") → o da korunur
+    baslik = re.match(r":\*\*\s*|\*\*:\s*|:\s*", cumle[len(onek):])
+    if baslik:
+        onek += baslik.group(0)
+    govde = cumle[len(onek):].rstrip("\n")
+    if govde.count("**") % 2:
+        tam = tam.replace("**", "")
+        tam = "**" + tam if govde.lstrip().startswith("**") else tam + "**"
+    return onek + tam + ("\n" if cumle.endswith("\n") else "")
+
+
 def kisa_gunduz_paragraf_duzelt(metin: str, bas: int | None, bit: int | None) -> tuple[str, list[tuple[str, str]]]:
     """Metindeki kısa gündüz paragraflarında yanlış dış bekleme ifadesini değiştir.
     Dönen: (yeni metin, [(önceki cümle, sonraki cümle)])."""
@@ -226,10 +304,28 @@ def kisa_gunduz_paragraf_duzelt(metin: str, bas: int | None, bit: int | None) ->
         paragraf = re.sub(r"(1[,.]5\s*(?:dk|dakika)?\s*(?:→|->)\s*2\s*(?:dk|dakika))\.\*\*", r"\1**.",
                           metin[m.end():bitis])
         yeni_par = []
+        takip = None        # "ifade" | "tam": önceki cümle hepsi-dışarıda/13. gün ifadesiyle değişti
         for cm in _CUMLE.finditer(paragraf):
             cumle = cm.group(0)
             if not cumle:
                 continue
+            if not cumle.strip() or re.fullmatch(r"\s*\d+\.\s*", cumle):
+                yeni_par.append(cumle)      # boş satır / tek başına liste numarası ("2.")
+                continue
+            if (takip and _TAKIP.search(cumle) and not _TAKIP_UYUMLU.search(cumle)
+                    and not _KUCAK_BAGLAMI.search(cumle)):
+                onek = _LISTE_ONEKI.match(cumle).group(0)
+                # Tam cümleden sonra (ya da ikinci takip cümlesi) adım zaten yazılı → cümle
+                # boşalır; liste maddesi boş kalmasın diye maddede adım yinelenir.
+                if takip == "ifade" or onek.strip():
+                    yeni = _kg_tam_cumle_yerlestir(cumle, _kg_sonraki_adim(bas, bit))
+                else:
+                    yeni = "\n" if cumle.endswith("\n") else ""
+                degisen.append((cumle.strip(), yeni.strip() or "(cümle kalkar; adım önceki cümlede)"))
+                yeni_par.append(yeni)
+                takip = "tam"
+                continue
+            takip = None
             yeni, n = cumle, 0
             ifade = _kg_dogru_ifade(bas, bit)
             if not _KUCAK_BAGLAMI.search(cumle):
@@ -247,6 +343,13 @@ def kisa_gunduz_paragraf_duzelt(metin: str, bas: int | None, bit: int | None) ->
                 yeni, n = _TEK_YANLIS.subn(_tek, cumle, count=1)
                 if n:
                     yeni = _ZINCIR_KUYRUK.sub("", yeni, count=1)
+            if n and bas is not None and ("hepsi dışarıda" in ifade or bas >= 13):
+                kalan = yeni.replace(ifade, "").replace(ifade.replace("**", ""), "")
+                if _ICERI_DEVAM.search(kalan):
+                    yeni = _kg_tam_cumle_yerlestir(cumle, _kg_tam_cumle(bas, bit))
+                    takip = "tam"
+                else:
+                    takip = "ifade"
             if not n and _KUYRUK_CUMLE.search(cumle) and not _KUCAK_BAGLAMI.search(cumle):
                 # Ayrı cümleye taşmış yanlış kademe → tabloyla uyumlu nötr cümle
                 onek = _LISTE_ONEKI.match(cumle).group(0)
