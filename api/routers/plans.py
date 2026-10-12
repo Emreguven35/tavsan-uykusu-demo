@@ -83,10 +83,9 @@ def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
     # istekte kart hiç gönderilmez (eski uygulama "45 dk bekle" yazıyor).
     if yontem_kart.acik_mi():
         try:
-            bebek = db.get(Baby, plan.baby_id)
             resp.content = yontem_kart.plan_icerigi_isle(
-                resp.content, user, bebek, referans or plan.plan_date,
-                _gece_gunu(db, bebek, referans or plan.plan_date))
+                resp.content, user, db.get(Baby, plan.baby_id), referans or plan.plan_date,
+                _gece_gunu(db, db.get(Baby, plan.baby_id), referans or plan.plan_date))
         except Exception:
             logger.exception("Gece kartı v2 kurulamadı (plan=%s) — saklanan kart "
                              "dönüyor", plan.id)
