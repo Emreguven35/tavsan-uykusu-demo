@@ -211,6 +211,16 @@ check("C10) Metin herkese açık + sürüm", r.status_code == 200
       and r.json()["metin_surumu"] and r.json()["markdown"].startswith("#"), r.text[:80])
 check("C11) Bilinmeyen metin → 404",
       client.get("/api/v1/consents/metin/yok").status_code == 404, "")
+# Yayın metinleri (yasal-metinler-2, 12 Ekim 2026): uç dosyayı AYNEN döner.
+for _tur, _baslik in (("aydinlatma", "# Gizlilik Politikası ve Aydınlatma Metni"),
+                      ("acik_riza_saglik", "# Açık Rıza Metni — Bebeğe ait uyku ve gelişim bilgileri"),
+                      ("acik_riza_ses", "# Açık Rıza Metni — Anne Sesi")):
+    _r = client.get(f"/api/v1/consents/metin/{_tur}").json()
+    _dosya = (ROOT / "data" / "kvkk" / f"{_tur}.md").read_text("utf-8")
+    check(f"C12) {_tur}: yayın metni, sürüm kvkk-2026-10, taslak değil",
+          _r.get("markdown") == _dosya and _dosya.startswith(_baslik)
+          and "Sürüm: kvkk-2026-10" in _dosya and "TASLAK" not in _dosya
+          and _r.get("metin_surumu") == "kvkk-2026-10", _r.get("markdown", "")[:80])
 
 # =============================================================================
 # E — Dışa aktarma
