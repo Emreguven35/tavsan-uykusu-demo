@@ -1768,7 +1768,8 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
                 baby_context: str | None = None, *,
                 gecmis: list[dict] | None = None,
                 onceki_soru: str | None = None,
-                sistem_eki: str | None = None) -> dict:
+                sistem_eki: str | None = None,
+                duzeltme_notu: str | None = None) -> dict:
     """RAG cevabını YAPISAL üret — cevapla() ve API katmanı bunu ortak kullanır.
     Döner: {cevap, cache_hit, kaynaklar, anahtar(hash), llm, in_chars, out_chars}.
 
@@ -1777,6 +1778,8 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
                     modele o anki sorudan ÖNCE sırasıyla gider; cache atlanır.
       onceki_soru — kısa takip sorusunda retrieval sorgusunu zenginleştirir.
       sistem_eki  — SYSTEM_PROMPT'tan sonra ayrı system bloğu.
+      duzeltme_notu — SOR_SAYI_DOGRULAMA yeniden üretiminde, önceki cevaptaki
+                    kurala aykırı sayıları modele söyleyen kural satırı.
     Kriz kapısı her durumda YALNIZ o anki soruya bakar.
 
     Akış cevapla() ile BİREBİR aynıdır (davranış korunur): LLM'den ÖNCE cache
@@ -1922,6 +1925,8 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
     bebek_blok = f"\n\nBEBEK VERİSİ (bu kullanıcının kendi kaydı):\n{baby_context}\n" \
         if baby_context else ""
     tekrar_kurali = MOTIVASYON_TEKRAR_KURALI if motivasyon_verildi else ""
+    if duzeltme_notu:
+        tekrar_kurali += "\n- " + duzeltme_notu
 
     user_prompt = f"""ANNE SORUSU: {soru}
 {bebek_blok}
