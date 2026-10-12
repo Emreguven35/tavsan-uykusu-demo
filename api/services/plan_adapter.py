@@ -1533,8 +1533,13 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
                   bucket_params: dict | None = None,
                   tz_offset_min: int = TZ_OFFSET_MIN,
                   sabah_hedefi: dict | None = None,
-                  yatis_mutlak_tavan: int | None | str = "tablo") -> dict:
+                  yatis_mutlak_tavan: int | None | str = "tablo",
+                  kestirme_v2: bool = False) -> dict:
     """K2/K3/K4/K6/K7 — BUGÜNÜN çizelgesini şablon + bugünün kayıtlarından kur.
+
+    `kestirme_v2` (KESTIRME_V2 bayrağı, 2026-10-12): şekerleme bloğu `uyandir`
+    alanlarını taşır, başlamış şekerleme kaydı şekerleme bloğu olarak tanınır
+    ve kayıt eksik günde şekerleme eklenmez (bkz. _kestirme_kaydi_adayi).
 
     v1.5 — `yatis_mutlak_tavan`: gece yatışının geçemeyeceği mutlak saat.
     Varsayılan tablodan (24:00, İlayda 3. cevaplar S3); None verilirse eski
@@ -1803,6 +1808,22 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
     # kaydettim" hatasını plana taşımaktır. Tavan aşılırsa önce tahmini/açık
     # kayıtlar düşer, sonra en geç olanlar.
     fazlalar = [f for f in olaylar[sirada:] if not f["_atlandi"]]
+    # KESTIRME_V2 — başlamış şekerleme kaydı şablon yuvasına oturmaz, "fazla"
+    # olur; bant üst sınırı doluysa (7 ay: 3) düşüp CAKISAN_KAYIT_UYARISI
+    # üretiyordu. Aday ayrılır; açık gerçekten varsa şekerleme bloğu olur.
+    kestirme_kaydi = None
+    kayit_eksik = bool(varsayilan)       # saati geçmiş planlı uykunun kaydı yok
+    if kestirme_v2 and bant is not None and not kayit_eksik:
+        kestirme_kaydi = _kestirme_kaydi_adayi(fazlalar, bant)
+        if kestirme_kaydi is not None:
+            _diger = [f for f in fazlalar if f is not kestirme_kaydi]
+            _toplam = _gunduz_toplam(bloklar) + sum(
+                max(0, int(f.get("bit_dk_lin") or f["bas_dk"] + 30) - f["bas_dk"])
+                for f in _diger)
+            if yas_bantlari.kestirme_degerlendir(bant, _toplam).get("gerekli"):
+                fazlalar = _diger
+            else:
+                kestirme_kaydi = None    # açık yok: sıradan ek uyku (eski yol)
     _ust = None
     if bant is not None and not bant.get("gunduz_uyku_sayisi_ust_acik"):
         _ust = int((bant.get("gunduz_uyku_sayisi") or [0, 0])[-1] or 0) or None
@@ -1815,32 +1836,39 @@ def recompute_day(schedule_template: list[dict], bant: dict | None,
             fazlalar = [f for f in fazlalar if id(f) in _kalan]
             uyarilar.append(CAKISAN_KAYIT_UYARISI)
     for j, fazla in enumerate(fazlalar, start=len(yuvalar) + 1):
-        bit = (fazla["bit_dk_lin"] if fazla.get("bit_dk_lin") is not None
-               else fazla["bas_dk"] + 30)
-        _fazla_blok = {"key": f"nap_{j}", "type": "nap",
-                       "start_minute": fazla["bas_dk"], "end_minute": bit,
-                       "title": f"{j}. gündüz uykusu", "kaynak": "kayit",
-                       "note": "Programda olmayan ek uyku (kaydına göre)"}
-        if fazla.get("_devam"):
-            _fazla_blok["devam"] = True
+        _fazla_blok = _fazla_blogu(fazla, j)
         bloklar.append(_fazla_blok)
-        cursor = max(cursor, bit)
+        cursor = max(cursor, _fazla_blok["end_minute"])
 
     # --- v1.4: ŞEKERLEME (K9 + K10.3 tek mekanizma) --------------------------
     # Gündüz toplamı bandın minimumunu tutmuyorsa günün SONUNA ilave uyku.
     # DENETİM B3: bitişi BİLİNMEYEN bir uyku varsa (açık ya da K17 ile tahminen
     # kapatılmış) gündüz açığı HESAPLANAMAZ — açık, uydurulmuş bir bitişe
     # dayanırdı. Şekerleme eklenmez; anneden bitiş saati istenir.
-    acik_uyku = any(not o["_atlandi"] and (
+    acik_uyku = any(not o["_atlandi"] and o is not kestirme_kaydi and (
         (o.get("_devam") and o.get("bit_dk") is None)
         or o.get("_otomatik_kapandi") == "bayat") for o in olaylar)
     if acik_uyku:
         sekerleme_bilgi = None
         uyarilar.append(ACIK_UYKU_UYARISI)
+    elif kestirme_v2 and kayit_eksik:
+        # KESTIRME_V2 — saati geçmiş planlı uykunun kaydı yoksa gündüz açığı
+        # gerçek değildir (anne kaydetmemiş olabilir): şekerleme EKLENMEZ.
+        sekerleme_bilgi = None
     else:
         bloklar, sekerleme_bilgi, sek_uyari = _sekerleme_yerlestir(
             bloklar, bant, cursor, ww, yatma_lo, yatma_hi, now_minute)
         uyarilar.extend(sek_uyari)
+        if kestirme_v2:
+            bloklar, sekerleme_bilgi = _kestirme_v2_uygula(
+                bloklar, sekerleme_bilgi, kestirme_kaydi, bant, uyarilar)
+    if kestirme_kaydi is not None and not (sekerleme_bilgi or {}).get("kayit"):
+        # Aday şekerleme sayılmadı (açık yok): eski yoldan, ek uyku olarak.
+        _ek = _fazla_blogu(kestirme_kaydi, 1 + sum(
+            1 for b in bloklar
+            if b.get("type") == "nap" and b.get("key") != SEKERLEME_KEY))
+        bloklar.append(_ek)
+        cursor = max(cursor, _ek["end_minute"])
     # ŞEKERLEME ZİNCİR HALKASI DEĞİLDİR: `cursor` ilerletilmez. İlayda:
     # "30 dakika uyutup kalktıktan sonra ÜÇ SAAT SONRA BİLE gece uykusuna
     # geçirebiliyoruz." Şekerlemeden sonra tam uyanıklık penceresi dayatmak
@@ -2040,6 +2068,85 @@ def _sekerleme_yerlestir(bloklar: list[dict], bant: dict | None, cursor: int,
     return bloklar, {"start_minute": bas, "end_minute": bas + sure,
                      "sure_dk": sure, "eksik_dk": kestirme["eksik_dk"],
                      "tetik": "tek_uyku_kisa" if tek_uyku else "gunduz_acigi"}, uyarilar
+
+
+def _fazla_blogu(fazla: dict, j: int) -> dict:
+    """Şablondan fazla gerçek kayıt → `nap_j` bloğu."""
+    bit = (fazla["bit_dk_lin"] if fazla.get("bit_dk_lin") is not None
+           else fazla["bas_dk"] + 30)
+    blok = {"key": f"nap_{j}", "type": "nap",
+            "start_minute": fazla["bas_dk"], "end_minute": bit,
+            "title": f"{j}. gündüz uykusu", "kaynak": "kayit",
+            "note": "Programda olmayan ek uyku (kaydına göre)"}
+    if fazla.get("_devam"):
+        blok["devam"] = True
+    return blok
+
+
+# --- KESTIRME_V2 (2026-10-12, bayrakla) --------------------------------------
+# Şekerleme uyandırma bildirimi için blok alanları: `uyandir: true`,
+# `uyandir_dk` / `uyandir_saat` — bebeğin uyandırılacağı an. Başlamış
+# şekerlemede an = GERÇEK başlangıç + bloğun süresi (geç başladıysa planlanan
+# bitiş değil).
+def _kestirme_penceresi(bant: dict) -> tuple[int, int]:
+    kestirme = yas_bantlari.kestirme_degerlendir(bant, None)
+    pencere = kestirme.get("saat_penceresi") or ["17:00", "19:00"]
+    bas, bit = _saat_dk(pencere[0]), _saat_dk(pencere[1])
+    if bant.get("varyant") == "tek_uyku":
+        bas = max(bas, SEKERLEME_TEK_UYKU_PENCERE[0])
+    return bas, bit
+
+
+def _kestirme_kaydi_adayi(fazlalar: list[dict], bant: dict) -> dict | None:
+    """Şablondan fazla kayıtlar içinde şekerleme olabilecek olan: şekerleme
+    saat penceresinde başlamış EN GEÇ kayıt. Şekerleme sayılıp sayılmayacağına
+    gündüz açığı karar verir (_kestirme_v2_uygula)."""
+    pen_bas, pen_bit = _kestirme_penceresi(bant)
+    adaylar = [f for f in fazlalar if pen_bas <= f["bas_dk"] < pen_bit]
+    return max(adaylar, key=lambda f: f["bas_dk"]) if adaylar else None
+
+
+def _kestirme_v2_uygula(bloklar: list[dict], sekerleme_bilgi: dict | None,
+                        kayit: dict | None, bant: dict,
+                        uyarilar: list[str]) -> tuple[list[dict], dict | None]:
+    """Planlanan şekerlemeye `uyandir` alanlarını ekle; başlamış şekerleme
+    kaydını (aday) şekerleme bloğu olarak çizelgeye koy.
+
+    Kayıt şekerleme sayılırsa planlanan blok onun yerini bırakır ve
+    `_sekerleme_yerlestir`in "şekerleme eklendi" uyarısı düşer (şekerleme
+    artık bir kayıttır). Şekerleme sayılması için kayıttan ÖNCEKİ gündüz
+    toplamı bandın minimumunun altında olmalı."""
+    planli = next((b for b in bloklar if b.get("key") == SEKERLEME_KEY), None)
+    if kayit is not None:
+        kestirme = yas_bantlari.kestirme_degerlendir(bant, _gunduz_toplam(bloklar))
+        if not kestirme.get("gerekli"):
+            return bloklar, sekerleme_bilgi
+        sure = int((sekerleme_bilgi or {}).get("sure_dk")
+                   or kestirme.get("sure_dk_min") or SEKERLEME_DK)
+        bas = kayit["bas_dk"]
+        acik = bool(kayit.get("_devam")) and kayit.get("bit_dk") is None
+        bit = bas + sure if acik else kayit["bit_dk_lin"]
+        blok = {"key": SEKERLEME_KEY, "type": "nap",
+                "start_minute": bas, "end_minute": bit,
+                "title": sekerleme_basligi(sure), "kaynak": "kayit",
+                "note": (f"Gündüz uykusu {kestirme['eksik_dk']} dakika eksik "
+                         f"kaldığı için eklendi"),
+                "uyandir": True, "uyandir_dk": bas + sure,
+                "uyandir_saat": _fmt(bas + sure)}
+        if acik:
+            blok["devam"] = True
+        if planli is not None:
+            uyarilar[:] = [u for u in uyarilar if "şekerleme eklendi" not in u]
+        bloklar = [b for b in bloklar if b is not planli] + [blok]
+        return bloklar, {"start_minute": bas, "end_minute": bit, "sure_dk": sure,
+                         "eksik_dk": kestirme["eksik_dk"],
+                         "tetik": (sekerleme_bilgi or {}).get("tetik", "gunduz_acigi"),
+                         "kayit": True}
+    if planli is not None:
+        planli["uyandir"] = True
+        planli["uyandir_dk"] = planli["end_minute"]
+        planli["uyandir_saat"] = _fmt(planli["end_minute"])
+    return bloklar, sekerleme_bilgi
 
 
 def _min_uyaniklik(bant: dict | None, varsayilan: int) -> int:
@@ -2669,7 +2776,8 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
           yas_ay: float | None = None,
           tek_uyku: bool | None = None,
           log_summary: dict | None = None,
-          plan_tipi: str | None = None) -> dict:
+          plan_tipi: str | None = None,
+          kestirme_v2: bool = False) -> dict:
     """GÜN İÇİ KAYMA MOTORU v2 — kural tabanlı, LLM YOK (K1-K9).
 
     v1.6 — `plan_tipi` (egitim_plani | egitim_bekleme | ...): geç yatış
@@ -2758,7 +2866,8 @@ def adapt(plan_content: dict, bucket_params: dict, logs: Iterable[Any], *,
                         yatis_mutlak_tavan=(
                             "tablo"
                             if yas_bantlari.gece_yatisi_mutlak_tavan_gecerli_mi(_tip)
-                            else None))
+                            else None),
+                        kestirme_v2=kestirme_v2)
     result["schedule"] = gun["schedule"]
     result["adaptation"] = gun["adaptation"]
     # Aşama gün hesabının izine de düşer: recompute_day regresyonu bilmez, bu

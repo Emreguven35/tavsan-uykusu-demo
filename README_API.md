@@ -785,6 +785,36 @@ kimliği bilmez. Anonim içerikten engelde ad "Anonim anne", listede
   profili ve ElevenLabs'te kalan klon silinir; aylık kayıt hakkı değişmez
   (`users.ses_son_kayit_at`). Paket hazırlanırken 409. İdempotent.
 
+### Şekerleme uyandırma (bayrak: KESTIRME_V2)
+
+Kapalı gelir; kapalıyken hiçbir yanıt ve bildirim değişmez. Açıkken:
+- Çizelgedeki `key: "sekerleme"` bloğu üç alan daha taşır:
+
+```json
+{"key": "sekerleme", "type": "nap", "start_minute": 1090, "end_minute": 1120,
+ "title": "Şekerleme (30 dk)", "kaynak": "kayit", "devam": true,
+ "uyandir": true, "uyandir_dk": 1120, "uyandir_saat": "18:40"}
+```
+  `uyandir_dk` / `uyandir_saat`: bebeğin **uyandırılacağı** an. Planlı blokta
+  bloğun bitişi; şekerleme başladıysa **gerçek başlangıç + bloğun süresi**
+  (geç başladıysa planlanan bitiş değil).
+- Başlamış şekerleme (17:00–19:00 penceresinde başlayan, şablondan fazla, gündüz
+  açığı varken girilen uyku kaydı) çizelgede **şekerleme bloğu olarak kalır**
+  (`kaynak: "kayit"`, açıksa `devam: true`). Eskiden bant üst sınırı doluysa
+  kayıt çizelgeden düşüp "aynı saatlere düşen birden fazla kayıt" uyarısı
+  çıkıyordu.
+- **Kayıt eksik gün:** saati geçmiş planlı bir gündüz uykusunun kaydı yoksa
+  (`adaptation.varsayilan_bloklar` dolu) şekerleme eklenmez.
+- **Bildirim (sunucu):** şekerleme bloğunda açık uyku kaydı varken `uyandir_dk`
+  anında bir kez push: başlık "Şekerleme bitti, uyandırma zamanı.",
+  `data.type = data.kategori = "sekerleme_uyandir"`, `data.saat` = uyandırma
+  saati, `data.block_key = "sekerleme"`. Uyku bildirimi tercihine
+  (`uyku_hatirlatma_bildirimi`) ve 23:00–06:00 sessiz saatine uyar; aynı uyku
+  için ikinci kez gitmez.
+- **Mobil:** `uyandir: true` olan blokta yerel "Bebeğiniz uyandı mı?"
+  hatırlatmasını KURMAZ (uyandırmayı sunucu söyler).
+- Süre ve saat penceresi `content.kestirme_protokolu` ile aynı (değişmedi).
+
 ### Hazırlık kuralları — "Eğitime başlamadan önce" (bayrak: HAZIRLIK_KURALLARI)
 
 Kapalı gelir; kapalıyken hiçbir yanıt değişmez. Açıkken:

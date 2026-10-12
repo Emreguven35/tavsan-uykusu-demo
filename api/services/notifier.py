@@ -117,6 +117,16 @@ UYANDI_MI_SESSIZ_BIT = 6 * 60
 # 0 verilirse backend her zaman gönderir (mobil yerel bildirimi hiç
 # kurmuyorsa doğru ayar budur).
 UYANDI_MI_UYGULAMA_ACIK_DK = int(os.getenv("UYANDI_MI_UYGULAMA_ACIK_DK") or 30)
+# --- ŞEKERLEME UYANDIRMA (KESTIRME_V2, 2026-10-12) ---------------------------
+# Şekerleme 30 dk'dır ve süre dolunca bebek UYANDIRILIR (kestirme protokolü).
+# Şekerleme bloğunda açık uyku kaydı varken bloğun `uyandir_dk` anında BİR KEZ
+# gönderilir. Anahtar uykunun başlangıç dakikasını taşır: aynı uyku için
+# ikinci kez gitmez, aynı gün ikinci bir şekerleme olursa o ayrı uykudur.
+KAT_SEKERLEME_UYANDIR = "sekerleme_uyandir"
+SEKERLEME_UYANDIR_BASLIK = "Şekerleme bitti, uyandırma zamanı."
+SEKERLEME_UYANDIR_GOVDE = ("{ad} şekerlemesini tamamladı; şimdi "
+                           "uyandırabilirsin. Gece uykusuna en erken 1 saat "
+                           "sonra geçilir.")
 UYANDI_MI_BASLIK = "Bebeğiniz uyandı mı?"
 UYANDI_MI_GOVDE = ("Bir sonraki uykuyu hesaplayabilmemiz için uyanma saatini "
                    "girin.")
@@ -397,6 +407,9 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
             continue
         if sessiz_saat(now_minute):
             continue
+        if plan_service.kestirme_v2_acik():
+            _sekerleme_uyandir(db, user, baby, plan, content, now_minute,
+                               today_local, stats)
         # SABAH KURALI — uyanış girilmeden çizelge tahmindir; o tahmine göre
         # "uyku zamanı" demek anneyi yanlış saate yönlendirir.
         if adapt.get("sabah_uyanis_kaynak") in (None, "varsayilan"):
@@ -570,6 +583,35 @@ def _uyku_dizisi(db: Session, user: User, baby: Baby, plan: SleepPlan,
                     ek={"block_key": blok.get("key"), "adim": adim,
                         "sinif": sinif, "saat": blok.get("time")
                         or plan_adapter._fmt(bas)})
+
+
+def sekerleme_uyandirma_bloklari(schedule: list[dict]) -> list[dict]:
+    """Uyandırma bildirimi bekleyen şekerleme blokları: `uyandir` işaretli
+    ve kaydı AÇIK (bebek şu an uyuyor)."""
+    return [b for b in (schedule or [])
+            if b.get("key") == plan_adapter.SEKERLEME_KEY and b.get("uyandir")
+            and b.get("devam") and b.get("uyandir_dk") is not None]
+
+
+def _sekerleme_uyandir(db: Session, user: User, baby: Baby, plan: SleepPlan,
+                       content: dict, now_minute: int, today_local: date,
+                       stats: dict) -> None:
+    """KESTIRME_V2 — şekerleme bitiş anında bir kez "uyandırma zamanı".
+
+    Çağıran tur zaten annenin uyku bildirimi tercihine ve şu anki sessiz
+    saate bakıyor; burada ayrıca HEDEF ânın sessiz saate düşmediğine bakılır.
+    Gecikme yayılması (kayma) uygulanmaz: uyandırma anı kesin olmalı."""
+    for blok in sekerleme_uyandirma_bloklari(content.get("schedule") or []):
+        hedef = int(blok["uyandir_dk"])
+        if not _vakti_geldi(hedef, now_minute, 0) or sessiz_saat(hedef % 1440):
+            continue
+        key = (f"{today_local.isoformat()}:uyandir:{_bebek_kisa(baby)}:"
+               f"{int(blok['start_minute'])}")
+        _gonder(db, user, baby, plan, key, KAT_SEKERLEME_UYANDIR,
+                SEKERLEME_UYANDIR_BASLIK,
+                SEKERLEME_UYANDIR_GOVDE.format(ad=baby.name), stats,
+                ek={"block_key": blok.get("key"),
+                    "saat": blok.get("uyandir_saat")})
 
 
 def _uyandi_mi_sor(db: Session, user: User, baby: Baby, plan: SleepPlan,

@@ -52,6 +52,17 @@ TYPE_YENIDOGAN = "yenidogan_ritim"  # 0-3 ay, ritim rehberi     — days BOŞ, s
 TYPE_BEKLEME = "egitim_bekleme"     # eğitim uygun değil (3-5 ay, doktor onayı vb.)
 
 
+# KESTIRME_V2 (2026-10-12): şekerleme bloğunda uyandırma alanları, başlamış
+# şekerlemenin tanınması, kayıt eksik günde şekerleme yok + bildirim adımı
+# (notifier._sekerleme_uyandir). Kapalıyken davranış eskisinin aynısı.
+KESTIRME_V2_BAYRAK = "KESTIRME_V2"
+
+
+def kestirme_v2_acik() -> bool:
+    from api.config import _bayrak
+    return _bayrak(KESTIRME_V2_BAYRAK)
+
+
 def tip_turet(content: dict) -> str:
     """`type` alanı olmayan (Faz 0-3 öncesi) planın türü.
 
@@ -932,7 +943,8 @@ def run_adaptation(db: Session, user: User, baby: Baby, base_plan: SleepPlan,
         # training_started_at'i Eğitim sekmesi açılınca her bebek için yazıyordu.
         training_started_at=(egitim_baslangicini_tamamla(db, baby)
                              if tip_turet(base_content) == TYPE_EGITIM else None),
-        regresyon_kendi_donuyor=regresyon_cevabi(baby, today))
+        regresyon_kendi_donuyor=regresyon_cevabi(baby, today),
+        kestirme_v2=kestirme_v2_acik())
 
     # Doğum tarihi yoksa yaş bandı çözülemez ve yeniden üretim YAPILAMAZ
     # (profile_from_baby birth_date ister). Eskiden bu yol 500 veriyordu ve
