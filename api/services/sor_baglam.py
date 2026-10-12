@@ -266,6 +266,15 @@ def gun_durumu(db: Session, baby: Baby, simdi: datetime | None = None) -> dict:
     return dict(d, durum="egitim")
 
 
+def gece_sayilan_gun(d: dict) -> int:
+    """Gece kurallarının eğitim günü (gece numarası) — gun_durumu() çıktısından.
+    Gece, başladığı akşama aittir: sabah uyanışından önce (sabah_once) önceki gün
+    (etkin_gun), sonra uygulamanın günü (app_gun). Sor kural bloğu ve gece kartı
+    BU fonksiyonu kullanır; ayrı hesap yok."""
+    g = d["etkin_gun"] if d["sabah_once"] else d["app_gun"]
+    return max(1, int(g or 1))
+
+
 def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None) -> str | None:
     """Sor bağlamına eklenecek satırlar (düz metin). Kurulamazsa None.
 

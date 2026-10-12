@@ -33,6 +33,19 @@ logger = logging.getLogger("tavsan.plans")
 router = APIRouter(prefix="/plans", tags=["plans"])
 
 
+def _gece_gunu(db: Session, bebek: Baby | None, gun: date) -> int | None:
+    """Gece kartının gece numarası — Sor ile AYNI hesap (sor_baglam.gun_durumu +
+    gece_sayilan_gun). Yalnız bugünün yanıtında ve eğitim sürerken; aksi hâlde
+    None (kart takvim gününe göre kurulur)."""
+    if bebek is None or bebek.training_started_at is None or gun != bugun_tr():
+        return None
+    from api.services import sor_baglam
+    d = sor_baglam.gun_durumu(db, bebek)
+    if d.get("durum") != "egitim":
+        return None
+    return sor_baglam.gece_sayilan_gun(d)
+
+
 def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
                  referans: date | None = None) -> PlanResp | None:
     """PlanResp + B4 kilidi. Premium değilse eğitim programı çıkarılır
@@ -71,7 +84,8 @@ def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
     if yontem_kart.acik_mi():
         try:
             resp.content = yontem_kart.plan_icerigi_isle(
-                resp.content, user, db.get(Baby, plan.baby_id), referans or plan.plan_date)
+                resp.content, user, db.get(Baby, plan.baby_id), referans or plan.plan_date,
+                _gece_gunu(db, db.get(Baby, plan.baby_id), referans or plan.plan_date))
         except Exception:
             logger.exception("Gece kartı v2 kurulamadı (plan=%s) — saklanan kart "
                              "dönüyor", plan.id)
