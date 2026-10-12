@@ -1,18 +1,24 @@
 """Chat (RAG) şemaları — mobil sözleşmesi."""
 import uuid
+from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class ChatMessageItem(BaseModel):
     role: str                        # user | assistant
     content: str
+    # Opsiyonel (2026-10-12, SOR_GECMIS): mesajın zamanı. Varsa 12 saatten eski
+    # geçmiş modele gönderilmez; yoksa mesaj olduğu gibi gider. Mobil bugün
+    # göndermiyor (yerel kayıtta `createdAt` var) — iki yazım da kabul edilir.
+    created_at: datetime | None = Field(
+        default=None, validation_alias=AliasChoices("created_at", "createdAt"))
 
 
 class ChatReq(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
-    # Sözleşme gereği alınır; mevcut RAG motoru TEK TURLUdur (cevap current message'a
-    # dayanır, cache tutarlılığı için). history ileride multi-turn'e açık bırakıldı.
+    # SOR_GECMIS kapalıyken motor TEK TURLUdur (history alınır ama kullanılmaz).
+    # Açıkken son 6 mesaj (takma adla gizlenmiş) o anki sorudan önce modele gider.
     history: list[ChatMessageItem] = Field(default_factory=list)
     # Opsiyonel yaş bandı → semantik cache katmanını etkinleştirir (yoksa yalnız exact).
     yas_bandi: str | None = None

@@ -1706,10 +1706,78 @@ def _kaynak_ozet(units: list[dict]) -> list[dict]:
             for u in units]
 
 
+# ---------------------------------------------------------------------------
+# SOHBET GEÇMİŞİ (SOR_GECMIS, 2026-10-12) — yalnız parametre verilirse devrede
+# ---------------------------------------------------------------------------
+# Prod incelemesi: geçmiş motora hiç gitmiyordu; "Eğitimin 2. günü" diyen anne
+# bir sonraki turda yine "kaçıncı gündesiniz?" sorusunu alıyordu. Geçmiş
+# verilmezse (bayrak kapalı) aşağıdaki hiçbir şey çalışmaz.
+KISA_TAKIP_MAX_KELIME = 5
+
+# Önceki asistan cevabında teselli/motivasyon cümlesi geçti mi (prod'da 13 cevabın
+# 5'inde aynı "45 dakika ağlayan çocuk…" paragrafı vardı).
+MOTIVASYON_IZI = re.compile(
+    r"45 dakika ağlayan|iki hafta sonra|her gün azal|sabit kalmaz|elim omzunuzda"
+    r"|bu geçecek|geçecek,? yanınızdayım", re.IGNORECASE)
+MOTIVASYON_TEKRAR_KURALI = (
+    "\n- Bu sohbette önceki cevaplarında motivasyon/teselli cümlesi (ağlamanın her gün "
+    "azalacağı, ilk gün 45 dakika ağlayan çocuk, 'geçecek' vb.) ZATEN VERİLDİ. Bu cevapta "
+    "hiçbir motivasyon ya da teselli cümlesi YAZMA; yalnız sorulan şeye cevap ver.")
+
+
+def motivasyon_verildi_mi(gecmis: list[dict] | None) -> bool:
+    return any(m.get("role") == "assistant" and MOTIVASYON_IZI.search(m.get("content") or "")
+               for m in gecmis or [])
+
+
+def kisa_takip_mi(soru: str) -> bool:
+    """Kendi başına retrieval'a yetmeyecek kısa takip mesajı mı ("Eğitimin 2. günü")."""
+    return len((soru or "").split()) <= KISA_TAKIP_MAX_KELIME
+
+
+def retrieval_sorgusu(soru: str, onceki_soru: str | None = None) -> str:
+    """Kısa takip sorusunu bir önceki kullanıcı sorusuyla zenginleştir. Yalnız
+    ARAMA içindir — modele giden soru metni değişmez."""
+    if onceki_soru and onceki_soru.strip() and kisa_takip_mi(soru):
+        return f"{onceki_soru.strip()} {soru.strip()}"
+    return soru
+
+
+def _gecmis_mesajlari(gecmis: list[dict] | None) -> list[dict]:
+    """Geçmişi Messages API sırasına çevir: yalnız user/assistant, boşlar
+    atılır, ardışık aynı rol birleşir, ilk mesaj user olmalı, son mesaj
+    assistant olmalı (o anki soru user olarak arkasına eklenir)."""
+    out: list[dict] = []
+    for m in gecmis or []:
+        rol = (m.get("role") or "").strip()
+        icerik = (m.get("content") or "").strip()
+        if rol not in ("user", "assistant") or not icerik:
+            continue
+        if out and out[-1]["role"] == rol:
+            out[-1]["content"] += "\n\n" + icerik
+        else:
+            out.append({"role": rol, "content": icerik})
+    while out and out[0]["role"] != "user":
+        out.pop(0)
+    while out and out[-1]["role"] != "assistant":
+        out.pop()
+    return out
+
+
 def _cevap_uret(soru: str, yas_bandi: str | None = None,
-                baby_context: str | None = None) -> dict:
+                baby_context: str | None = None, *,
+                gecmis: list[dict] | None = None,
+                onceki_soru: str | None = None,
+                sistem_eki: str | None = None) -> dict:
     """RAG cevabını YAPISAL üret — cevapla() ve API katmanı bunu ortak kullanır.
     Döner: {cevap, cache_hit, kaynaklar, anahtar(hash), llm, in_chars, out_chars}.
+
+    Ek parametreler (2026-10-12, hepsi verilmezse davranış ÖNCEKİYLE BİREBİR):
+      gecmis      — önceki mesajlar [{role, content}] (takma adla gizlenmiş);
+                    modele o anki sorudan ÖNCE sırasıyla gider; cache atlanır.
+      onceki_soru — kısa takip sorusunda retrieval sorgusunu zenginleştirir.
+      sistem_eki  — SYSTEM_PROMPT'tan sonra ayrı system bloğu.
+    Kriz kapısı her durumda YALNIZ o anki soruya bakar.
 
     Akış cevapla() ile BİREBİR aynıdır (davranış korunur): LLM'den ÖNCE cache
     (exact+semantik) → yoksa retrieval → yoksa/anahtarsız fallback → Haiku + store.
@@ -1731,7 +1799,7 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
     # girmemeli — yoksa bir bebeğin saatleri başka kullanıcıya cevap olarak döner.
     # baby_context varsa cache ne OKUNUR ne YAZILIR. Genel sorularda cache aynen çalışır.
     # Ruhsal sıkıntı ifadesi de kişiseldir: cevabı paylaşılan cache'e girmemeli.
-    kisisel = bool(baby_context) or ruhsal == "sikinti"
+    kisisel = bool(baby_context) or ruhsal == "sikinti" or bool(gecmis)
 
     entry = None if kisisel else _cache_lookup_entry(soru, yas_bandi)
     if entry is not None:
@@ -1745,7 +1813,10 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
                 "retrieval_layer": None, "top_score": None}
 
     # --- K1: normal retrieval ------------------------------------------------
-    retrieved = retrieve(soru, top_k=SEM_TOP_K)
+    # `arama`: kısa takip sorusunda önceki soruyla zenginleştirilmiş sorgu
+    # (onceki_soru verilmezse soru'nun KENDİSİ — davranış değişmez).
+    arama = retrieval_sorgusu(soru, onceki_soru)
+    retrieved = retrieve(arama, top_k=SEM_TOP_K)
 
     # Yaş bandı köprüsü (K2 bileşeni): bandın sayısal parametreleri + o bandın
     # korpustaki birimleri bağlama EKLENİR (retrieval skorları değişmez → mevcut
@@ -1754,10 +1825,10 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
     bant_blok = yas_bandi_blok(bantlar, yas_ay)
 
     # Katman kararı için ham en yüksek skor (eşikten bağımsız ölçülür).
-    _olcum = retrieved or retrieve(soru, top_k=1, min_score=0.0)
+    _olcum = retrieved or retrieve(arama, top_k=1, min_score=0.0)
     top_score = float(_olcum[0].get("_score", 0.0)) if _olcum else 0.0
-    katman = _katman_belirle(top_score, _alan_sinyali(soru, yas_ay), bool(bant_blok),
-                             ebeveynlik=_ebeveynlik_sinyali(soru),
+    katman = _katman_belirle(top_score, _alan_sinyali(arama, yas_ay), bool(bant_blok),
+                             ebeveynlik=_ebeveynlik_sinyali(arama),
                              kapsam_disi=_kapsam_disi_sinyali(soru))
 
     # FAZ E, KADEME 1: ruhsal sıkıntı ifade eden anne ASLA "bu soru kapsam dışı"
@@ -1781,7 +1852,7 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
     # --- K2: eşiği bir kademe düşür (bağlam hâlâ zayıfsa) -------------------
     if katman == "k2" and len(retrieved) < SEM_TOP_K:
         dusuk = max(0.0, SEM_MIN_SCORE - 0.05)
-        for u in retrieve(soru, top_k=SEM_TOP_K, min_score=dusuk):
+        for u in retrieve(arama, top_k=SEM_TOP_K, min_score=dusuk):
             if all(u.get("chunk_id") != r.get("chunk_id") for r in retrieved):
                 retrieved.append(u)
 
@@ -1800,7 +1871,10 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
 
     # Duygusal soruda küratörlü motivasyon birimleri bağlamın BAŞINA konur ki
     # model ham danışmanlık-süreci parçaları yerine bunları kullansın.
-    if ruhsal == "sikinti" or duygu_sinyali(soru) is not None:
+    # Geçmişte teselli zaten verildiyse motivasyon birimleri BAŞA konmaz (gecmis
+    # verilmezse — bayrak kapalı — motivasyon_verildi daima False).
+    motivasyon_verildi = motivasyon_verildi_mi(gecmis)
+    if (ruhsal == "sikinti" or duygu_sinyali(soru) is not None) and not motivasyon_verildi:
         _mevcut = {r.get("chunk_id") for r in retrieved}
         retrieved = [m for m in _motivasyon_birimleri()
                      if m.get("chunk_id") not in _mevcut] + retrieved
@@ -1847,6 +1921,7 @@ def _cevap_uret(soru: str, yas_bandi: str | None = None,
     # bozulmaz. Blok kişiye özeldir, asla cache'lenmez (yukarıdaki bypass).
     bebek_blok = f"\n\nBEBEK VERİSİ (bu kullanıcının kendi kaydı):\n{baby_context}\n" \
         if baby_context else ""
+    tekrar_kurali = MOTIVASYON_TEKRAR_KURALI if motivasyon_verildi else ""
 
     user_prompt = f"""ANNE SORUSU: {soru}
 {bebek_blok}
@@ -1862,9 +1937,20 @@ CEVAP KURALLARI:{duygu_kurali}
 - Kaynak parçalarda 'danışmanlık'/'danışmana sorun' gibi yönlendirme geçse bile bunu cevaba TAŞIMA.
 - Tıbbi konularda (hastalık, ilaç, reflü, kolik, nöbet, ateş vb.) tanı/tedavi verme; kısaca çocuk doktoruna başvurulmasını öner (danışmana değil).
 - Yetersiz bilgi varsa açıkça ama kısaca söyle ve sorunun farklı ifade edilmesini öner. ANCAK bu kural YAŞ için geçerli DEĞİLDİR: sorulan yaş için birebir kayıt yoksa YAŞ BANDI PARAMETRELERİ bölümündeki en yakın bandın değerlerini, hangi banda dayandığını belirterek ver; yaş için asla "bilgim yok" deme.
-- Yaş geçiş dönemi belirtilmişse iki bandın aralığını birlikte özetle.{katman_kurali}
+- Yaş geçiş dönemi belirtilmişse iki bandın aralığını birlikte özetle.{katman_kurali}{tekrar_kurali}
 
 CEVAP:"""
+
+    # Sabit system prompt'a cache_control ekli. NOT: Sistem prompt'u ~80 token,
+    # Haiku 4.5 minimum cache eşiği 4096 token → bu blok şu an cache TETİKLEMEZ
+    # (no-op, hata vermez). Asıl değişken maliyet RAG context'i olup soruya göre
+    # değiştiğinden cache'lenemez. Marker yapısal doğruluk + ileride system büyürse
+    # otomatik devreye girsin diye burada. Çıktı birebir aynı kalır.
+    system = [{"type": "text", "text": SYSTEM_PROMPT,
+               "cache_control": {"type": "ephemeral"}}]
+    if sistem_eki:                      # önbellekli ilk blok DEĞİŞMEZ; ek ardından
+        system.append({"type": "text", "text": sistem_eki})
+    messages = _gecmis_mesajlari(gecmis) + [{"role": "user", "content": user_prompt}]
 
     client = Anthropic(api_key=api_key)
     # LLM sağlık izleme (pasif katman): hata /health'in "llm" alanını anında
@@ -1873,14 +1959,8 @@ CEVAP:"""
         response = client.messages.create(
             model=CHATBOT_MODEL,
             max_tokens=MAX_TOKENS,
-        # Sabit system prompt'a cache_control ekli. NOT: Sistem prompt'u ~80 token,
-        # Haiku 4.5 minimum cache eşiği 4096 token → bu blok şu an cache TETİKLEMEZ
-        # (no-op, hata vermez). Asıl değişken maliyet RAG context'i olup soruya göre
-        # değiştiğinden cache'lenemez. Marker yapısal doğruluk + ileride system büyürse
-        # otomatik devreye girsin diye burada. Çıktı birebir aynı kalır.
-            system=[{"type": "text", "text": SYSTEM_PROMPT,
-                     "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user", "content": user_prompt}],
+            system=system,
+            messages=messages,
         )
     except Exception as e:                       # noqa: BLE001 — kaydet, sonra yükselt
         llm_saglik.kaydet_hata(e)
@@ -1896,6 +1976,7 @@ CEVAP:"""
     return {"cevap": answer, "cache_hit": False, "kaynaklar": _kaynak_ozet(retrieved),
             "anahtar": h, "llm": True,
             "in_chars": len(SYSTEM_PROMPT) + len(user_prompt), "out_chars": len(answer),
+            "gecmis_sayisi": len(messages) - 1,
             "retrieval_layer": katman, "top_score": top_score,
             "model": CHATBOT_MODEL, "usage": _usage_ozet(response)}
 
