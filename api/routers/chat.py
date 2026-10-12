@@ -112,9 +112,14 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     # Bağlam BEBEK KAYDI VARSA kurulur (log/plan şartı yok): ad ve yaş
     # birth_date'ten hesaplanabiliyor, bunun için log beklemek yeni kayıt olan
     # anneye ilk soruda "adını ve kaç aylık olduğunu yazın" dedirtiyordu.
+    # SOR_GECMIS: yalnız teşekkür/vedalaşma ya da yalnız emoji → bağlam, RAG ve
+    # LLM YOK; sabit kısa cevap (bkz. chatbot.kapanis_mesaji_mi).
+    kapanis = _bayrak(GECMIS_BAYRAK) and chatbot.kapanis_mesaji_mi(req.message)
     ctx = None
     gercek_ad = takma = None
-    if req.baby_id is not None:
+    if req.baby_id is not None and kapanis:
+        get_owned_baby(req.baby_id, db, user)             # sahiplik 404'ü korunur
+    elif req.baby_id is not None:
         baby = get_owned_baby(req.baby_id, db, user)      # sahiplik 404'ü korunur
         # TAKMA AD (2026-10-07): gerçek ad Anthropic'e gitmez. Bağlamda ve
         # sorunun içinde ses uyumlu takma ad gider; cevapta gerçek ada döner.
@@ -151,6 +156,7 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     # giden yük) eskisinin birebir aynısı.
     ek_param: dict = {}
     if _bayrak(GECMIS_BAYRAK):
+        ek_param["fiyat_kapsam_disi"] = True
         gecmis = gecmis_hazirla(req.history, gercek_ad, takma)
         if gecmis:
             ek_param["gecmis"] = gecmis
@@ -162,7 +168,8 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
 
     _t0 = time.perf_counter()
     soru = takma_ad.adi_gizle(req.message, gercek_ad, takma)
-    r = chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx, **ek_param)
+    r = (chatbot.kapanis_cevabi() if kapanis else
+         chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx, **ek_param))
     r["cevap"] = takma_ad.adi_geri_koy(r["cevap"], takma, gercek_ad)
     _sure_ms = int((time.perf_counter() - _t0) * 1000)
 

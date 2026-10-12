@@ -149,7 +149,7 @@ async def lifespan(app: FastAPI):
     try:
         chatbot.init_index()
         logger.info("Retrieval hazır: %s (model=%s)",
-                    chatbot.active_retrieval(), chatbot.CHATBOT_MODEL)
+                    chatbot.active_retrieval(), chatbot.sor_model_ayarlari()["model"])
     except Exception as e:
         logger.warning("init_index başarısız: %s", e)
 
@@ -376,7 +376,7 @@ def health(detail: int = 0, x_api_key: str | None = Header(default=None,
         "llm": llm_durum,
         "rag_mode": rt,                # "semantic" | "tfidf" | null
         "retrieval": rt,               # geriye dönük uyumluluk (eski alan adı)
-        "model": chatbot.CHATBOT_MODEL,
+        "model": chatbot.sor_model_ayarlari()["model"],   # CHATBOT_MODEL env'i dahil
         "version": APP_VERSION,        # kısa etiket (SHA DEĞİL)
         "build_time": BUILD_TIME,      # ISO-8601
         "corpus_units": chatbot.yuklu_birim_sayisi(),
