@@ -69,9 +69,11 @@ def check(name, cond, detail=""):
 
 
 def bayrak(**acik):
+    """True → "1"; metin değer (ör. SOR_SAYI_DOGRULAMA="duzelt") aynen yazılır."""
     for ad in BAYRAKLAR:
-        if acik.get(ad):
-            os.environ[ad] = "1"
+        v = acik.get(ad)
+        if v:
+            os.environ[ad] = v if isinstance(v, str) else "1"
         else:
             os.environ.pop(ad, None)
 
@@ -132,6 +134,9 @@ check("C) Adımlar: dışarıda bekle → içeride 45 dk → 15 dk rutin (beslen
       len(adim) == 5 and "dışarıda bekleyin" in adim[0] and "45 dakika" in adim[1]
       and "15 dakikalık" in adim[2] and "beslenme olmasın" in adim[2]
       and "en fazla 3 kez" in adim[3] and "destek vererek uyutun" in adim[4], adim)
+check("C) Son adım tablodaki sonuç: 'o gün başarısız sayılır'; tabloda olmayan 'yarın devam' yok",
+      adim[4] == "Yine uyumazsa mecburen destek vererek uyutun; o gün başarısız sayılır."
+      and "yarın" not in adim[4], adim[4])
 check("C) İlk bekleme (bekleyen) için sayı YOK", not re.search(r"\d", adim[0]), adim[0])
 check("C) Beşik yanı yöntemi: pat-pat, histerik değilse kucak yok",
       "pat-pat" in adim[1] and "kucağa almayın" in adim[1], adim[1])
@@ -252,18 +257,57 @@ check("K) 02:30 (2. günün gecesi): sabahki gündüz uykuları 3. günün → k
 k_g2g, _ = kural_al(BID, G.replace(hour=14))                          # 2. günün gündüzü
 check("K) 2. günün gündüzü: kısa gündüz 10 + 35",
       "dışarıda 10 dk bekle, sonra içeride 35 dk dene" in k_g2g["blok"] and not k_g2g["gece"], k_g2g["blok"])
-check("K) Bekleyen alanlar için sayı yok: ilk bekleme ve gece içi artış 'planına bak'",
-      "ilk bekleme süresi ve aynı gece içindeki artış için planına bak" in blok2)
+check("K) Bekleyen alanlar için sayı yok: ilk bekleme ve aynı gece içindeki süreler 'planına bak'",
+      "ilk bekleme süresi ve aynı gece içindeki bekleme süreleri için planına bak" in blok2
+      and "artış için planına bak" not in blok2, blok2)
+check("K) Bekleyen alanlarda YÖN de yasak; günden güne artış kuralı gece içine taşınmaz",
+      "aynı gece içinde bir uyanmadan ötekine bekleme süresinin değişimi" in blok2
+      and "sayı da YÖN de söyleme" in blok2
+      and "'Aynı gece her uyanmada bekleme artar / azalır / aynı kalır' DEME" in blok2
+      and "Bu artış kuralı GÜNDEN GÜNEdir, aynı gecenin uyanmaları için değil." in blok2, blok2)
+check("K) 3 denemeden sonraki gece: tablodaki kural aynen + yumuşatma/suçlama/ek sonuç yasağı",
+      "3 denemeden sonra da uyumayan GECE için tablodaki kural: mecburen destek verip uyutulur; "
+      "o gün başarısız sayılır." in blok2 and "yumuşatma" in blok2 and "anneyi suçlama" in blok2
+      and "tabloda olmayan bir sonuç" in blok2, blok2)
+check("K) Annenin yeri (beşik yanı): odada, beşiğin yanında; 'içeri girmeyin' çelişkisi anılır",
+      "Annenin yeri (Beşik yanı; yatırırken ve içeri girdiğinde): odada, beşiğin yanında "
+      "(sandalyede ya da ayakta)." in blok2 and "'içeri girmeyin' deme" in blok2, blok2)
 check("K) Gün 2: yatır-çık dizisi kullanılmaz", "Yatır-çık 13. günde başlar" in blok2
       and "5 → 10 → 15 → 20" not in blok2)
 check("K) Gece akışı ve 3 kez sonrası (gece destek, gündüz uyanık tut)",
-      "45 dk; uyumazsa odada 15 dk rutin (beslenme yok); en fazla 3 kez" in blok2
+      "sonra içeri gir ve 45 dk dene; uyumazsa odada 15 dk rutin (beslenme yok); en fazla 3 kez. "
+      "İçerideyken: uyuyana kadar pat-pat, pış-pış; histerik ağlama yoksa kucak yok, histerikse "
+      "kucak serbest." in blok2 and "kucak serbest, 45" not in blok2
       and "destek verip uyutulur" in blok2 and "uyanık tutulur" in blok2, blok2)
 k_g5, _ = kural_al(BID4, G.replace(hour=14))
 check("K) Gün 5 (oda ortası): kısa gündüz 'bekleme süreleri için planına bak'",
       "Kısa gündüz uykusu (5. günün gündüz uykuları; uyku 60 dk altında kalırsa): bekleme "
       "süreleri için planına bak" in k_g5["blok"]
       and not k_g5["izinli"]["dis"], k_g5["blok"])
+from api.services.sor_baglam import AYLAR as _AY
+_GN = ("Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar")
+
+
+def _tt(gun):
+    return f"{_GN[gun.weekday()]} {gun.day} {_AY[gun.month - 1]}"
+
+
+_D1, _D2 = BUGUN + timedelta(days=1), BUGUN + timedelta(days=2)
+check("K) Takvim (gündüz): bugün/yarın gün adı, tarih, eğitim günü ve aşama hazır",
+      f"bugün {_tt(BUGUN)}: eğitimin 2. günü, aşama Beşik yanı; yarın {_tt(_D1)}: eğitimin 3. "
+      f"günü, aşama Beşik yanı." in k_g2g["blok"], k_g2g["blok"])
+check("K) Takvim (gece 02:30, sabah öncesi): gecesi sayılan gün, sabahki gün, yarın",
+      f"şu an {_tt(_D1)} gecesi, eğitimin 2. gününün gecesi; sabah uyanınca {_tt(_D1)}: eğitimin "
+      f"3. günü, aşama Beşik yanı; yarın {_tt(_D2)}: eğitimin 4. günü, aşama Oda ortası." in blok2,
+      blok2)
+check("K) Gün 5: kısa gündüz dış/iç süreleri bekleyen konular arasında",
+      "kısa gündüz uykusundaki dışarıda/içeride bekleme süreleri" in k_g5["blok"], k_g5["blok"])
+_, B8 = hesap(egitim_gunu_bugun=8)
+k_g8, _ = kural_al(B8, G.replace(hour=14))
+check("K) Gün 8 (kapı): içeride temas bekleyen konu; yer kapının yanı; 'içeri girmeyin' örneği var",
+      "bu aşamada içeride temasın nasıl olacağı" in k_g8["blok"]
+      and "Annenin yeri (Kapı; yatırırken ve içeri girdiğinde): odanın içinde, kapının yanında"
+      in k_g8["blok"], k_g8["blok"])
 _, B13 = hesap(egitim_gunu_bugun=13)
 k_g13, _ = kural_al(B13, G.replace(hour=14))
 check("K) Gün 13: yatır-çık 5 → 10 → 15 → 20, en fazla 20–25; kısa gündüz 20 + 25",
@@ -284,11 +328,23 @@ def ihlal(metin, kural):
     return [(i["rol"], i["deger"]) for i in sor_kural.dogrula(metin, kural)]
 
 
+def _mod_dene(v):
+    if v is None:
+        os.environ.pop("SOR_SAYI_DOGRULAMA", None)
+    else:
+        os.environ["SOR_SAYI_DOGRULAMA"] = v
+    try:
+        return sor_kural.dogrulama_modu()
+    finally:
+        os.environ.pop("SOR_SAYI_DOGRULAMA", None)
+
+
 check("V) 'İkinci uyanmada 10 dakika, üçüncü uyanmada 15 dakika' → 10 ihlal",
       ihlal("İkinci uyanmada 10 dakika, üçüncü uyanmada 15 dakika bekleyin.", k_g2) == [("gece_uyanma", 10.0)])
-check("V) 'ikinci uyanmada 6-7, üçüncüde 8-9 dakika' → hepsi ihlal",
-      len(ihlal("Gecenin bundan sonraki uyanmalarında ise bekleme süresini artırmaya devam edin — "
-                "ikinci uyanmada 6-7 dakika, üçüncüde 8-9 dakika gibi.", k_g2)) == 4)
+_v67 = ihlal("Gecenin bundan sonraki uyanmalarında ise bekleme süresini artırmaya devam edin — "
+             "ikinci uyanmada 6-7 dakika, üçüncüde 8-9 dakika gibi.", k_g2)
+check("V) 'ikinci uyanmada 6-7, üçüncüde 8-9 dakika' → 4 sayı ihlali + yön ihlali",
+      len([r for r, _ in _v67 if r != "yon"]) == 4 and ("yon", 0.0) in _v67, _v67)
 _kg = ("- **1. gündüz uykusu:** Dışarıdan 10 dakika bekleyin, sonra içeri girin ve beşiğin "
        "yanında oturup toplam 35 dakika daha bekleyin")
 check("V) 'Dışarıdan 10 … 35 dakika': 2. gün gündüzünde uygun, 1. günde ihlal",
@@ -319,7 +375,7 @@ check("V) Gece yanlış dış bekleme düzeltmede gece akışı karşılığıyl
       sor_kural.duzelt("Dışarıda 5 dakika bekleyin.", k_g2))
 check("V) Motivasyon istatistiği (45 dk ağlayan … 5 dakikada) plan sayısı değil → ihlal",
       [r for r, _ in ihlal("İlk gün 45 dakika ağlayan bir çocuk iki hafta sonra 5 dakikada uykuya "
-                           "geçebiliyor.", k_g2)] == ["motivasyon", "motivasyon"])
+                           "geçebiliyor.", k_g2)] == ["motivasyon"] * 3)
 check("V) Rol karışması: '(çok dirençli bebekte 30 dakika)' ve gündüz 'içeride 35 dakika deneyin' uygun",
       ihlal("Uyumazsa 15 dakika rutin molası verin (çok dirençli bebekte 30 dakika).", k_g2g) == []
       and ihlal("Sonra içeride 35 dakika deneyin.", k_g2g) == []
@@ -351,6 +407,174 @@ check("V) Düzeltme: gece cümlesi karşılıkla değişir; yatır-çık ve saat
       "Önce sakin olun." in _duz and "Gece uyandığında önce dışarıda bekleyin" in _duz
       and "Yatır-çık" not in _duz and "03:17" not in _duz and "Ağlama sabit kalmaz, her gün azalır." in _duz
       and "ağlayan" not in _duz and sor_kural.dogrula(_duz, k_g2) == [], _duz)
+
+
+# --- Yeni kurallar (2026-10-12 b): yazıyla sayı, sayımlar, yön, yumuşatma,
+#     suçlama, aşama, gün adı, tek geçişte düzeltme ---------------------------
+k_g3n, _ = kural_al(BID, G.replace(hour=20, minute=35) + timedelta(days=1))   # 3. günün gecesi
+check("V) Yazıyla sayı: 'on dakika' rakamla aynı kurala girer (gece 2. uyanma 10 → ihlal)",
+      ihlal("İkinci uyanmada on dakika bekleyin.", k_g2) == [("gece_uyanma", 10.0)]
+      == ihlal("İkinci uyanmada 10 dakika bekleyin.", k_g2))
+check("V) Yazıyla: 'kırk beş dakika deneyin', 'beş dakikanın altına inmeyin' uygun",
+      ihlal("İçeride kırk beş dakika deneyin.", k_g2) == []
+      and ihlal("Bekleme asla beş dakikanın altına inmesin.", k_g2) == [])
+check("V) Yazıyla: 'bir buçuk dakika' bekleme süresi gibi → ihlal; 'yarım saat' mola = 30 uygun",
+      ihlal("Sonraki bekleme bir buçuk dakika olsun.", k_g2g) == [("belirsiz", 1.5)]
+      and ihlal("Çok dirençliyse yarım saat rutin molası verin.", k_g2g) == [])
+check("V) Birimsiz kullanım sayılmaz: 'bir şey', 'iki taraf'",
+      ihlal("Şimdilik bir şey yapmayın; iki taraf da sakin kalsın.", k_g2g) == [])
+check("V) Sayım: 'iki gün kaldı' ve '2 gün kaldı' 5. günde ihlal (kalan 8); '13 günlük' uygun",
+      ihlal("İki gün kaldı.", k_g5) == [("gun", 2.0)] == ihlal("2 gün kaldı.", k_g5)
+      and ihlal("Program 13 günlük; 8 gün kaldı.", k_g5) == [])
+check("V) Sayım: 'beş kez' ihlal; 'en fazla üç kez', 'bir kez daha' uygun; 'dört defa' ihlal",
+      ihlal("Beş kez deneyin.", k_g2g) == [("kez", 5.0)]
+      and ihlal("En fazla üç kez deneyin, gerekirse bir kez daha rutin yapın.", k_g2g) == []
+      and ihlal("Dört defa deneyin.", k_g2g) == [("kez", 4.0)])
+check("V) Sayım: 'bir hafta' (tabloda yok) ihlal",
+      ihlal("Bir hafta içinde düzelir.", k_g2g) == [("hafta", 1.0)])
+_yon = ["Aynı gecede her yeni uyanmada bekleme süresini bir öncekinden mutlaka artırın.",
+        "Her uyanmada bekleme süresi artacağı için, gece içindeki direnç azalacaktır.",
+        "İlk bekleme süresi ve aynı gece içindeki artış için planınıza bakın."]
+check("V) Yön: aynı gece içinde bekleme artar/artırın → ihlal (sayı olmasa da)",
+      all(ihlal(c, k_g2) == [("yon", 0.0)] for c in _yon), [ihlal(c, k_g2) for c in _yon])
+_yon_ok = ["Bekleme süresi günden güne 5 dakika artar.",
+           "Her uyanmada aynı adımları izleyin; en fazla 3 kez deneyin.",
+           "İlk bekleme süresi ve aynı gece içindeki bekleme süreleri için planınıza bakın."]
+check("V) Yön: günden güne artış, 'en fazla 3 kez', süreyi plana bırakmak uygun",
+      all(ihlal(c, k_g2) == [] for c in _yon_ok), [ihlal(c, k_g2) for c in _yon_ok])
+check("V) Yumuşatma: 'başarısızlık değil, ilk 3 gün esnek' → ihlal",
+      ("yumusatma", 0.0) in ihlal("3 kez sonra da uyumazsa destek vererek uyutabilirsiniz — bu bir "
+                                  "başarısızlık değildir, ilk 3 gün bu esnektir.", k_g3n))
+check("V) 'Hiçbir şey olmaz — bir gün başarısız, iki gün kaldı' (3. gün) → yumuşatma + gün 2",
+      sorted(ihlal("Hiçbir şey olmaz — bir gün başarısız, iki gün kaldı.", k_g3n))
+      == [("gun", 2.0), ("yumusatma", 0.0)], ihlal("Hiçbir şey olmaz — bir gün başarısız, iki gün kaldı.", k_g3n))
+check("V) 'normal karşılanır' yalnız başarısızlık bağlamında ihlal",
+      ihlal("3 kez sonunda mecburen destekle uyutun; bu normal karşılanır.", k_g3n) == [("yumusatma", 0.0)]
+      and ihlal("Ağlaması bu aşamada normal karşılanır.", k_g3n) == [])
+check("V) Tablodaki kural ('o gün başarısız sayılır') ihlal değil",
+      ihlal("3 kez sonunda mecburen destek verip uyutursunuz; o gün başarısız sayılır.", k_g3n) == [])
+check("V) Suçlama → ihlal",
+      ihlal("Bu sizin hatanız değil ama yeterince kararlı olmadınız.", k_g3n) == [("suclama", 0.0)])
+check("V) Aşama (beşik yanı): yatışta 'içeri girmeyin' ihlal; gece uyanmasında dışarıda bekleme ve "
+      "uyuyunca odadan çıkmak uygun",
+      ihlal("Hayır, içeri girmeyin — henüz 45 dakika dolmamış olabilir.", k_g3n) == [("asama", 0.0)]
+      and ihlal("Gece uyandığında önce dışarıda bekleyin, hemen içeri girmeyin.", k_g3n) == []
+      and ihlal("Uyuyana kadar yanında kalın, sonra odadan çıkın.", k_g3n) == [])
+check("V) Aşama (kapı): 'beşiğin yanında oturun' ihlal; beşik yanında uygun",
+      ihlal("Beşiğin yanında oturun.", k_g8) == [("asama", 0.0)] and ihlal("Beşiğin yanında oturun.", k_g2g) == [])
+_gb, _gy, _go = _GN[BUGUN.weekday()], _GN[_D1.weekday()], _GN[_D2.weekday()]
+check("V) Gün adı: 'yarın <yanlış gün>' ihlal; bugün/yarın doğruysa uygun",
+      ihlal(f"Yarın ({_go}) 3. gün başlıyor.", k_g2g) == [("gun_adi", 0.0)]
+      and ihlal(f"Bugün {_gb}, yarın {_gy}.", k_g2g) == []
+      and ihlal(f"yarın {_go.lower()} günü", k_g2g) == [("gun_adi", 0.0)])
+check("V) Gün adı düzeltmesi yerinde: cümle kalır, gün adı doğrusuyla değişir",
+      sor_kural.duzelt(f"Yarın ({_go}) 3. gün başlıyor.", k_g2g) == f"Yarın ({_gy}) 3. gün başlıyor.",
+      sor_kural.duzelt(f"Yarın ({_go}) 3. gün başlıyor.", k_g2g))
+check("V) Gece 02:30: 'yarın' bu sabahı da kapsar (gecenin takvim günü)",
+      ihlal(f"Yarın {_gy} sabahı 3. gün başlıyor.", k_g2) == [])
+_kgu = k_g2["karsilik"]["gece_uyanma"]
+_m, _d, _c = sor_kural.duzelt_ayrinti(_kgu + " İkinci uyanmada 10 dakika bekleyin.", k_g2)
+check("V) Düzelt: karşılık cevapta aynen varsa ihlalli cümle ÇIKAR (iki kez geçmez)",
+      _m == _kgu and (_d, _c) == (0, 1), (_m, _d, _c))
+_m, _d, _c = sor_kural.duzelt_ayrinti("Dışarıda bekleyin; süre için planınıza bakın. İçeride 45 dakika "
+                                      "deneyin, uyumazsa 15 dakika rutin yapın; en fazla 3 kez. "
+                                      "İkinci uyanmada 10 dakika bekleyin.", k_g2)
+check("V) Düzelt: karşılığın bilgisi (45/15/3 + planınıza bakın) zaten varsa cümle çıkar",
+      "10 dakika" not in _m and _kgu not in _m and (_d, _c) == (0, 1), (_m, _d, _c))
+_m, _d, _c = sor_kural.duzelt_ayrinti("İkinci uyanmada 10 dakika bekleyin. Üçüncü uyanmada 20 dakika "
+                                      "bekleyin.", k_g2)
+check("V) Düzelt: aynı karşılık bir kez; ikinci ihlalli cümle çıkar",
+      _m == _kgu and (_d, _c) == (1, 1), (_m, _d, _c))
+_m, _d, _c = sor_kural.duzelt_ayrinti("Önce sakin olun. Yeterince kararlı olmadınız.", k_g3n)
+check("V) Düzelt: karşılığı olmayan (suçlama) cümle çıkar",
+      _m == "Önce sakin olun." and (_d, _c) == (0, 1), (_m, _d, _c))
+_m, _d, _c = sor_kural.duzelt_ayrinti("Bu bir başarısızlık değil, ilk günler esnektir.", k_g3n)
+check("V) Düzelt: yumuşatma tablodaki kuralla değişir",
+      _m == k_g3n["karsilik"]["yumusatma"]
+      == "3 denemeden sonra da uyumazsa o gece mecburen destek verip uyutulur; o gün başarısız sayılır."
+      and (_d, _c) == (1, 0), (_m, _d, _c))
+check("V) Yeni karşılıklar kendi doğrulamasından geçer (yon, yumusatma, asama, gun_no)",
+      all(ihlal(k["karsilik"][r], k) == [] for k in (k_g2, k_g3n, k_g8, k_g2g)
+          for r in ("yon", "yumusatma", "asama", "gun_no")))
+# Canlı koşudan (2026-10-12 b) çıkan durumlar
+check("V) Gün no: 02:30'da 'Yarın Salı, eğitimin 3. günü' (yarın 4. gün) → ihlal; '4. gün' uygun",
+      ihlal(f"Yarın {_go}, eğitimin 3. günü başlıyor.", k_g2) == [("gun_no", 0.0)]
+      and ihlal(f"Yarın {_gy} değil, {_go} eğitimin 3. günü.", k_g2) != []
+      and ihlal(f"Yarın {_gy}, eğitimin 3. günü başlıyor.", k_g2) == []          # gece: 'yarın' bu sabah da olabilir
+      and ihlal(f"{_go} günü eğitimin 3. günü.", k_g2) != []
+      and ihlal(f"Yarın {_go} eğitimin 4. günü olacak.", k_g2) == [], [
+          ihlal(f"Yarın {_go}, eğitimin 3. günü başlıyor.", k_g2), ihlal(f"{_go} günü eğitimin 3. günü.", k_g2)])
+check("V) Gün no (gündüz): 'Yarın eğitimin 2. günü' (yarın 3. gün) ihlal, takvim karşılığıyla değişir",
+      ihlal("Yarın eğitimin 2. günü başlıyor.", k_g2g) == [("gun_no", 0.0)]
+      and sor_kural.duzelt("Yarın eğitimin 2. günü başlıyor.", k_g2g) == k_g2g["karsilik"]["gun_no"]
+      == f"Bugün {_tt(BUGUN)}: eğitimin 2. günü, aşama Beşik yanı; yarın {_tt(_D1)}: eğitimin 3. günü, "
+         f"aşama Beşik yanı.", sor_kural.duzelt("Yarın eğitimin 2. günü başlıyor.", k_g2g))
+check("V) Gün no: 'her gün 5 dakika' sıra gün değildir",
+      ihlal("Bugün de bekleme her gün 5 dakika artar.", k_g2g) == [])
+check("V) Kucak süresi uydurma: 'histerikse kucak serbest, en fazla 45 dakika' → kucak ihlali",
+      ihlal("Histerik ağlama varsa kucağa alabilirsiniz, en fazla 45 dakika.", k_g2) == [("kucak", 45.0)])
+_m, _d, _c = sor_kural.duzelt_ayrinti("Histerikse kucak serbest, 45 dakikaya kadar kucakta tutabilirsiniz. "
+                                      "Kucağa alacaksanız kademeli yapın: 30 saniye, 1 dakika, 1,5 dakika, "
+                                      "2 dakika.", k_g2)
+check("V) Düzelt: kucak aralıkları saniye/dakika karışık zaten varsa karşılık EKLENMEZ, cümle çıkar",
+      "45" not in _m and "Kucağa alma aralıkları 0,5" not in _m and (_d, _c) == (0, 1), (_m, _d, _c))
+check("V) '45 dakika — en fazla 3 kez': 3 dakika sanılmaz (tire zinciri)",
+      ihlal("Toplam 45 dakika deneyin; uyumazsa 15 dakika rutin molası (çok dirençli olursa 30 dakika), "
+            "ardından yeniden 45 dakika — en fazla 3 kez.", k_g2g) == [])
+check("V) Kısa uyku eşiği: 'kısa bir uyku (60 dakikadan az) uyursa … dışarıda 10, içeride 35' uygun",
+      k_g2g["kisa_esik"] == 60 and ihlal("Eğer kısa bir uyku (60 dakikadan az) uyursa dışarıda 10 dakika "
+                                         "bekleyin, sonra içeride 35 dakika deneyin.", k_g2g) == [],
+      ihlal("Eğer kısa bir uyku (60 dakikadan az) uyursa dışarıda 10 dakika bekleyin, sonra içeride 35 "
+            "dakika deneyin.", k_g2g))
+_m, _d, _c = sor_kural.duzelt_ayrinti("İlk gün 45 dakika ağlayan bir çocuk iki hafta sonra 5 dakikada uyur. "
+                                      "Ağlama her gün azalır.", k_g2)
+check("V) Düzelt: motivasyon karşılığı cevapta zaten varsa eklenmez (iki kez 'azalır' yok)",
+      _m == "Ağlama her gün azalır." and (_d, _c) == (0, 1), (_m, _d, _c))
+check("V) Geri dalış eşiği: '5 dakika ve üzeri tekrar uyursa uzatma tamamlanır' uygun",
+      ihlal("5 dakika ve üzeri tekrar uyursa uzatma denemesi tamamlanmış sayılır.", k_g2g) == [])
+_m, _d, _c = sor_kural.duzelt_ayrinti("Toplam 45 dakika deneyin; uyumazsa 15 dakika rutin molası (çok "
+                                      "dirençliyse 30 dakika), ardından tekrar 45 dakika. En fazla 3 deneme "
+                                      "yapılır. Sonra 47 dakika deneyin.", k_g2g)
+check("V) Düzelt: '3 deneme' yalın sayısı da bilgiyi taşır → seans karşılığı EKLENMEZ, cümle çıkar",
+      "47" not in _m and "Uyumazsa 45 dakika deneyin, sonra" not in _m and (_d, _c) == (0, 1), (_m, _d, _c))
+check("V) Yumuşatma bağlamı önceki cümleden: '…destek verip uyutabilirsiniz. Bu, bir duruma neden olmaz.'",
+      ihlal("3 denemenin tamamından sonra da uyumazsa mecburen destek verip uyutabilirsiniz. Bu, eğitim "
+            "adımında bir duruma neden olmaz.", k_g3n) == [("yumusatma", 0.0)]
+      and ihlal("Bu, eğitim adımında bir duruma neden olmaz.", k_g3n) == [])
+check("V) Kısa uyku eşiği: 'uyku uzunsa (60 dakika veya daha fazla)' rutin sayılmaz",
+      ihlal("Eğer uyku uzunsa (60 dakika veya daha fazla): rutine devam edin.", k_g2g) == [])
+_ilk_uyku = min(b["start_minute"] for b in plan_adapter.normalize_schedule(
+    (SessionLocal().query(SleepPlan).filter(SleepPlan.baby_id == uuid.UUID(BID)).first().content or {})
+    .get("schedule")) if b.get("start_minute") is not None and b["start_minute"] > 8 * 60)
+_ss_ = lambda m: f"{m // 60:02d}:{m % 60:02d}"
+check("V) Türeyen saat: uykudan rutin süresi (15/30) kadar önce uygun; çizelgeden türemeyen saat ihlal",
+      ihlal(f"Rutin 15-30 dakika sürer, yani {_ss_(_ilk_uyku - 30)}-{_ss_(_ilk_uyku - 15)} civarında başlayın.",
+            k_g2g) == []
+      and ihlal("Saat 11:07'de başlayın.", k_g2g) == [("saat", 667.0)],
+      ihlal(f"Rutin 15-30 dakika sürer, yani {_ss_(_ilk_uyku - 30)}-{_ss_(_ilk_uyku - 15)} civarında başlayın.", k_g2g))
+_m, _d, _c = sor_kural.duzelt_ayrinti("1 → 1,5 → 2 dakika bekleme ile toplam 45 dakika deneyin. 15 dakikalık rutin "
+                                      "molası verin. Sonra yeniden 45 dakika deneyin; en fazla 3 kez.", k_g2g)
+check("V) Düzelt: karşılıktaki parantez ayrıntısı (30 dk) eksik diye karşılık EKLENMEZ",
+      "çok dirençli bebekte" not in _m and (_d, _c) == (0, 1), (_m, _d, _c))
+check("V) Yumuşatma: 'başarısız sayılır — ama korkmayın, çok nadir' ve 'kaygı kaynağı yapmayın' ihlal",
+      ihlal("Bu durumda bu gece başarısız sayılır — ama korkmayın, bu senaryo çok nadir yaşanır.", k_g3n)
+      == [("yumusatma", 0.0)]
+      and ihlal("O gece başarısız sayılır ama bunu kaygı kaynağı yapmayın.", k_g3n) == [("yumusatma", 0.0)]
+      and ihlal("Korkmayın, yanındayım.", k_g3n) == [])
+check("V) Yumuşatma: 'başarısız sayılır, ama merak etmeyin' ihlal",
+      ihlal("Bu durum başarısız sayılır, ama merak etmeyin, sabah devam edersiniz.", k_g3n) == [("yumusatma", 0.0)])
+_m, _d, _c = sor_kural.duzelt_ayrinti("İlk bekleme süresini ve aynı gece içindeki ilerlemesini öğrenmek için "
+                                      "planınızın gece bölümüne bakın. Bekleme süresi her uyanmada artacak.", k_g2)
+check("V) Düzelt: 'aynı gece … planınızın gece bölümüne bakın' varsa yön karşılığı EKLENMEZ, cümle çıkar",
+      "artacak" not in _m and k_g2["karsilik"]["yon"] not in _m and (_d, _c) == (0, 1), (_m, _d, _c))
+check("V) 'ör.' / 'vb.' kısaltması cümleyi bölmez",
+      len(sor_kural._cumleler("Kısa bir rutin yapın — ör. perde kapatmak, masaj vb. şeyler. Sonra yatırın.")) == 2)
+check("V) Kısa uyku eşiği bağlamı yoksa 60 dış bekleme sayılmaz: 'dışarıda 60 dakika bekleyin' ihlal",
+      ihlal("Dışarıda 60 dakika bekleyin.", k_g2g) == [("dis", 60.0)])
+check("V) Mod: tanımsız/kapali → kapali; izle/duzelt/yeniden; eski '1'/'true' → duzelt",
+      [(_mod_dene(v)) for v in (None, "kapali", "izle", "duzelt", "yeniden", "1", "true", "abc")]
+      == ["kapali", "kapali", "izle", "duzelt", "yeniden", "duzelt", "duzelt", "kapali"])
+
 
 # =============================================================================
 # F — sohbet akışı (sahte model)
@@ -394,6 +618,19 @@ def sor(h, bid, cevaplar, an):
     return r.json().get("answer", ""), [m for m in _loglar if m.startswith("chat: ")][-1]
 
 
+def usage_sabit():
+    """Kuyruktaki önceki yazımlar bitene dek bekle (sayı 0,5 sn değişmesin)."""
+    import time
+    n = usage_sayisi()
+    for _ in range(20):
+        time.sleep(0.5)
+        m = usage_sayisi()
+        if m == n:
+            return n
+        n = m
+    return n
+
+
 def usage_sayisi(beklenen=None):
     """Maliyet satırları kuyruk iş parçacığıyla yazılır: beklenen sayıya ulaşana
     kadar en fazla 5 sn yokla."""
@@ -418,6 +655,7 @@ check("F) Blok bağlamda, sistem kuralı ayrı blokta",
       "BUGÜNÜN KURALLARI" in YUKLER[0]["messages"][-1]["content"]
       and any("YALNIZ BEBEK VERİSİ'ndeki 'BUGÜNÜN KURALLARI'" in s["text"] for s in YUKLER[0]["system"]))
 check("F) Blokta ad yok (takma ad bile)", "Ada" not in blok2 and "Zalva" not in blok2)
+bayrak(SOR_KURAL_BLOGU=True, SOR_SAYI_DOGRULAMA="yeniden")
 _u0 = usage_sayisi()
 cev, log = sor(H, BID, ["İkinci uyanmada 10 dakika bekleyin.", "Planınıza bakın; 45 dakika deneyin."], an2)
 check("F) İhlal → yeniden üretim: 2 çağrı, düzeltme notu modele gitti, dogrulama=yeniden",
@@ -431,6 +669,33 @@ check("F) İkinci cevap da ihlalli → cümle karşılıkla değişir, dogrulama
       "dogrulama=duzeltildi" in log and "Önce sakin olun." in cev and "20 dakika" not in cev
       and "Gece uyandığında önce dışarıda bekleyin" in cev, (log, cev))
 check("F) Log satırında içerik yok", "uyanmada" not in log and "Ada" not in log, log)
+
+bayrak(SOR_KURAL_BLOGU=True, SOR_SAYI_DOGRULAMA="duzelt")
+_u0 = usage_sabit()
+cev, log = sor(H, BID, ["Önce sakin olun. İkinci uyanmada 10 dakika bekleyin."], an2)
+check("F) duzelt: TEK model çağrısı (düzeltme notu yok), cümle karşılıkla değişti",
+      len(YUKLER) == 1 and "DÜZELTME" not in YUKLER[0]["messages"][-1]["content"]
+      and usage_sayisi(_u0 + 1) == _u0 + 1
+      and cev == "Önce sakin olun. " + k_g2["karsilik"]["gece_uyanma"], (len(YUKLER), cev))
+check("F) duzelt: log içeriksiz — ihlal sayısı/türü, değişen/çıkan",
+      "dogrulama=duzeltildi n=1 tur=gece_uyanma degisen=1 cikan=0" in log and "uyanmada" not in log, log)
+cev, log = sor(H, BID, ["İçeride 45 dakika deneyin."], an2)
+check("F) duzelt: ihlal yoksa cevap aynen, dogrulama=gecti", cev == "İçeride 45 dakika deneyin."
+      and "dogrulama=gecti" in log and len(YUKLER) == 1, log)
+os.environ["SOR_SAYI_DOGRULAMA"] = "true"
+cev, log = sor(H, BID, ["İkinci uyanmada 10 dakika bekleyin."], an2)
+check("F) Eski 'true' değeri duzelt sayılır: tek çağrı", len(YUKLER) == 1
+      and "dogrulama=duzeltildi" in log, (len(YUKLER), log))
+bayrak(SOR_KURAL_BLOGU=True, SOR_SAYI_DOGRULAMA="izle")
+cev, log = sor(H, BID, ["İkinci uyanmada 10 dakika bekleyin. Yarın 5 gün kaldı."], an2)
+check("F) izle: cevap DEĞİŞMEZ, tek çağrı, log'da yalnız sayı ve tür",
+      len(YUKLER) == 1 and cev == "İkinci uyanmada 10 dakika bekleyin. Yarın 5 gün kaldı."
+      and "dogrulama=izle n=2 tur=gece_uyanma,gun" in log and "uyanmada" not in log, log)
+bayrak(SOR_KURAL_BLOGU=True, SOR_SAYI_DOGRULAMA="kapali")
+cev, log = sor(H, BID, ["İkinci uyanmada 10 dakika bekleyin."], an2)
+check("F) kapali (blok açık): blok gider, doğrulama yok",
+      len(YUKLER) == 1 and "BUGÜNÜN KURALLARI" in YUKLER[0]["messages"][-1]["content"]
+      and "dogrulama=-" in log and cev == "İkinci uyanmada 10 dakika bekleyin.", log)
 bayrak()
 YUKLER.clear()
 cev, log = sor(H, BID, ["İkinci uyanmada 10 dakika bekleyin."], an2)

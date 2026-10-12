@@ -4,10 +4,16 @@ Sor — "bugünün kuralları" bloğu ve cevaptaki sayıların ROL bazlı doğru
 İki bayrak (kapalıyken hiçbir şey çağrılmaz, davranış bugünkünün aynısı):
     SOR_KURAL_BLOGU     — bağlama blok + sistem kuralı ("süre ve sayı yalnız
                           bu bloktan alınır")
-    SOR_SAYI_DOGRULAMA  — cevap anneye gitmeden önce doğrulama; ihlalde bir kez
-                          yeniden üretim (ihlal modele söylenir), yine ihlalde
-                          ihlalli cümle bloktaki karşılığıyla değiştirilir,
-                          karşılığı yoksa çıkarılır.
+    SOR_SAYI_DOGRULAMA  — cevap anneye gitmeden önce doğrulama. Değerler
+                          (dogrulama_modu):
+                            kapali (tanımsız)  hiçbir şey yapılmaz
+                            izle               cevap değişmez; log'a ihlal sayısı/türü
+                            duzelt ("1/true")  İKİNCİ ÇAĞRI YOK: ihlalli cümle bloktaki
+                                               karşılığıyla değişir; karşılık cevapta
+                                               zaten varsa ya da yoksa cümle çıkar
+                            yeniden            bir kez yeniden üretim (ihlal modele
+                                               söylenir), yine ihlalde duzelt — ölçüm
+                                               için (11–45 sn bekletiyordu)
 
 NEDEN (2026-10-12 incelemesi): model başka plan tiplerinin tablolarını ("dış 10
 + iç 35"), yatır-çık dizisini 13. günden önce ve uydurma artışları ("6-7 dk,
@@ -23,7 +29,9 @@ Rol çıkarımı engine.sayi_rol (denetim betiğiyle ortak, sezgisel).
 """
 from __future__ import annotations
 
+import os
 import re
+from datetime import timedelta
 from typing import Any
 
 from api.config import _bayrak
@@ -42,7 +50,9 @@ SISTEM_KURALI = (
 _TOL = 1e-6
 _MOTIVASYON_SAYILI = re.compile(r"ağlayan (?:bir )?(?:çocuk|bebek)|hafta sonra", re.IGNORECASE)
 _SAAT = re.compile(r"(?<![\d:.])(\d{1,2})[:.](\d{2})(?![\d])(?!\s*(?:dakika|dk|sn|saniye))")
-_CUMLE_SONU = re.compile(r"(?<=[.!?])\s+(?=\S)")
+# Sıra sayısındaki nokta ("3. günü") cümle sonu değildir.
+_CUMLE_SONU = re.compile(r"(?<=[.!?])(?<!\b\d\.)(?<!\b\d\d\.)(?<!\bör\.)(?<!\börn\.)"
+                         r"(?<!\bvb\.)(?<!\bvs\.)\s+(?=\S)")
 # "asla 5 dk altına inme", "en az 5 dk": gece bekleme TABANI. Taban, ilk bekleme
 # süresi değildir (o alan İlayda kararı bekliyor) — taban değeri gece yalnız bu
 # kalıpla geçer.
@@ -51,16 +61,123 @@ def _taban_ifadesi(cumle: str, taban: float) -> bool:
     return bool(re.search(rf"en az\s+{t}\s*(?:dk|dakika)|(?<![\d,.]){t}\s*(?:dk|dakika)\w*\s+"
                           rf"(?:altın|aşağı)", cumle, re.IGNORECASE))
 _BEKLE = re.compile(r"bekle", re.IGNORECASE)
+_GUNDEN_GUNE = re.compile(r"günden güne|her gün", re.IGNORECASE)
+_GERI_DALIS_BAGLAMI = re.compile(r"(?:ve )?(?:üzeri|üstü)[^.]*uyu|uyu\w*[^.]*(?:ve )?(?:üzeri|üstü)",
+                                 re.IGNORECASE)
+_KISA_ESIK_BAGLAMI = re.compile(r"\d\s*(?:dakika|dk)\w*\s+(?:az|kısa|altı)|altında kal|"
+                                r"\d\s*(?:dakika|dk)\w*\s+(?:veya|ya da)\s+(?:daha\s+)?(?:fazla|uzun)",
+                                re.IGNORECASE)
+# sayi_rol "45 dakika — en fazla 3 kez"i zincir sayıp 3'ü dakika okuyor (denetim
+# betiğinin davranışı korunur; Sor denetim kopyasında tire noktalı virgüle döner)
+_TIRE_EN_FAZLA = re.compile(r"\s*[—–-]\s*(?=en fazla\s+\d+\s*(?:kez|tekrar|kere|defa))", re.IGNORECASE)
 _GUNDUZ = re.compile(r"gündüz", re.IGNORECASE)
 _GECE = re.compile(r"gece", re.IGNORECASE)
+
+# --- Yazıyla sayılar: birimle geçtiğinde rakamla AYNI kurala girer ----------
+# ("beş dakika" → "5 dakika", "bir buçuk dakika" → "1,5 dakika", "yarım saat" →
+# "30 dakika"). "bir şey" gibi birimsiz kullanım sayılmaz. Çeviri yalnız
+# DENETİM kopyasında yapılır; anneye giden metin değişmez.
+_BIRLER = {"bir": 1, "iki": 2, "üç": 3, "dört": 4, "beş": 5, "altı": 6, "yedi": 7,
+           "sekiz": 8, "dokuz": 9}
+_ONLAR = {"on": 10, "yirmi": 20, "otuz": 30, "kırk": 40, "elli": 50, "altmış": 60,
+          "yetmiş": 70, "seksen": 80, "doksan": 90}
+_B, _O = "|".join(_BIRLER), "|".join(_ONLAR)
+_SOZ_SAYI = rf"(?:yüz\s+)?(?:(?:{_O})(?:\s+(?:{_B}))?|(?:{_B})|yüz)"
+_SAYIM_BIRIM = r"(?:gün|gece|kez|defa|hafta)"
+_YAZI = re.compile(rf"(?<!\w)({_SOZ_SAYI})(\s+buçuk)?(\s+)((?:dakika|dk\b|saniye|sn\b|saat|"
+                   rf"{_SAYIM_BIRIM})\w*)", re.IGNORECASE)
+_YARIM = re.compile(r"(?<!\w)(yarım|çeyrek)\s+(saat|dakika)\w*", re.IGNORECASE)
+# Sayımlar (rakam ya da çevrilmiş yazı): "2 gün", "3 kez", "1 hafta". Sıra
+# sayısı ("3. gün", "Gün 4") sayım değildir.
+_SAYIM = re.compile(rf"(?<![\d.,])(\d+(?:[.,]\d+)?)\s*({_SAYIM_BIRIM})\w*", re.IGNORECASE)
+_SAYIM_ROL = {"gün": "gun", "gece": "gun", "kez": "kez", "defa": "kez", "hafta": "hafta"}
+
+
+def _soz_deger(soz: str) -> float:
+    v = 0.0
+    for p in soz.replace("İ", "i").replace("I", "ı").lower().split():   # "İki" → "iki"
+        v += 100 if p == "yüz" else _ONLAR.get(p, 0) + _BIRLER.get(p, 0)
+    return v
+
+
+def yaziyi_rakama(metin: str) -> str:
+    def _yazi(m):
+        v = _soz_deger(m.group(1)) + (0.5 if m.group(2) else 0)
+        return f"{_sayi(v)}{m.group(3)}{m.group(4)}"
+    def _yarim(m):
+        tam = 60 if m.group(2).lower() == "saat" else 1
+        return f"{_sayi(tam * (0.5 if m.group(1).lower() == 'yarım' else 0.25))} dakika"
+    return _YAZI.sub(_yazi, _YARIM.sub(_yarim, metin))
+
+
+# --- Bekleyen alanda YÖN: "aynı gece her uyanmada bekleme artar" ------------
+# Gece içi artış İlayda kararı bekliyor → sayı da yön de yasak ("aynı gece içindeki
+# ARTIŞ için planınıza bakın" da artışı varsayar). Günden güne artış (tabloda
+# dolu) bu kalıba girmez: bağlam "uyanma / aynı gece" ister.
+_GECE_ICI = re.compile(r"(?:her|sonraki|ikinci|üçüncü|yeni|diğer)\s+(?:\w+\s+)?uyan\w*|aynı gece\w*|"
+                       r"gece içi\w*|gece içinde\w*|uyanmadan uyanmaya", re.IGNORECASE)
+_YON = re.compile(r"\bart(?:a|ı|ış|tı)\w*|uzat\w*|uzar\b|\bfazla\w*|çoğal\w*|azal\w*|kısal\w*|"
+                  r"kısalt\w*|aynı (?:kal|tut)\w*|bir öncekin\w*", re.IGNORECASE)
+_SURE_BAGLAMI = re.compile(r"bekle|süre", re.IGNORECASE)
+
+# --- 3 denemeden sonraki gece: tablo ne diyorsa o; yumuşatma ve suçlama yok ---
+_YUMUSATMA = re.compile(r"başarısızlık değil|başarısız say(?:ıl)?ma(?:z|ması|mak|yın)|"
+                        r"başarısız sayılmaz|bir hata değil|hata değildir|"
+                        r"ilk (?:\w+ )?gün\w* (?:bu )?esnek|esnektir|esnek(?:siniz| davran)",
+                        re.IGNORECASE)
+_YUMUSATMA_BAGLAMLI = re.compile(r"normal karşılanır|sorun değil|sorun olmaz|önemli değil|"
+                                 r"hiçbir şey (?:olmaz|kaybolmaz|kaybetmezsiniz)|neden olmaz|"
+                                 r"etkilemez|endişe etmeyin|merak etmeyin|korkmayın|nadir|olası değil|"
+                                 r"kaygı(?:lanmayın| kaynağı yapmayın)", re.IGNORECASE)
+_BASARISIZLIK_BAGLAMI = re.compile(r"başarısız|destek\w* (?:verip|vererek) uyut|mecburen|"
+                                   r"denemeden sonra|kez sonra|deneme de", re.IGNORECASE)
+_SUCLAMA = re.compile(r"(?:sizin|senin) (?:hatanız|hatan|suçunuz|suçun|yüzünüzden)|"
+                      r"hata yaptınız|yanlış yaptınız|tutarsız davrandınız|pes ettiniz|"
+                      r"yeterince (?:kararlı|sabırlı|tutarlı|ısrarcı) (?:değilsiniz|olmadınız|"
+                      r"davranmadınız)|siz (?:bozdunuz|alıştırdınız)", re.IGNORECASE)
+
+# --- Aşama: annenin yeri ---------------------------------------------------
+# Tablodaki merdiven.asamalar[].pozisyon metninin anneye dönük hâli.
+_YER = {
+    "besik_yani": "odada, beşiğin yanında (sandalyede ya da ayakta)",
+    "oda_ortasi": "odada, odanın ortasında (gerekirse temas edip yerinize dönersiniz)",
+    "kapi": "odanın içinde, kapının yanında; bebek sizi tam görür",
+    "kapi_esigi": "kapı eşiğinde; bebek sizi tam görür",
+    "yatir_cik": "yatırıp odadan çıkarsınız (yatır-çık)",
+}
+_ODADA = ("besik_yani", "oda_ortasi", "kapi")
+# Odada durulan aşamada "içeri girmeyin" çelişkidir — gece uyanmasındaki
+# dışarıda bekleme (uyanma / bekleme süresi bağlamı) hariç.
+_ICERI_GIRME = re.compile(r"içeri (?:girmeyin|girmeyiniz|girme\b)|odaya girmeyin|odadan çık(?:ın|ıp)|"
+                          r"odayı terk ed|odadan ayrıl", re.IGNORECASE)
+_GECE_UYANMA_BAGLAMI = re.compile(r"uyan|bekleme süre|plan\w* bak", re.IGNORECASE)
+_BESIK_YANINDA = re.compile(r"beşi(?:ğin|k)\w* yanında (?:otur|kal|dur)", re.IGNORECASE)
+
+# --- Gün adları: model hesaplamaz, blokta hazır ---------------------------
+_GUN_ADLARI = ("Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar")
+_GUN_ADI = re.compile(r"(?<!\w)(pazartesi|salı|çarşamba|perşembe|cumartesi|cuma|pazar)(?!\w)",
+                      re.IGNORECASE)
+# Sayı olmayan ihlal türleri (değer 0)
+METIN_ROLLERI = ("yon", "yumusatma", "suclama", "asama", "gun_adi", "gun_no")
 
 
 def blok_acik_mi() -> bool:
     return _bayrak(BLOK_BAYRAK)
 
 
+MODLAR = ("kapali", "izle", "duzelt", "yeniden")
+
+
+def dogrulama_modu() -> str:
+    """SOR_SAYI_DOGRULAMA değeri; her çağrıda env'den. Eski "1/true" → duzelt."""
+    v = (os.getenv(DOGRULAMA_BAYRAK) or "").strip().lower().replace("ü", "u")
+    if v in MODLAR:
+        return v
+    return "duzelt" if _bayrak(DOGRULAMA_BAYRAK) else "kapali"
+
+
 def dogrulama_acik_mi() -> bool:
-    return _bayrak(DOGRULAMA_BAYRAK)
+    return dogrulama_modu() != "kapali"
 
 
 def _ss(dk: int) -> str:
@@ -147,19 +264,69 @@ def kurallar(d: dict, baby: Any) -> dict | None:
     icerde = temas.get(asama["kod"], "bu aşamanın yöntemiyle (ayrıntı için planına bak)")
     icerde_sayili = asama["kod"] == "yatir_cik"                 # "on saniye – bir dakika"
 
+    # --- Takvim: gün adlarını model hesaplamaz ---------------------------------
+    from api.services.sor_baglam import AYLAR
+    bugun_t = d["gun"]
+    yarin_t, dun_t = bugun_t + timedelta(days=1), bugun_t - timedelta(days=1)
+    toplam = int(d.get("toplam") or asamalar[-1]["gun"][1])
+
+    def _t(gun_) -> str:
+        return f"{_GUN_ADLARI[gun_.weekday()]} {gun_.day} {AYLAR[gun_.month - 1]}"
+
+    def _gun_asama(n: int) -> str:
+        if n > toplam:
+            return "program tamamlanmış olur"
+        a = next((x for x in asamalar if x["gun"][0] <= n <= x["gun"][1]), asamalar[-1])
+        return f"eğitimin {n}. günü, aşama {a['ad']}"
+
+    app_gun = max(1, int(d["app_gun"] or 1))
+    if d["sabah_once"]:
+        takvim = (f"- Takvim (gün adlarını kendin hesaplama, YALNIZ buradan al): şu an "
+                  f"{_t(bugun_t)} gecesi, eğitimin {g}. gününün gecesi; sabah uyanınca "
+                  f"{_t(bugun_t)}: {_gun_asama(app_gun)}; yarın {_t(yarin_t)}: "
+                  f"{_gun_asama(app_gun + 1)}.")
+    else:
+        takvim = (f"- Takvim (gün adlarını kendin hesaplama, YALNIZ buradan al): bugün "
+                  f"{_t(bugun_t)}: {_gun_asama(app_gun)}; yarın {_t(yarin_t)}: "
+                  f"{_gun_asama(app_gun + 1)}.")
+
+    takvim_karsilik = ((f"Bu sabah uyanınca {_t(bugun_t)}: " if d["sabah_once"] else
+                        f"Bugün {_t(bugun_t)}: ") + f"{_gun_asama(app_gun)}; yarın {_t(yarin_t)}: "
+                       f"{_gun_asama(app_gun + 1)}.")
+    yer = _YER.get(asama["kod"], asama.get("pozisyon") or asama["ad"])
+    bekleyen = ["ilk bekleme süresi",
+                "aynı gece içinde bir uyanmadan ötekine bekleme süresinin değişimi"]
+    if 4 <= g_gunduz <= 12:
+        bekleyen.append("kısa gündüz uykusundaki dışarıda/içeride bekleme süreleri")
+    if asama["kod"] in ("kapi", "kapi_esigi"):
+        bekleyen.append("bu aşamada içeride temasın nasıl olacağı")
+
     satirlar = [
         f"BUGÜNÜN KURALLARI (süre ve sayıları YALNIZ buradan al; burada olmayan süre için "
         f"'planınıza bakın' de):",
         f"- Aşama: {asama['ad']} (eğitimin {g}. günü{', gece' if gece else ''}).",
+        takvim,
+        f"- Annenin yeri ({asama['ad']}; yatırırken ve içeri girdiğinde): {yer}. Bu aşamayla "
+        f"çelişen yönlendirme yapma"
+        + (" (ör. gece uyanmasındaki dışarıda bekleme dışında 'içeri girmeyin' deme)."
+           if asama["kod"] in _ODADA else "."),
         f"- Uykuya dalmazsa: {deneme} dk dene → uyumazsa {mola} dk rutin molası (çok dirençli "
         f"bebekte {mola_max} dk) → yeniden {deneme} dk; en fazla {tekrar} kez. {tekrar} kez "
         f"sonra gece: {sonrasi['gece']}; gündüz: {sonrasi['gunduz']}.",
+        f"- {tekrar} denemeden sonra da uyumayan GECE için tablodaki kural: {sonrasi['gece']}. "
+        f"Bunu aynen söyle: yumuşatma ('başarısızlık değil', 'ilk günler esnek' gibi deme), "
+        f"anneyi suçlama, tabloda olmayan bir sonuç (ör. ertesi günün nasıl değişeceği) ekleme.",
         f"- Gece uyanırsa: önce dışarıda bekle (ilk bekleme süresi ve aynı gece içindeki "
-        f"artış için planına bak); sonra içeride {icerde}, {akis['3_deneme_dk']} dk; uyumazsa "
-        f"odada {akis['4_rutin_dk']} dk rutin (beslenme yok); en fazla "
-        f"{akis['6_tekrar_en_fazla']} kez. Bekleme günden güne standart +{artis_std} dk, "
+        f"bekleme süreleri için planına bak); sonra içeri gir ve {akis['3_deneme_dk']} dk dene; "
+        f"uyumazsa odada {akis['4_rutin_dk']} dk rutin (beslenme yok); en fazla "
+        f"{akis['6_tekrar_en_fazla']} kez. İçerideyken: {icerde}. "
+        f"Bekleme günden güne standart +{artis_std} dk, "
         f"çok dirençli bebekte en az +{_sayi(artis_min * 60)} sn artar; önceki günle aynı ya "
-        f"da daha az olamaz; asla {taban} dk altına inmez.",
+        f"da daha az olamaz; asla {taban} dk altına inmez. Bu artış kuralı GÜNDEN GÜNEdir, "
+        f"aynı gecenin uyanmaları için değil.",
+        f"- Kararı bekleyen konular ({'; '.join(bekleyen)}): sayı da YÖN de söyleme. 'Aynı "
+        f"gece her uyanmada bekleme artar / azalır / aynı kalır' DEME; yalnız 'bunun için "
+        f"planınıza bakın' de.",
         f"- Kısa gündüz uykusu ({g_gunduz}. günün gündüz uykuları; uyku"
         f"{f' {kisa_esik} dk' if kisa_esik else ''} altında kalırsa): {kg_metin}. Bebek {geri_dalis} dk ve üzeri geri uyursa uzatma biter.",
         f"- Kucağa alma aralıkları: {' → '.join(_sayi(v) for v in kucak)} dk.",
@@ -185,6 +352,14 @@ def kurallar(d: dict, baby: Any) -> dict | None:
         "ic": kg_ic | ({1} if icerde_sayili else set()),
         "yatir_cik": yc_izinli,
         "kestirme": {30, 60},
+        # Sayımlar ("2 gün", "3 kez"): gün sayısı programdan/bugünden türeyenler;
+        # "kez" 1..tekrar (ve BEBEK VERİSİ'ndeki gece uyanma sayısı); hafta yok.
+        "gun": ({1, 3, toplam, g, g_gunduz, max(0, toplam - g),
+                 max(0, toplam - g_gunduz), app_gun, app_gun + 1}
+                | ({yc_21["gun"]} if yatir_cik_var else set())),
+        "kez": set(range(1, int(tekrar) + 1)) | ({int(baby.night_wakes)} if getattr(
+            baby, "night_wakes", None) else set()),
+        "hafta": set(),
     }
 
     # --- Saatler ve türeyen dakikalar ----------------------------------------
@@ -200,6 +375,10 @@ def kurallar(d: dict, baby: Any) -> dict | None:
             bloklar.append(int(b["start_minute"]))
             if b.get("end_minute") is not None:
                 bloklar.append(int(b["end_minute"]))
+    for m in [int(b["start_minute"]) for b in sched if b.get("start_minute") is not None]:
+        for once in {rutin["en_az"], rutin["en_fazla"], yontem.deger("bildirim.uyku_once_dk"),
+                     yontem.deger("bildirim.gece_rutin_once_dk")}:
+            saatler.add(_ss(m - int(once)))
     kest = (bant or {}).get("kestirme_protokolu") or {}
     for s in kest.get("saat_penceresi") or []:
         saatler.add(str(s))
@@ -220,8 +399,8 @@ def kurallar(d: dict, baby: Any) -> dict | None:
 
     # Rolü çıkarılamayan sayılar için serbest küme: bütün izinli değerler + türevler
     serbest = set(turev)
-    for v in izinli.values():
-        if isinstance(v, set):
+    for r, v in izinli.items():
+        if isinstance(v, set) and r not in ("gun", "kez", "hafta"):    # sayımlar dakika değil
             serbest |= {float(x) for x in v}
 
     karsilik = {
@@ -243,8 +422,27 @@ def kurallar(d: dict, baby: Any) -> dict | None:
     }
     karsilik["mola"] = karsilik["tekrar"] = karsilik["seans"]
     karsilik["motivasyon"] = "Ağlama sabit kalmaz, her gün azalır."
+    karsilik["yon"] = "Aynı gece içindeki bekleme süreleri için planınıza bakın."
+    karsilik["yumusatma"] = f"{tekrar} denemeden sonra da uyumazsa o gece {sonrasi['gece']}."
+    karsilik["asama"] = f"Bugün {asama['ad']} aşamasındasınız; yeriniz: {yer}."
+    # Karşılık cevapta zaten var mı (aynı bilgi iki kez geçmesin): sayısız
+    # karşılıklar için iz deseni; sayılılar için sayıların hepsi geçiyor mu.
+    izler = {
+        "yon": r"aynı gece[^.]*plan[^.]*bak|plan[^.]*bak[^.]*aynı gece",   # "planınızın gece bölümüne bakın"
+        "yumusatma": r"başarısız sayılır",
+        "asama": re.escape(asama["ad"].lower()),
+        "motivasyon": r"ağlama[^.]*(?:azal|sabit kalma)",
+    }
+    if not kg_dis:
+        izler["dis"] = izler["ic"] = r"gündüz[^.]*plan\w* bak|plan\w* bak[^.]*gündüz"
+    takvim_d = {"bugun": bugun_t.weekday(), "yarin": yarin_t.weekday(),
+                "dun": dun_t.weekday(), "sabah_once": bool(d["sabah_once"]),
+                "app_gun": app_gun, "gece_gun": g}
+    karsilik["gun_no"] = takvim_karsilik
     return {"gun": g, "gun_gunduz": g_gunduz, "gece": gece, "asama": asama, "blok": "\n".join(satirlar),
             "izinli": izinli, "serbest": serbest, "turev": turev, "taban": float(taban),
+            "takvim": takvim_d, "izler": izler, "kisa_esik": kisa_esik,
+            "geri_dalis": float(geri_dalis),
             "saatler": saatler, "karsilik": karsilik}
 
 
@@ -266,9 +464,17 @@ def _gece_akisi_uygun(rol: str, dk: float, kural: dict, cumle: str) -> bool:
 
 def _uygun(rol: str, dk: float, kural: dict, cumle: str = "") -> bool:
     gece = kural["gece"] and not _GUNDUZ.search(cumle)
+    esik = kural.get("kisa_esik")
+    if esik and abs(dk - esik) < _TOL and _KISA_ESIK_BAGLAMI.search(cumle):
+        return True                                    # "kısa uyku (60 dakikadan az)"
+    if abs(dk - kural.get("geri_dalis", -1)) < _TOL and _GERI_DALIS_BAGLAMI.search(cumle):
+        return True                                    # "5 dk ve üzeri geri uyursa uzatma biter"
     if abs(dk - kural["taban"]) < _TOL and _taban_ifadesi(cumle, kural["taban"]):
         return True                                    # "asla 5 dk altına inme" her bağlamda doğru
     if rol == "belirsiz":
+        artis = kural["izinli"]["artis"]
+        if _GUNDEN_GUNE.search(cumle) and artis[1] - _TOL <= dk <= artis[2] + _TOL:
+            return True                                # "bekleme günden güne 5 dk artar"
         if _BEKLE.search(cumle):
             # Bekleme cümlesinde rolü çıkmayan sayı bir bekleme süresi olmalı:
             # kucak aralığı (1,5 → 2 dk) ya da artış miktarı bekleme süresi değildir.
@@ -309,37 +515,152 @@ def _cumleler(satir: str) -> list[str]:
     return [c for c in _CUMLE_SONU.split(satir) if c.strip()]
 
 
-def cumle_ihlalleri(cumle: str, kural: dict) -> list[tuple[str, float]]:
+_GUN_NO = {ad.lower(): i for i, ad in enumerate(_GUN_ADLARI)}
+
+
+def _gun_adi_beklenen(cumle: str, bas: int, tk: dict) -> tuple[set[int], int | None]:
+    """Gün adının izinli değerleri ve (bağlam belliyse) doğrusu. Yakındaki
+    "yarın / bugün / dün" sözcüğüne bakılır; gece (sabah uyanışından önce)
+    "yarın" bugünün sabahını, "bugün" dünü (gecenin başladığı gün) de kapsar."""
+    on = cumle[max(0, bas - 30):bas].lower()
+    konum = {k: on.rfind(k) for k in ("yarın", "bugün", "dün")}
+    k, yer = max(konum.items(), key=lambda x: x[1])
+    gece = tk["sabah_once"]
+    if yer < 0:
+        return {tk["bugun"], tk["yarin"]} | ({tk["dun"]} if gece else set()), None
+    if k == "yarın":
+        return {tk["yarin"]} | ({tk["bugun"]} if gece else set()), tk["yarin"]
+    if k == "bugün":
+        return {tk["bugun"]} | ({tk["dun"]} if gece else set()), tk["bugun"]
+    return {tk["dun"]}, tk["dun"]
+
+
+_SIRA_GUN = re.compile(r"(?<![\d.,])(\d{1,2})\.\s*gün|\bgün\s+(\d{1,2})\b(?![.,]\d|\s*(?:dk|dakika|sn|saniye|saat))",
+                       re.IGNORECASE)
+_DAYANAK = re.compile(r"(?<!\w)(yarın|bugün|pazartesi|salı|çarşamba|perşembe|cumartesi|cuma|pazar)(?!\w)",
+                      re.IGNORECASE)
+
+
+def _gun_no_celisir(cumle: str, tk: dict) -> bool:
+    """"Yarın Salı, eğitimin 3. günü" gibi: sıra gün, ÖNCESİNDEKİ en yakın
+    dayanağın (gün adı / yarın / bugün) eğitim günüyle tutmuyor mu."""
+    app, gece = tk["app_gun"], tk["sabah_once"]
+    for m in _SIRA_GUN.finditer(cumle):
+        no = int(m.group(1) or m.group(2))
+        dayanaklar = list(_DAYANAK.finditer(cumle[:m.start()]))
+        if not dayanaklar:
+            continue
+        d = dayanaklar[-1].group(1).lower()
+        if d == "yarın":
+            izin = {app + 1} | ({app} if gece else set())
+        elif d == "bugün":
+            izin = {app} | ({tk["gece_gun"]} if gece else set())
+        else:
+            gno = _GUN_NO[d]
+            izin = ({app} | ({tk["gece_gun"]} if gece else set()) if gno == tk["bugun"] else
+                    {app + 1} if gno == tk["yarin"] else {app - 1} if gno == tk["dun"] else set())
+            if not izin:
+                continue                               # yanlış gün adı ayrıca gun_adi'dır
+        if no not in izin:
+            return True
+    return False
+
+
+def _metin_ihlalleri(cumle: str, kural: dict, onceki: str = "") -> list[tuple[str, float]]:
+    out: list[tuple[str, float]] = []
+    # Bekleyen alanda yön ("aynı gece her uyanmada bekleme artar")
+    temiz = re.sub(r"\b(?:en|birden) fazla", " ", cumle, flags=re.IGNORECASE)
+    if _GECE_ICI.search(temiz) and not re.search(r"günden güne", temiz, re.IGNORECASE):
+        for m in _YON.finditer(temiz):
+            if _SURE_BAGLAMI.search(temiz[max(0, m.start() - 50):m.end() + 50]):
+                out.append(("yon", 0.0))
+                break
+    # 3 denemeden sonraki gece: yumuşatma / suçlama
+    if _YUMUSATMA.search(cumle) or (_YUMUSATMA_BAGLAMLI.search(cumle)
+                                    and _BASARISIZLIK_BAGLAMI.search(onceki + " " + cumle)):
+        out.append(("yumusatma", 0.0))
+    if _SUCLAMA.search(cumle):
+        out.append(("suclama", 0.0))
+    # Aşamayla çelişen yönlendirme
+    kod = kural["asama"]["kod"]
+    if kod in _ODADA and _ICERI_GIRME.search(cumle) and not _GECE_UYANMA_BAGLAMI.search(cumle):
+        out.append(("asama", 0.0))
+    elif kod != "besik_yani" and _BESIK_YANINDA.search(cumle):
+        out.append(("asama", 0.0))
+    # Gün numarası, yanındaki gün adı / "yarın" / "bugün" ile tutmalı
+    if _gun_no_celisir(cumle, kural["takvim"]):
+        out.append(("gun_no", 0.0))
+    # Takvimle çelişen gün adı
+    for m in _GUN_ADI.finditer(cumle):
+        izin, _ = _gun_adi_beklenen(cumle, m.start(), kural["takvim"])
+        if _GUN_NO[m.group(1).lower()] not in izin:
+            out.append(("gun_adi", 0.0))
+    return out
+
+
+def cumle_ihlalleri(cumle: str, kural: dict, onceki: str = "") -> list[tuple[str, float]]:
+    """`onceki`: bir önceki cümle (yalnız yumuşatmanın başarısızlık bağlamı için)."""
     if cumle.strip() in {k for k in kural["karsilik"].values() if k}:
         return []                                      # bloğun kendi karşılık cümlesi
-    sayilar = sayi_rol.satir_sayilari(cumle)
-    if sayilar and _MOTIVASYON_SAYILI.search(cumle):
+    # Denetim kopyası: yazıyla sayılar rakama; "N defa" sayım kuralına (kez).
+    n = re.sub(r"(\d)\s*defa", r"\1 kez", yaziyi_rakama(cumle), flags=re.IGNORECASE)
+    n = _TIRE_EN_FAZLA.sub("; ", n)
+    sayilar = sayi_rol.satir_sayilari(n)
+    sayimlar = [(_SAYIM_ROL[m.group(2).lower()], float(m.group(1).replace(",", ".")))
+                for m in _SAYIM.finditer(n)]
+    if (sayilar or sayimlar) and _MOTIVASYON_SAYILI.search(n):
         # "İlk gün 45 dakika ağlayan bir çocuk iki hafta sonra 5 dakikada…" —
         # korpus istatistiği, plan sayısı değil; değerleri tesadüfen izinli olabilir.
-        return [("motivasyon", dk) for _, dk in sayilar]
-    ihlal = [(rol, dk) for rol, dk in sayilar if not _uygun(rol, dk, kural, cumle)]
-    for m in _SAAT.finditer(cumle):
+        return [("motivasyon", v) for _, v in sayilar + sayimlar]
+    ihlal = [(rol, dk) for rol, dk in sayilar if not _uygun(rol, dk, kural, n)]
+    ihlal += [(rol, v) for rol, v in sayimlar
+              if not _icinde(v, {float(x) for x in kural["izinli"][rol]})]
+    for m in _SAAT.finditer(n):
         saat = f"{int(m.group(1)):02d}:{m.group(2)}"
         if int(m.group(1)) < 24 and saat not in kural["saatler"]:
             ihlal.append(("saat", float(int(m.group(1)) * 60 + int(m.group(2)))))
-    return ihlal
+    return ihlal + _metin_ihlalleri(cumle, kural, onceki)
 
 
 def dogrula(metin: str, kural: dict) -> list[dict]:
     """İhlaller: [{rol, deger}] — METİN DÖNMEZ (log ve yeniden üretim notu için)."""
     out = []
+    onceki = ""
     for satir in (metin or "").splitlines():
         for c in _cumleler(satir):
-            out.extend({"rol": r, "deger": v} for r, v in cumle_ihlalleri(c, kural))
+            out.extend({"rol": r, "deger": v} for r, v in cumle_ihlalleri(c, kural, onceki))
+            onceki = c
     return out
+
+
+def ozet(ihlaller: list[dict]) -> str:
+    """Log için içeriksiz özet: 'n=3 tur=dis,saat'."""
+    turler = ",".join(dict.fromkeys(i["rol"] for i in ihlaller)) or "-"
+    return f"n={len(ihlaller)} tur={turler}"
+
+
+_METIN_ACIKLAMA = {
+    "yon": "kararı bekleyen konuda yön (ör. aynı gece her uyanmada bekleme artar)",
+    "yumusatma": "3 deneme sonrası gece kuralını yumuşatma",
+    "suclama": "anneyi suçlayan dil",
+    "asama": "bugünün aşamasıyla çelişen yönlendirme",
+    "gun_adi": "takvimle uyuşmayan gün adı",
+    "gun_no": "takvimle uyuşmayan eğitim günü numarası",
+}
 
 
 def duzeltme_notu(ihlaller: list[dict]) -> str:
     parcalar = []
     for i in ihlaller:
-        v = i["deger"]
-        parcalar.append(f"{i['rol']}: {_ss(int(v))}" if i["rol"] == "saat"
-                        else f"{i['rol']}: {_sayi(v)} dk")
+        v, rol = i["deger"], i["rol"]
+        if rol in _METIN_ACIKLAMA:
+            parcalar.append(_METIN_ACIKLAMA[rol])
+        elif rol == "saat":
+            parcalar.append(f"saat: {_ss(int(v))}")
+        elif rol in ("gun", "kez", "hafta"):
+            parcalar.append(f"{rol}: {_sayi(v)}")
+        else:
+            parcalar.append(f"{rol}: {_sayi(v)} dk")
     return ("DÜZELTME: Önceki cevabında 'BUGÜNÜN KURALLARI' bloğuyla uyuşmayan süre/sayı "
             "vardı (" + ", ".join(dict.fromkeys(parcalar)) + "). Bu cevapta süre ve "
             "sayıları YALNIZ o bloktan al; blokta karşılığı olmayan süre için 'planınıza "
@@ -349,30 +670,94 @@ def duzeltme_notu(ihlaller: list[dict]) -> str:
                if any(i["rol"] in ("dis", "gece_uyanma", "belirsiz") for i in ihlaller) else ""))
 
 
-def duzelt(metin: str, kural: dict) -> str:
-    """İhlalli cümleyi bloktaki karşılığıyla değiştir (aynı karşılık bir kez);
-    karşılığı yoksa cümleyi çıkar. Satır yapısı (madde işaretleri) korunur."""
+def _gun_adi_duzelt(cumle: str, kural: dict) -> str | None:
+    """Yanlış gün adını bağlamdaki doğrusuyla değiştir; bağlam yoksa None."""
+    tk = kural["takvim"]
+
+    def _f(m):
+        izin, dogru = _gun_adi_beklenen(cumle, m.start(), tk)
+        if _GUN_NO[m.group(1).lower()] in izin:
+            return m.group(0)
+        if dogru is None:
+            raise ValueError
+        ad = _GUN_ADLARI[dogru]
+        return ad if m.group(1)[0].isupper() else ad.lower()
+    try:
+        return _GUN_ADI.sub(_f, cumle)
+    except ValueError:
+        return None
+
+
+def _karsilik_var(rol: str, k: str, metin: str, kural: dict) -> bool:
+    """Karşılık cevabın geçerli kısmında zaten var mı (aynı bilgi iki kez geçmesin)."""
+    low = metin.lower()
+    if k.lower() in low:
+        return True
+    iz = kural.get("izler", {}).get(rol)
+    if iz:
+        return bool(re.search(iz, low))
+    sayilar = _degerler(re.sub(r"\([^)]*\)", " ", k))     # "(çok dirençli bebekte 30 dk)" isteğe bağlı
+    if not sayilar:
+        return False
+    return sayilar <= _degerler(metin) and ("planınıza bak" not in k
+                                            or bool(re.search(r"plan\w* bak", low)))
+
+
+def _degerler(metin: str) -> set[float]:
+    """Metindeki süre (dakikaya çevrilmiş) ve sayım değerleri."""
+    n = _TIRE_EN_FAZLA.sub("; ", yaziyi_rakama(metin))
+    return ({round(v, 3) for _, v in sayi_rol.satir_sayilari(n)}
+            | {round(float(m.group(1).replace(",", ".")), 3) for m in _SAYIM.finditer(n)}
+            | {round(float(x.replace(",", ".")), 3) for x in re.findall(r"(?<![\d:])\d+(?:,\d+)?(?![\d:])", n)})
+
+
+def duzelt_ayrinti(metin: str, kural: dict) -> tuple[str, int, int]:
+    """İhlalli cümleyi bloktaki karşılığıyla değiştir. Karşılık cevapta zaten
+    varsa (ya da bu düzeltmede bir kez kullanıldıysa) ya da karşılığı yoksa
+    cümle çıkar. Yanlış gün adı yerinde düzeltilir. Satır yapısı korunur.
+    Dönen: (metin, değiştirilen cümle sayısı, çıkarılan cümle sayısı)."""
+    satirlar = (metin or "").splitlines()
+    tum = [c for satir in satirlar for c in _cumleler(satir)]
+    onceki_of = {i: (tum[i - 1] if i else "") for i in range(len(tum))}
+    gecerli = " ".join(c for i, c in enumerate(tum) if not cumle_ihlalleri(c, kural, onceki_of[i]))
+    sira = 0
     kullanilan: set[str] = set()
+    degisen = cikan = 0
     yeni_satirlar = []
-    for satir in (metin or "").splitlines():
+    for satir in satirlar:
         onek = re.match(r"^(\s*(?:[-*•]|\d+\.)\s+)?", satir).group(0)
         govde = satir[len(onek):]
         parcalar = []
         for c in _cumleler(govde):
-            ihlal = cumle_ihlalleri(c, kural)
+            ihlal = cumle_ihlalleri(c, kural, onceki_of.get(sira, ""))
+            sira += 1
             if not ihlal:
                 parcalar.append(c)
                 continue
-            rol = ihlal[0][0]
+            if all(r == "gun_adi" for r, _ in ihlal):
+                duz = _gun_adi_duzelt(c, kural)
+                if duz is not None and not cumle_ihlalleri(duz, kural):
+                    parcalar.append(duz)
+                    degisen += 1
+                    continue
+            rol = next((r for r, _ in ihlal if r != "gun_adi"), ihlal[0][0])
             if kural["gece"] and rol in ("dis", "ic", "belirsiz") and not _GUNDUZ.search(c):
                 rol = "gece_uyanma"                    # gece bekleme cümlesi → gece akışı
             elif not kural["gece"] and rol == "gece_uyanma" and not _GECE.search(c):
                 rol = "dis"                            # gündüz "uyanırsa … bekle" → kısa gündüz
             k = kural["karsilik"].get(rol)
-            if k and k not in kullanilan:
+            if k and k not in kullanilan and not _karsilik_var(rol, k, gecerli, kural):
                 kullanilan.add(k)
+                gecerli += " " + k
                 parcalar.append(k)
+                degisen += 1
+            else:
+                cikan += 1
         if govde.strip() and not parcalar:
             continue                                   # satırın tamamı çıktı
         yeni_satirlar.append(onek + " ".join(parcalar) if parcalar else satir)
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(yeni_satirlar)).strip()
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(yeni_satirlar)).strip(), degisen, cikan
+
+
+def duzelt(metin: str, kural: dict) -> str:
+    return duzelt_ayrinti(metin, kural)[0]

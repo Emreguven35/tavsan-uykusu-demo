@@ -78,9 +78,11 @@ def gece_adimlari(asama_kod: str | None) -> list[dict]:
         {"metin": f"Sonra içeri girin, {icerde.format(dk=deneme)}."},
         {"metin": f"Uyumazsa odada {rutin} dakikalık kısa bir rutin yapın; rutinde beslenme olmasın."},
         {"metin": f"Sonra yeniden {deneme} dakika deneyin; bunu en fazla {tekrar} kez yapın."},
-        {"metin": "Yine uyumazsa destek vererek uyutun; bu gece başarısız sayılır, "
-                  "eğitime yarın devam edersiniz."
-                  if "destek" in gece_sonrasi else gece_sonrasi},
+        # Tablodaki sonuç aynen ("o gün başarısız sayılır"); tabloda olmayan bir
+        # sonuç ("yarın devam edersiniz") eklenmez.
+        {"metin": "Yine uyumazsa mecburen destek vererek uyutun; "
+                  f"{gece_sonrasi.split(';', 1)[1].strip()}."
+                  if "destek" in gece_sonrasi and ";" in gece_sonrasi else gece_sonrasi},
     ]
 
 

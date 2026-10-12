@@ -353,7 +353,8 @@ check("G) Çağrılar bayrak kapısının ardında (plans, notifier, chat)",
       and "yontemli = yontem_kart.acik_mi()" in _notif
       and "if yontemli else UYKU_ONCE_DK" in _notif and "if yontemli and adim == \"once\"" in _notif
       and "sor_kural.blok_acik_mi() or sor_kural.dogrulama_acik_mi()" in _chat
-      and "if kural and sor_kural.dogrulama_acik_mi()" in _chat)
+      and "mod = sor_kural.dogrulama_modu() if kural else \"kapali\"" in _chat
+      and "if mod != \"kapali\" and r.get(\"llm\")" in _chat)
 
 # =============================================================================
 print("\n" + "=" * 70)

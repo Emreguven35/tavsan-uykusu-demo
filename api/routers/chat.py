@@ -182,20 +182,30 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     soru = takma_ad.adi_gizle(req.message, gercek_ad, takma)
     r = chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx, **ek_param)
     cagrilar = [r]                    # maliyet: yapılan HER LLM çağrısı kaydedilir
-    # SOR_SAYI_DOGRULAMA: kurala aykırı sayı → bir kez yeniden üretim (ihlal modele
-    # söylenir) → yine aykırıysa cümle bloktaki karşılığıyla değişir/çıkar.
+    # SOR_SAYI_DOGRULAMA (sor_kural.dogrulama_modu): izle → yalnız log; duzelt →
+    # ikinci çağrı YOK, ihlalli cümle karşılığıyla değişir/çıkar; yeniden → bir kez
+    # yeniden üretim (ihlal modele söylenir), yine aykırıysa duzelt (ölçüm için).
+    # Log içeriksiz: sonuç + ihlal sayısı/türü + değişen/çıkan cümle sayısı.
     dogrulama = "-"
-    if kural and sor_kural.dogrulama_acik_mi() and r.get("llm"):
+    mod = sor_kural.dogrulama_modu() if kural else "kapali"
+    if mod != "kapali" and r.get("llm"):
         ihlal = sor_kural.dogrula(r["cevap"], kural)
-        dogrulama = "gecti"
-        if ihlal:
+        if not ihlal:
+            dogrulama = "gecti"
+        elif mod == "izle":
+            dogrulama = f"izle {sor_kural.ozet(ihlal)}"
+        elif mod == "duzelt":
+            r["cevap"], _deg, _cik = sor_kural.duzelt_ayrinti(r["cevap"], kural)
+            dogrulama = f"duzeltildi {sor_kural.ozet(ihlal)} degisen={_deg} cikan={_cik}"
+        else:
             r = chatbot._cevap_uret(soru, req.yas_bandi, baby_context=ctx, **ek_param,
                                     duzeltme_notu=sor_kural.duzeltme_notu(ihlal))
             cagrilar.append(r)
-            dogrulama = "yeniden"
+            dogrulama = f"yeniden {sor_kural.ozet(ihlal)}"
             if sor_kural.dogrula(r["cevap"], kural):
-                r["cevap"] = sor_kural.duzelt(r["cevap"], kural)
-                dogrulama = "duzeltildi"
+                r["cevap"], _deg, _cik = sor_kural.duzelt_ayrinti(r["cevap"], kural)
+                dogrulama = (f"duzeltildi {sor_kural.ozet(ihlal)} degisen={_deg} "
+                             f"cikan={_cik} cagri=2")
     r["cevap"] = takma_ad.adi_geri_koy(r["cevap"], takma, gercek_ad)
     _sure_ms = int((time.perf_counter() - _t0) * 1000)
 
