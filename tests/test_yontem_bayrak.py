@@ -12,6 +12,8 @@ Yöntem tablosu bayrakları — YONTEM_TABLOSU, SOR_KURAL_BLOGU, SOR_SAYI_DOGRUL
      düzeltme (karşılıkla değiştir / çıkar)
   F  Sohbet akışı (sahte model): gecti / yeniden / duzeltildi; düzeltme notu
      modele gider; her LLM çağrısı maliyete yazılır; log içeriksiz
+  G  Güvenlik ağı: kural bloğu / doğrulama / düzeltme / yeniden üretim hata
+     verirse cevap yine gider (bloksuz, doğrulamasız), hata loglanır
 
 Çalıştırma: python tests/test_yontem_bayrak.py
 """
@@ -866,6 +868,65 @@ cev, log = sor(H, BID, ["İkinci uyanmada 10 dakika bekleyin."], an2)
 check("F) Bayraklar kapalı: tek çağrı, blok yok, dogrulama=-",
       len(YUKLER) == 1 and "BUGÜNÜN KURALLARI" not in YUKLER[0]["messages"][-1]["content"]
       and "dogrulama=-" in log and cev == "İkinci uyanmada 10 dakika bekleyin.", (len(YUKLER), log))
+
+# =============================================================================
+# G — güvenlik ağı: kural bloğu ya da doğrulama patlarsa cevap yine gider
+# =============================================================================
+_hatalar: list[str] = []
+
+
+class _HataYakala(logging.Handler):
+    def emit(self, rec):
+        if rec.exc_info:
+            _hatalar.append(rec.getMessage())
+
+
+logging.getLogger("tavsan.chat").addHandler(_HataYakala())
+
+
+def _patlat(*a, **k):
+    raise RuntimeError("sahte hata")
+
+
+def _guvenli(ad, mod, yama, cevaplar, beklenen_cevap, beklenen_dogrulama, log_parca):
+    bayrak(SOR_KURAL_BLOGU=True, SOR_SAYI_DOGRULAMA=mod)
+    eski = {k: getattr(sor_kural, k) for k in yama}
+    for k, v in yama.items():
+        setattr(sor_kural, k, v)
+    _hatalar.clear()
+    CEVAPLAR[:] = list(cevaplar)
+    YUKLER.clear()
+    try:
+        with saat_sabitle(an2):
+            r = client.post("/api/v1/chat", headers=H, json={
+                "message": "Bebeğim gece uyandı, ağlıyor; ne kadar bekleyip içeri gireyim?",
+                "baby_id": BID})
+    finally:
+        for k, v in eski.items():
+            setattr(sor_kural, k, v)
+        bayrak()
+    log = [m for m in _loglar if m.startswith("chat: ")][-1]
+    check(f"G) {ad}: 200, cevap gitti, {beklenen_dogrulama}, hata loglandı",
+          r.status_code == 200 and r.json().get("answer") == beklenen_cevap
+          and beklenen_dogrulama in log and any(log_parca in h for h in _hatalar),
+          (r.status_code, r.text[:120], log, _hatalar))
+    return list(YUKLER)
+
+
+_y = _guvenli("Kural bloğu patladı → bloksuz, doğrulamasız", "duzelt",
+              {"kurallar": _patlat}, ["İkinci uyanmada 10 dakika bekleyin."],
+              "İkinci uyanmada 10 dakika bekleyin.", "dogrulama=-", "kural bloğu kurulamadı")
+check("G) Kural bloğu patladı → modele blok gitmedi",
+      bool(_y) and "BUGÜNÜN KURALLARI" not in _y[0]["messages"][-1]["content"], "")
+_guvenli("Doğrulama patladı (duzelt)", "duzelt", {"dogrula": _patlat},
+         ["İkinci uyanmada 10 dakika bekleyin."], "İkinci uyanmada 10 dakika bekleyin.",
+         "dogrulama=hata", "doğrulaması başarısız")
+_guvenli("Düzeltme patladı (duzelt)", "duzelt", {"duzelt_ayrinti": _patlat},
+         ["İkinci uyanmada 10 dakika bekleyin."], "İkinci uyanmada 10 dakika bekleyin.",
+         "dogrulama=hata", "doğrulaması başarısız")
+_guvenli("Yeniden üretim patladı (yeniden) → ilk cevap gider", "yeniden",
+         {"duzeltme_notu": _patlat}, ["İkinci uyanmada 10 dakika bekleyin."],
+         "İkinci uyanmada 10 dakika bekleyin.", "dogrulama=hata", "doğrulaması başarısız")
 
 # =============================================================================
 print("\n" + "=" * 70)
