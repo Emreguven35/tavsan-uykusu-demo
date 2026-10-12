@@ -380,6 +380,34 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
     rutin_saatleri = "; ".join(f"{_ss(m)} uykusu → rutine {_ss(m - rutin['en_fazla'])}–"
                                f"{_ss(m - rutin['en_az'])} arasında başla" for m in uyku_baslari)
     kestirme_dk = int(yontem.deger("kestirme.sure_dk"))
+    # Kestirme: standart 30 dk, açığa göre uzamaz; yatışı geciktirmiyorsa
+    # (başlangıçtan yatışa ≥ koşul dk) 60 dk. Plan bloğu varsa Sor onu söyler.
+    kestirme_max = int(yontem.deger("kestirme.en_fazla_dk"))
+    kestirme_kosul = int(yontem.deger("kestirme.uzatma_kosulu_yatisa_kalan_min_dk"))
+    kest_blok = next((b for b in sched0 if b.get("key") == plan_adapter.SEKERLEME_KEY
+                      and b.get("start_minute") is not None and b.get("end_minute") is not None), None)
+    kural_metni = (f"standart {kestirme_dk} dk; gündüz açığına göre UZAMAZ — amaç bebeğin uykuya dönmesi "
+                   f"(yatışa köprü); yalnız gece yatışını geciktirmiyorsa (kestirme başlangıcından yatışa "
+                   f"{kestirme_kosul} dk ya da fazlası kalıyorsa) {kestirme_max} dk olabilir")
+    if kest_blok is not None:
+        kb_bas, kb_bit = int(kest_blok["start_minute"]), int(kest_blok["end_minute"])
+        kest_sure = kb_bit - kb_bas
+        kest_izinli = {kestirme_dk, kest_sure}
+        kest_satir = (f"- Kestirme (şekerleme): bugünkü planda {_ss(kb_bas)}–{_ss(kb_bit)} ({kest_sure} dk); "
+                      f"süre dolunca bebek uyandırılır. Kural: {kural_metni}.")
+        kest_karsilik = (f"Bugünkü planda kestirme {_ss(kb_bas)}–{_ss(kb_bit)} arasında, {kest_sure} "
+                         f"dakikadır; süre dolunca uyandırılır.")
+    else:
+        pencere = ((bant or {}).get("kestirme_protokolu") or {}).get("saat_penceresi") or []
+        pen_bas = (int(pencere[0][:2]) * 60 + int(pencere[0][3:5])) if pencere else None
+        yatis_saati = next((int(b["start_minute"]) for b in sched0
+                            if b.get("type") == "sleep" and b.get("start_minute") is not None), None)
+        uzayabilir = (pen_bas is not None and yatis_saati is not None
+                      and yatis_saati - pen_bas >= kestirme_kosul)
+        kest_izinli = {kestirme_dk} | ({kestirme_max} if uzayabilir else set())
+        kest_satir = f"- Kestirme (şekerleme): bugünkü planda yok. Kural: {kural_metni}."
+        kest_karsilik = (f"Kestirme {kestirme_dk} dakikadır; gündüz açığına göre uzamaz, yalnız gece "
+                         f"yatışını geciktirmiyorsa {kestirme_max} dakika olabilir.")
     rutin_yeri = akis.get("5_rutin_yeri") or "oda içinde"
     yatir_cik_asama = asama["kod"] == "yatir_cik"
     bekleyen = ["ilk bekleme süresi",
@@ -430,8 +458,7 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
         f"- Rutin süresi: {rutin['en_az']}–{rutin['en_fazla']} dk. Rutin uyku saatinden ÖNCE biter: "
         f"başlangıcı = uyku saati − rutin süresi; uyku saatinde ya da sonrasında rutine başlatma."
         + (f" Bugün: {rutin_saatleri}." if rutin_saatleri else ""),
-        f"- Kestirme (şekerleme): {kestirme_dk} dk; gündüz açığına göre UZAMAZ — amaç açığı kapatmak "
-        f"değil, bebeğin uykuya dönmesi (yatışa köprü).",
+        kest_satir,
         "- Hitap: anneye HER ZAMAN 'siz' diye hitap et ('yapabilirsiniz'; 'yapabilirsin' değil).",
         (f"- Yatır-çık: dışarıda {' → '.join(str(v) for v in yc_dizi)} dk, en fazla "
          f"{'–'.join(str(v) for v in yc_max)} dk; {yc_21['gun']} gün hiç dalmazsa en fazla "
@@ -454,7 +481,7 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
         "dis": kg_dis,
         "ic": kg_ic | ({1} if icerde_sayili else set()),
         "yatir_cik": yc_izinli,
-        "kestirme": {kestirme_dk},
+        "kestirme": kest_izinli,
         # Sayımlar ("2 gün", "3 kez"): gün sayısı programdan/bugünden türeyenler;
         # "kez" 1..tekrar (ve BEBEK VERİSİ'ndeki gece uyanma sayısı); hafta yok.
         "gun": ({1, 3, toplam, g, g_gunduz, max(0, toplam - g),
@@ -536,8 +563,7 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
         f"{rutin['en_fazla']} dakika) kadar öncedir"
         + (f"; {_ss(_sonraki)} uykusu için rutine {_ss(_sonraki - rutin['en_fazla'])}–"
            f"{_ss(_sonraki - rutin['en_az'])} arasında başlayın." if _sonraki is not None else "."))
-    karsilik["kestirme"] = (f"Kestirme {kestirme_dk} dakikadır; gündüz açığına göre uzamaz, amacı "
-                            f"yatışa köprü olmasıdır.")
+    karsilik["kestirme"] = kest_karsilik
     karsilik["mola_tanimi"] = (f"{mola} dakikalık rutin molası bebekle odada yapılan kısa bir uyku "
                                f"rutinidir; beslenme olmaz.")
     uyk = (bant or {}).get("uyaniklik_penceresi_dk") or []

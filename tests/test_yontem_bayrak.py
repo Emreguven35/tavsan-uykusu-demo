@@ -671,15 +671,61 @@ check("V) Düzelt: rutin zamanı karşılığı (sonraki uyku için aralık); ka
       sor_kural.duzelt(_rz[0], k_g2g) == k_g2g["karsilik"]["rutin_zamani"]
       and "rutine" in k_g2g["karsilik"]["rutin_zamani"] and ihlal(k_g2g["karsilik"]["rutin_zamani"], k_g2g) == [],
       k_g2g["karsilik"]["rutin_zamani"])
-check("T) Tablo v0.3: kestirme 30 dk (İlayda 12 Ekim), açığa göre uzamaz",
+check("T) Tablo v0.3 kestirme: standart 30 (21 Eylül + 12 Ekim), açığa göre uzamaz, en fazla 60 "
+      "(21 Eylül), koşul yatışa ≥ 150 dk (yas_bantlari atfı)",
       _yontem.deger("kestirme.sure_dk") == 30 and _yontem.deger("kestirme.aciga_gore_uzamaz") is True
-      and any(k.get("tur") == "ilayda_12_ekim" for k in _yontem.kaynaklar("kestirme.sure_dk")))
-check("K) Kestirme: blok 30 dk der, açığa göre uzamaz",
-      "- Kestirme (şekerleme): 30 dk; gündüz açığına göre UZAMAZ" in k_g2g["blok"], k_g2g["blok"])
-check("V) Kestirme: '60 dakikalık kestirme' ihlal, '30 dakikalık kestirme yeterli' uygun",
-      ihlal("Gündüz açığı büyükse 60 dakikalık kestirme yaptırın.", k_g2g) == [("kestirme", 60.0)]
-      and ihlal("30 dakikalık kestirme yeterli.", k_g2g) == []
-      and ihlal(k_g2g["karsilik"]["kestirme"], k_g2g) == [])
+      and _yontem.deger("kestirme.en_fazla_dk") == 60
+      and _yontem.deger("kestirme.uzatma_kosulu_yatisa_kalan_min_dk") == 150
+      and {k.get("tur") for k in _yontem.kaynaklar("kestirme.sure_dk")} == {"ilayda_sesli_cevap", "ilayda_12_ekim"}
+      and _yontem.kaynaklar("kestirme.en_fazla_dk")[0]["tarih"] == "2026-09-21")
+
+
+def _kural_cizelgeli(bid, an, kestirme=None, yatis=None):
+    """Bugünkü çizelgeyi kontrollü kur: şekerleme bloğu (bas, bit) ekle/çıkar,
+    gece yatışı saatini değiştir; plan kaydına dokunmaz."""
+    db = SessionLocal()
+    try:
+        b = db.get(Baby, uuid.UUID(bid))
+        with saat_sabitle(an):
+            d = sor_baglam.gun_durumu(db, b)
+            sched = [dict(x) for x in plan_adapter.normalize_schedule((d["content"] or {}).get("schedule"))
+                     if x.get("key") != plan_adapter.SEKERLEME_KEY]
+            for x in sched:
+                if yatis is not None and x.get("type") == "sleep":
+                    x["start_minute"] = yatis
+            if kestirme:
+                sched.append({"key": plan_adapter.SEKERLEME_KEY, "type": "nap",
+                              "start_minute": kestirme[0], "end_minute": kestirme[1]})
+            d2 = dict(d, content=dict(d["content"] or {}, schedule=sched))
+            return sor_kural.kurallar(d2, b)
+    finally:
+        db.close()
+
+
+_an14 = G.replace(hour=14)
+_k60 = _kural_cizelgeli(BID, _an14, kestirme=(17 * 60, 18 * 60))
+_k30 = _kural_cizelgeli(BID, _an14, kestirme=(17 * 60, 17 * 60 + 30))
+check("K) Planda kestirme bloğu varsa blok onun saatini ve süresini söyler",
+      "- Kestirme (şekerleme): bugünkü planda 17:00–18:00 (60 dk); süre dolunca bebek uyandırılır." in _k60["blok"]
+      and "- Kestirme (şekerleme): bugünkü planda 17:00–17:30 (30 dk)" in _k30["blok"], _k60["blok"])
+check("V) Plan bloğu 60 dk: '60 dakikalık kestirme' uygun; plan bloğu 30 dk: 60 ihlal (Sor plana uyar)",
+      ihlal("Bugün 60 dakikalık kestirme yapın.", _k60) == []
+      and ihlal("Bugün 60 dakikalık kestirme yapın.", _k30) == [("kestirme", 60.0)]
+      and ihlal("Kestirme 30 dakikadır.", _k30) == [] and ihlal("Kestirme 30 dakikadır.", _k60) == [])
+check("V) Plan bloğu varken karşılık plan saatini söyler ve kendi doğrulamasından geçer",
+      _k60["karsilik"]["kestirme"] == "Bugünkü planda kestirme 17:00–18:00 arasında, 60 dakikadır; süre "
+                                     "dolunca uyandırılır." and ihlal(_k60["karsilik"]["kestirme"], _k60) == [])
+_kyok_uzun = _kural_cizelgeli(BID, _an14, yatis=20 * 60)        # 17:00 → 20:00 = 180 dk ≥ 150
+_kyok_kisa = _kural_cizelgeli(BID, _an14, yatis=19 * 60)        # 17:00 → 19:00 = 120 dk < 150
+check("K) Planda kestirme yoksa blok kuralın tamamını söyler",
+      "- Kestirme (şekerleme): bugünkü planda yok. Kural: standart 30 dk; gündüz açığına göre UZAMAZ — amaç "
+      "bebeğin uykuya dönmesi (yatışa köprü); yalnız gece yatışını geciktirmiyorsa (kestirme başlangıcından "
+      "yatışa 150 dk ya da fazlası kalıyorsa) 60 dk olabilir." in _kyok_uzun["blok"], _kyok_uzun["blok"])
+check("V) Plan bloğu yok: yatışa ≥150 dk kalabiliyorsa 60 uygun; kalamıyorsa 60 ihlal; 30 her zaman uygun",
+      ihlal("Yatışa vakit varsa 60 dakikalık kestirme olabilir.", _kyok_uzun) == []
+      and ihlal("Yatışa vakit varsa 60 dakikalık kestirme olabilir.", _kyok_kisa) == [("kestirme", 60.0)]
+      and ihlal("30 dakikalık kestirme yeterli.", _kyok_kisa) == []
+      and all(ihlal(k["karsilik"]["kestirme"], k) == [] for k in (_kyok_uzun, _kyok_kisa)))
 check("V) Yeni karşılıklar (yatis_dis, mola_tanimi) kendi doğrulamasından geçer",
       all(ihlal(k["karsilik"][r], k) == [] for k in (_k_yat, k_g2g, k_g8) for r in ("yatis_dis", "mola_tanimi")))
 
