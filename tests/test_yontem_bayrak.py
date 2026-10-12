@@ -619,6 +619,20 @@ check("V) Mola anne molası gibi: '15 dakikalık rutin molası alın: odadan ç�
       ("mola_tanimi", 0.0) in ihlal("15 dakikalık rutin molası alın: odadan çıkın, yüzünüzü yıkayın, su için.",
                                     _k_yat)
       and ihlal("15 dakikalık rutin molası verin; beslenme yok.", _k_yat) == [])
+check("V) Mola: olumsuz kalıp ('odadan çıkmadan', 'siz odadan çıkmıyorsunuz') doğru tanım, ihlal DEĞİL",
+      ihlal("Uyumazsa odadan çıkmadan 15 dakika rutin molası yapın.", _k_yat) == []
+      and ihlal("Rutin molasında besleme yok, siz odadan çıkmıyorsunuz.", _k_yat) == [])
+check("V) Mola: 'siz dinlenin diye değil, bebekle odada uyku hazırlığıdır' doğru tanım, ihlal DEĞİL",
+      ihlal("Önemli: rutin molası siz de dinlenin diye değil, bebekle odada yapılan kısa bir uyku "
+            "hazırlığıdır.", _k_yat) == [])
+check("V) Yumuşatma: '3 deneme sonunda destekle uyutuyorsunuz; bu o gece için geçerli bir sonuç' ihlal",
+      ihlal("3 deneme sonunda hâlâ uyumadıysa o geceyi destek vererek uyutuyorsunuz; bu o gece için "
+            "geçerli bir sonuç, yarın eğitime devam ediyorsunuz.", k_g3n) == [("yumusatma", 0.0)])
+check("V) Gündüz 'uyanmayı duyduğunuzda 10 dakika bekleyin, sonra 35 dakika' (2. gün kısa gündüz) uygun",
+      _sayisal(ihlal("Eğer 60 dakikadan kısa uyursa uyanmayı duyduğunuzda önce 10 dakika bekleyin, sonra "
+                     "odaya girin ve 35 dakika daha eşlik edin.", k_g2g)) == [],
+      ihlal("Eğer 60 dakikadan kısa uyursa uyanmayı duyduğunuzda önce 10 dakika bekleyin, sonra odaya girin "
+            "ve 35 dakika daha eşlik edin.", k_g2g))
 check("V) Saatli süre: '1-1,5 saat uyanıklık' (bant 3–4 sa) ihlal; '3-4 saat' ve '3,5 saat' uygun",
       ihlal("Yaşına uygun uyanıklık süresi 1-1,5 saat civarı.", k_g2g) == [("saat_sure", 60.0), ("saat_sure", 90.0)]
       and ihlal("Uyanıklık penceresi 3-4 saat.", k_g2g) == []

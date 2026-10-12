@@ -128,7 +128,8 @@ _YUMUSATMA = re.compile(r"başarısızlık değil|başarısız say(?:ıl)?ma(?:z
 _YUMUSATMA_BAGLAMLI = re.compile(r"normal karşılanır|sorun değil|sorun olmaz|önemli değil|"
                                  r"hiçbir şey (?:olmaz|kaybolmaz|kaybetmezsiniz)|neden olmaz|"
                                  r"etkilemez|endişe etmeyin|merak etmeyin|korkmayın|nadir|olası değil|"
-                                 r"kaygı(?:lanmayın| kaynağı yapmayın)", re.IGNORECASE)
+                                 r"kaygı(?:lanmayın| kaynağı yapmayın)|"
+                                 r"(?:geçerli|olağan|normal) bir sonuç", re.IGNORECASE)
 _BASARISIZLIK_BAGLAMI = re.compile(r"başarısız|destek\w* (?:verip|vererek) uyut|mecburen|"
                                    r"denemeden sonra|kez sonra|deneme de", re.IGNORECASE)
 _SUCLAMA = re.compile(r"(?:sizin|senin) (?:hatanız|hatan|suçunuz|suçun|yüzünüzden)|"
@@ -172,8 +173,9 @@ _DISARIDA_BEKLE = re.compile(r"dışar\w*[^.]{0,40}bekle|odanın dışında[^.]{
 _DIS_MESRU = re.compile(r"uyan|kısa (?:gündüz )?uyku|kısa uyur|kısa kal|altında kal|dakikadan (?:az|kısa)|"
                         r"dakikanın altında|yatır-çık|planınıza bak", re.IGNORECASE)
 # 15 dk rutin molası anne molası sanılmasın
-_MOLA_ANNE = re.compile(r"yüzünüzü yıka|su için|kahve|dinlenin|kendinize (?:zaman|vakit)|odadan çık|"
-                        r"nefes alın", re.IGNORECASE)
+# Olumsuz kalıp ("odadan çıkmadan", "çıkmıyorsunuz") doğru tanımdır, eşleşmez.
+_MOLA_ANNE = re.compile(r"yüzünüzü yıka|su için|kahve|dinlenin|kendinize (?:zaman|vakit)|"
+                        r"odadan çık(?:ın|ıp|arak|abilirsiniz)\b|nefes alın", re.IGNORECASE)
 # Saatli süreler: "2 saat", "1-1,5 saat", "2 saat 30 dakika"
 _SAAT_SURE = re.compile(r"(?<![\d:.,])(\d+(?:[.,]\d+)?)(?:\s*(?:[-–]|ile|ila|ya da|veya)\s*"
                         r"(\d+(?:[.,]\d+)?))?\s*saat\w*(?:\s+(\d+)\s*(?:dakika|dk)\w*)?", re.IGNORECASE)
@@ -588,6 +590,10 @@ def _uygun(rol: str, dk: float, kural: dict, cumle: str = "") -> bool:
     # Gece "dışarıda X dk / içeride Y dk" gece akışıdır (kısa gündüz değil).
     if gece and rol in ("dis", "ic", "gece_uyanma"):
         return _gece_akisi_uygun(rol, dk, kural, cumle)
+    # Gündüz "uyanınca 10 dk bekleyin" kısa gündüz uykusudur (gece akışı değil).
+    if not gece and rol == "gece_uyanma" and _icinde(
+            dk, set(kural["izinli"]["dis"]) | set(kural["izinli"]["ic"])):
+        return True
     if rol == "gece_uyanma" and abs(dk - kural["taban"]) < _TOL:
         return False                                   # taban kalıbı yukarıda; yoksa ilk bekleme sayılır
     if isinstance(izin, tuple):
@@ -691,7 +697,8 @@ def _metin_ihlalleri(cumle: str, kural: dict, onceki: str = "") -> list[tuple[st
             and not re.search(r"bekleme(?:yin|zsiniz|z)\b|bekleme yok|beklemek yok", cumle, re.IGNORECASE)):
         out.append(("yatis_dis", 0.0))
     # Rutin molası anne molası sanılmış
-    if re.search(r"mola", cumle, re.IGNORECASE) and _MOLA_ANNE.search(cumle):
+    if (re.search(r"mola", cumle, re.IGNORECASE) and _MOLA_ANNE.search(cumle)
+            and not re.search(r"\bdeğil", cumle, re.IGNORECASE)):   # "siz dinlenin diye değil" doğru tanım
         out.append(("mola_tanimi", 0.0))
     # Takvimle çelişen gün adı
     for m in _GUN_ADI.finditer(cumle):
