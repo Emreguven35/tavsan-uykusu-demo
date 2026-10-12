@@ -816,6 +816,12 @@ Kapalı gelir; kapalıyken hiçbir yanıt değişmez. Açıkken:
   yoksa aynı kimlik, koşullu metin); uyarı `yatakta_pelus_battaniye` (< 12 ay).
 - Mobil biçimi: ses `w:1`/`w:0` (eski veride `a:white_noise` ya da `w:1` →
   kullanıyor); oda `d:1`/`d:0` (eski veride `d` yok → cevapsız).
+- **Eğitim durumu (plan metni):** yeni üretilen eğitim planında ön hazırlık
+  bölümünün adı eğitimin durumuna göre değişir. Eğitim bugün başlıyorsa
+  `## Eğitimin ilk günü` (geçiş adımları bugünden başlanan adımlar olarak),
+  eğitim ortasında yeniden üretimde (`training_started_at` < bugün)
+  `## Eğitim sürerken` (geçiş adımları yok). Bekleme planında `## Ön Hazırlık`
+  aynen kalır. Geçiş adımları listesi: `hazirlik.GECIS_ADIMLARI`.
 
 ### Bitişi bilinmeyen kayıt (v2.8.2)
 

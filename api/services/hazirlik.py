@@ -157,6 +157,41 @@ UYARI_METINLERI: dict[str, tuple[str, str]] = {
         "12 aydan küçük bebeklerde güvenlik için. Mutlaka uyku tulumu kullan."),
 }
 
+# --- Eğitim durumuna göre plan bölümü (2026-10-12) ---------------------------
+# Plan istemi eğitimin durumunu bilir (bkz. plan_service.egitim_durumu):
+#   "ilk_gun"  — eğitim bugün başlıyor: bölüm "Eğitimin ilk günü", geçiş
+#                adımları BUGÜNDEN başlanacak adımlar olarak anlatılır.
+#   "suruyor"  — eğitim bugünden önce başladı (yeniden üretim): bölüm
+#                "Eğitim sürerken", GEÇİŞ adımları DÜŞER.
+# Bekleme ve yenidoğan planlarında durum yoktur, bölüm eskisi gibi.
+#
+# SINIF — TEK LİSTE (İlayda'nın cevabına göre burada değişir): geçiş
+# adımları. Listede olmayan her adım eğitim boyunca geçerli sayılır
+# (beslenme, emzik kullanımı, ses, oda, peluş uyarısı).
+GECIS_ADIMLARI = (
+    "emzirerek_uyutmayi_birak",
+    "sallamayi_birak",
+    "kucaktan_yataga",
+    "pusetten_kucaga_yataga",
+    "salincaktan_yataga",
+    "ortak_yataktan_besige",
+    "emzigi_birak",
+)
+EGITIM_DURUMU_BOLUM = {"ilk_gun": "Eğitimin ilk günü", "suruyor": "Eğitim sürerken"}
+# İlk gün metinleri: İlayda metninde eğitimi ERTELEYEN ifade geçen adımlar
+# ("Eğitimden önceki 3 gün…", "eğitime sonra başla") için bugünden başlanan
+# karşılığı. Diğer adımların metni aynen kalır. İLAYDA ONAYI BEKLİYOR.
+ILK_GUN_METINLERI = {
+    "emzirerek_uyutmayi_birak": (
+        "Bugünden itibaren emzirerek değil sallayarak uyut. Her gün sallamayı "
+        "kısalt, beklemeyi uzat: 1 dk salla 1 dk bekle, 50 sn salla 2 dk bekle, "
+        "40 sn salla 3 dk bekle."),
+    "ortak_yataktan_besige": (
+        "Bugünden itibaren kendi yatağında ya da beşiğinde uyut; geçişe gündüz "
+        "uykularıyla başla."),
+}
+
+
 _DESTEK_ADIMI = {"nursing": "emzirerek_uyutmayi_birak", "rocking": "sallamayi_birak",
                  "holding": "kucaktan_yataga", "stroller": "pusetten_kucaga_yataga"}
 _KONUM_ADIMI = {"swing": "salincaktan_yataga", "car_seat": "salincaktan_yataga",
@@ -201,12 +236,23 @@ def bebek_hazirligi(baby, yas_ay: float | None) -> dict:
 # ---------------------------------------------------------------------------
 # Kullanım yerleri
 # ---------------------------------------------------------------------------
-def on_hazirlik_listesi(baby, yas_ay: float | None) -> list[dict]:
+def on_hazirlik_listesi(baby, yas_ay: float | None,
+                        egitim_durumu: str | None = None) -> list[dict]:
     """Plan üretiminin ön hazırlık listesi (istem + yedek motor biçimi:
-    konu / sure / aksiyon). Kimlik de taşınır."""
+    konu / sure / aksiyon). Kimlik de taşınır.
+
+    egitim_durumu "suruyor": geçiş adımları düşer; "ilk_gun": geçiş adımları
+    bugünden başlanacak metinleriyle (ILK_GUN_METINLERI) gelir."""
     h = bebek_hazirligi(baby, yas_ay)
-    return ([{"kimlik": a["kimlik"], "konu": a["baslik"], "sure": "Öneri",
-              "aksiyon": a["aciklama"]} for a in h["adimlar"]]
+    adimlar = h["adimlar"]
+    if egitim_durumu == "suruyor":
+        adimlar = [a for a in adimlar if a["kimlik"] not in GECIS_ADIMLARI]
+    elif egitim_durumu == "ilk_gun":
+        adimlar = [dict(a, aciklama=ILK_GUN_METINLERI.get(a["kimlik"], a["aciklama"]))
+                   for a in adimlar]
+    sure = {"ilk_gun": "Bugünden", "suruyor": "Eğitim boyunca"}.get(egitim_durumu, "Öneri")
+    return ([{"kimlik": a["kimlik"], "konu": a["baslik"], "sure": sure,
+              "aksiyon": a["aciklama"]} for a in adimlar]
             + [{"kimlik": u["kimlik"], "konu": u["baslik"], "sure": "Güvenlik uyarısı",
                 "aksiyon": u["aciklama"]} for u in h["uyarilar"]])
 

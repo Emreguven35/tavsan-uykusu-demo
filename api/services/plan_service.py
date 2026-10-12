@@ -587,6 +587,17 @@ def istem_profili(profile: dict, param: dict, takma: str | None,
     return out
 
 
+def egitim_durumu(baby: Baby, param: dict, bugun: date) -> str | None:
+    """Üretilen plan için eğitim durumu: None (bekleme — eğitim bugün
+    uygulanmıyor), "ilk_gun" (eğitim bugün başlıyor: ilk plan, bekleme→eğitim
+    geçişi, aynı gün yeniden üretim) ya da "suruyor" (training_started_at
+    bugünden önce: eğitim ortasında yeniden üretim)."""
+    if not param.get("uygun_mu"):
+        return None
+    ts = baby.training_started_at
+    return "suruyor" if ts is not None and ts < bugun else "ilk_gun"
+
+
 def generate_content(baby: Baby, req_overrides: dict | None,
                      dogum_haftasi: int | None,
                      operation: str = usage.OP_PLAN_GENERATE) -> dict:
@@ -619,8 +630,17 @@ def generate_content(baby: Baby, req_overrides: dict | None,
     # hiçbir bebekte tetiklenmiyordu). Yalnız listeyi değiştirir; çizelge, uyarılar
     # ve eğitim başlangıcı aynı. Kapalıyken eski motorunki (bkz. hazirlik.py).
     if hazirlik.acik_mi():
+        # Eğitim durumu (2026-10-12): istem eğitimin bugün mü başladığını,
+        # sürüyor mu olduğunu bilir — "Ön Hazırlık" bölümü buna göre adlanır
+        # ve eğitim ortasındaki yeniden üretim "eğitime başlamadan önce"
+        # metnini geri getirmez. Bekleme planında durum yok (eskisi gibi).
+        durum = egitim_durumu(baby, param, bugun_tr())
         param["on_hazirlik"] = hazirlik.on_hazirlik_listesi(
-            baby, param["yas"]["duzeltilmis_ay"])
+            baby, param["yas"]["duzeltilmis_ay"], durum)
+        if durum is not None:
+            param["egitim_durumu"] = durum
+            param["egitim_gunu"] = (plan_adapter.egitim_gunu(
+                baby.training_started_at, bugun_tr()) if durum == "suruyor" else 1)
 
     used_claude = bool(os.getenv("ANTHROPIC_API_KEY")) and plan_generator.HAS_ANTHROPIC
     tip = param["plan_secimi"]["tip"]

@@ -223,7 +223,36 @@ def _gun_basliklari_blok(param: dict) -> str:
     return ("\n".join(satirlar) + "\n")
 
 
+def _hazirlik_bolumu(param: dict) -> tuple[str, str, str]:
+    """(istemdeki blok başlığı, bölüm satırı, ek talimat) — eğitim durumuna göre.
+
+    Durum yoksa (bayrak kapalı, bekleme planı) eskisinin BİREBİR aynısı."""
+    durum = param.get("egitim_durumu")
+    if durum == "ilk_gun":
+        return ("EĞİTİMİN İLK GÜNÜ — BUGÜNDEN BAŞLANACAK ADIMLAR",
+                "3. ## Eğitimin ilk günü (yukarıdaki adımlar, BUGÜNDEN başlanacak "
+                "adımlar olarak)",
+                "\nEĞİTİM DURUMU: Eğitim BUGÜN başlıyor (1. gün). Yukarıdaki "
+                "adımları eğitimle aynı gün, bugünden itibaren uygulanacak adımlar "
+                "olarak anlat. Planın HİÇBİR yerinde \"eğitime başlamadan önce\", "
+                "\"eğitimden önce\", \"1-3 gün içinde\", \"3-5 gün\", \"birkaç gün "
+                "önceden\" gibi eğitimi erteleyen ya da eğitim öncesi bir hazırlık "
+                "süresi öneren ifade KULLANMA; eğitimi bir hazırlık dönemine bağlama.\n")
+    if durum == "suruyor":
+        gun = param.get("egitim_gunu")
+        return ("EĞİTİM SÜRERKEN — EĞİTİM BOYUNCA GEÇERLİ ADIMLAR",
+                "3. ## Eğitim sürerken (yukarıdaki adımlar, eğitim boyunca)",
+                f"\nEĞİTİM DURUMU: Eğitim zaten sürüyor (bugün {gun}. gün); bu plan "
+                "eğitim ortasında yeniden hazırlanıyor. Yalnız eğitim boyunca "
+                "geçerli adımları yaz. Uyutma desteğini ya da uyku yerini "
+                "değiştirmeye yönelik geçiş/hazırlık adımı yazma. Planın HİÇBİR "
+                "yerinde \"eğitime başlamadan önce\", \"eğitimden önce\", \"1-3 gün "
+                "içinde\", \"3-5 gün\" gibi eğitim öncesine ait bir ifade KULLANMA.\n")
+    return "ÖN HAZIRLIK", "3. ## Ön Hazırlık (varsa gün gün)", ""
+
+
 def _build_user_prompt(param: dict) -> str:
+    hz_blok, hz_satir, hz_talimat = _hazirlik_bolumu(param)
     bir_ay_blok = _bir_ay_program_blok(param)
     yas_ozel_blok = _yas_ozel_blok(param)
     bekleme_blok = _egitim_baslangic_blok(param)
@@ -285,8 +314,8 @@ EĞİTİM UYGUNLUĞU:
 - Uyarılar:
 {chr(10).join(f"  - {u}" for u in param['uyarilar']) or "  (yok)"}
 
-ÖN HAZIRLIK:
-{_format_dict({"hazirliklar": param['on_hazirlik']})}
+{hz_blok}:
+{_format_dict({"hazirliklar": param['on_hazirlik']})}{hz_talimat}
 
 SEÇİLEN PLAN:
 - Tip: {param['plan_secimi']['tip']}
@@ -305,7 +334,7 @@ BEKLEME SÜRELERİ VE KADEMELİ UZAKLAŞMA:
 PLANIN İÇERMESİ GEREKEN BÖLÜMLER:
 1. ## Bebek Profili Özeti (yaş, beslenme, mevcut destek, oda durumu, kısa özet)
 2. ## Eğitim Uygunluğu (uygunsa "Uygun", değilse sebep ve hazırlık)
-3. ## Ön Hazırlık (varsa gün gün)
+{hz_satir}
 4. ## Günlük Program (saat saat — yaş bucket'ından gelen "ornek_gunluk_program_basit" varsa kullan; A kuralını uygula: başlık ibaresi + tablonun altına uyanıklık süresi açıklaması)
 5. ## Eğitim Planı (gün gün, plan_secimi['gunler'] kadar gün; F kuralı: her günün altına o güne uyarlanmış "Bu gün kısa gündüz uykusu olursa" ve "Bu gün yoğun direnç olursa (B Planı)" alt başlıkları — AYRI genel protokol bölümü AÇMA. Aşama başlıklarının biçimi için aşağıdaki GÜN BAŞLIKLARI kuralına birebir uy.)
 6. ## Gece Uyanmaları Protokolü
@@ -468,7 +497,9 @@ def _fallback_plan(param: dict) -> str:
 
     # Bölüm 3: Ön Hazırlık
     if param["on_hazirlik"]:
-        lines.append("## Ön Hazırlık")
+        lines.append("## " + {"ilk_gun": "Eğitimin ilk günü",
+                              "suruyor": "Eğitim sürerken"}.get(
+            param.get("egitim_durumu"), "Ön Hazırlık"))
         lines.append("")
         for h in param["on_hazirlik"]:
             lines.append(f"- **{h['konu']}** ({h['sure']}): {h['aksiyon']}")

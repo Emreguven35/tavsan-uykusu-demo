@@ -18,6 +18,11 @@ Kapsam:
       başlamış bebekte ve yenidoğanda null; training_started_at değişmiyor;
       eski ve yeni mobil biçimi aynı kartı (ses/oda farkı dışında) veriyor
   H6  Mevcut plan yeniden üretilmiyor (bayrağı açmak plan satırına dokunmaz)
+  H7  Eğitim durumu (2026-10-12): eğitim bugün başlıyorsa istem/yedek motor
+      bölümü "Eğitimin ilk günü", geçiş adımları bugünden başlanan metinle;
+      eğitim ortasında yeniden üretimde "Eğitim sürerken", geçiş adımları yok;
+      bekleme ve bayrak kapalı istem bölümü eskisinin aynısı; çizelge, gün
+      sayısı ve training_started_at değişmez
 
 Çalıştırma: python tests/test_hazirlik_kurallari.py
 """
@@ -239,8 +244,12 @@ _istem: list = []
 _eski_uret = plan_generator.plan_uret
 
 
+_paramlar: list = []
+
+
 def _yakala(param, **kw):
     _istem.append([dict(h) for h in param.get("on_hazirlik") or []])
+    _paramlar.append(dict(param))
     return _eski_uret(param, **kw)
 
 
@@ -284,9 +293,15 @@ check("H4b) Uyarı listeye 'Güvenlik uyarısı' olarak giriyor (4 ay, battaniye
       _on_bekleme[-1]["kimlik"] == "yatakta_pelus_battaniye"
       and _on_bekleme[-1]["sure"] == "Güvenlik uyarısı", _on_bekleme)
 _md = _p_acik[B_EGITIM]["content"]["markdown"]
-check("H4c) Yedek motor metninde Ön Hazırlık bölümü yeni başlıklarla",
-      "## Ön Hazırlık" in _md and "**Emzirerek uyutmayı bırak** (Öneri)" in _md
+check("H4c) Yedek motor: eğitim bugün başlıyor → 'Eğitimin ilk günü' bölümü",
+      "## Eğitimin ilk günü" in _md and "## Ön Hazırlık" not in _md
+      and "**Emzirerek uyutmayı bırak** (Bugünden)" in _md
+      and "Bugünden itibaren emzirerek değil sallayarak uyut" in _md
+      and "Eğitimden önceki 3 gün" not in _md and "eğitime sonra başla" not in _md
       and "**Beslenme uykudan en az 1 saat önce bitsin**" in _md, _md[:300])
+_md_b = _p_acik[B_BEKLEME]["content"]["markdown"]
+check("H4c) Yedek motor: bekleme planı bölümü eskisi gibi 'Ön Hazırlık' + 'Öneri'",
+      "## Ön Hazırlık" in _md_b and "(Öneri)" in _md_b, _md_b[:200])
 for b, ad in ((B_EGITIM, "eğitim"), (B_BEKLEME, "bekleme")):
     check(f"H4d) {ad}: plan şablonu çizelgesi bayrak kapalıyla aynı",
           _p_acik[b]["content"]["schedule"] == _p_kapali[b]["content"]["schedule"], "")
@@ -350,6 +365,59 @@ check("H5g) İleri tarihli training_started_at: kart o tarihi gösterir",
 bayrak(False)
 check("H5h) Bayrak tekrar kapalı: alan yok",
       "egitim_oncesi" not in bugun(B_BEKLEME)["content"], "")
+
+# =============================================================================
+# H7 — eğitim durumu: istem bölümü ve eğitim ortasında yeniden üretim
+# =============================================================================
+from api.services import plan_service                   # noqa: E402
+_pi = {p_.get("egitim_durumu"): p_ for p_ in _paramlar}
+_ist_ilk = plan_generator._build_user_prompt(_pi["ilk_gun"]) if "ilk_gun" in _pi else ""
+check("H7a) İstem (ilk gün): bölüm 'Eğitimin ilk günü', erteleme yasağı talimatı",
+      "3. ## Eğitimin ilk günü" in _ist_ilk and "EĞİTİMİN İLK GÜNÜ" in _ist_ilk
+      and "Eğitim BUGÜN başlıyor" in _ist_ilk and "3. ## Ön Hazırlık" not in _ist_ilk,
+      list(_pi))
+_ist_bek = plan_generator._build_user_prompt(_pi[None]) if None in _pi else ""
+check("H7b) İstem (bekleme, bayrak açık): bölüm satırı ve başlık eskisi gibi",
+      "3. ## Ön Hazırlık (varsa gün gün)" in _ist_bek and "\nÖN HAZIRLIK:\n" in _ist_bek
+      and "EĞİTİM DURUMU" not in _ist_bek, "")
+_ist_kap = plan_generator._build_user_prompt(
+    {k: v for k, v in _pi["ilk_gun"].items() if k not in ("egitim_durumu", "egitim_gunu")}
+) if "ilk_gun" in _pi else ""
+check("H7c) Durum yokken (bayrak kapalı yolu) istem bölümü eskisinin aynısı",
+      "3. ## Ön Hazırlık (varsa gün gün)" in _ist_kap and "EĞİTİM DURUMU" not in _ist_kap, "")
+
+bayrak(True)
+_ts_eski = BUGUN - timedelta(days=4)
+db = SessionLocal()
+db.get(Baby, uuid.UUID(B_EGITIM)).training_started_at = _ts_eski
+db.commit()
+db.close()
+_onceki_gun = len(_p_acik[B_EGITIM]["content"].get("days") or [])
+plan_sil(B_EGITIM)
+_paramlar.clear()
+_p5 = uret(B_EGITIM)
+_par5 = _paramlar[-1] if _paramlar else {}
+_on5 = [h["kimlik"] for h in _par5.get("on_hazirlik") or []]
+check("H7d) Eğitimin 5. günü: durum 'suruyor', gün 5",
+      _par5.get("egitim_durumu") == "suruyor" and _par5.get("egitim_gunu") == 5,
+      (_par5.get("egitim_durumu"), _par5.get("egitim_gunu")))
+check("H7e) 5. gün listesinde geçiş adımı YOK (yalnız eğitim boyunca geçerliler)",
+      _on5 == ["beslenme_1_saat", "emzik_kullanimi", "sesi_kademeli_kapat", "odayi_karart"]
+      and not set(_on5) & set(hazirlik.GECIS_ADIMLARI), _on5)
+_md5 = _p5["content"]["markdown"]
+_ist5 = plan_generator._build_user_prompt(_par5)
+check("H7f) Yedek motor + istem: 'Eğitim sürerken', geçiş başlığı yok",
+      "## Eğitim sürerken" in _md5 and "Emzirerek uyutmayı bırak" not in _md5
+      and "Önce beşiğe geç" not in _md5 and "3. ## Eğitim sürerken" in _ist5
+      and "bugün 5. gün" in _ist5, _md5[:300])
+check("H7g) Yeniden üretim: training_started_at ve gün sayısı değişmedi, çizelge aynı",
+      baby_alan(B_EGITIM, "training_started_at") == _ts_eski
+      and len(_p5["content"].get("days") or []) == _onceki_gun
+      and _p5["content"]["schedule"] == _p_kapali[B_EGITIM]["content"]["schedule"],
+      (baby_alan(B_EGITIM, "training_started_at"), _onceki_gun))
+check("H7h) egitim_durumu: bekleme → None",
+      plan_service.egitim_durumu(None, {"uygun_mu": False}, BUGUN) is None, "")
+bayrak(False)
 
 plan_generator.plan_uret = _eski_uret
 check("Z) Canlı LLM çağrısı yapılmadı", canli_cagri_sayisi() == 0, canli_cagri_sayisi())
