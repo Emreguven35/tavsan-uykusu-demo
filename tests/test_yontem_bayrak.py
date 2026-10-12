@@ -950,6 +950,29 @@ _DEVAM_KALAN = re.compile(r"içeri\s+gir\w*[^.]*devam|devam\s+ed", re.I)
 check("İ) Çelişen cümle: 'hepsi dışarıda'/13. gün olan hiçbir sonuçta 'içeri girip devam' kalmaz",
       not any(_DEVAM_KALAN.search(r) for r, c in zip(_celiski_sonuc, _celiski) if c[1] >= 7),
       _celiski_sonuc)
+# Gece numarası: kart ve Sor AYNI fonksiyondan (sor_baglam.gece_sayilan_gun). Gece,
+# başladığı akşama ait; gündüze dönüş Sor'un mevcut kuralı (sabah uyanışı).
+_HN, _BN = hesap(egitim_gunu_bugun=8)
+bayrak(YONTEM_TABLOSU=True)
+_kart_sor = {}
+for _ad, _an in (("22:00", G.replace(hour=22)),
+                 ("00:30", G.replace(hour=0, minute=30) + timedelta(days=1)),
+                 ("02:30", G.replace(hour=2, minute=30) + timedelta(days=1)),
+                 ("05:30", G.replace(hour=5, minute=30) + timedelta(days=1)),
+                 ("07:30", G.replace(hour=7, minute=30) + timedelta(days=1))):
+    with saat_sabitle(_an):
+        _kart = (bugunku(_HN, _BN, "1.0.0+28").get("night_wake_protocol") or {}).get("adimlar") or [{}]
+    _ks, _d = kural_al(_BN, _an)
+    _m1 = re.search(r"dışarıda (\d+) dakika bekleyin", _kart[0].get("metin") or "")
+    _m2 = re.search(r"önce dışarıda (\d+) dk bekle", (_ks or {}).get("blok") or "")
+    _kart_sor[_ad] = (int(_m1.group(1)) if _m1 else None, int(_m2.group(1)) if _m2 else None,
+                      sor_baglam.gece_sayilan_gun(_d))
+bayrak()
+for _ad, (_k, _s, _g) in _kart_sor.items():
+    check(f"İ) Gece numarası {_ad}: kart ve Sor aynı sayı (gece {_g})",
+          _k is not None and _k == _s == yontem_kart.gece_ilk_bekleme_dk(_g), (_k, _s, _g))
+check("İ) Gece numarası: 22:00 ve gece yarısından sonra (00:30, 02:30, 05:30) aynı gece (8. gece, 40 dk)",
+      all(_kart_sor[a][:2] == (40, 40) for a in ("22:00", "00:30", "02:30", "05:30")), _kart_sor)
 _p_kapali = bugunku(H, BID, "1.0.0+28")
 bayrak(YONTEM_TABLOSU=True)
 _p_acik = bugunku(H, BID, "1.0.0+28")

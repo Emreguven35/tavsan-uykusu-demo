@@ -50,6 +50,12 @@ def asama(training_started_at: date | None, training_completed_at: date | None,
     g = plan_adapter.egitim_gunu(training_started_at, gun)
     if g is None:
         return None
+    return asama_gunden(g)
+
+
+def asama_gunden(g: int) -> dict:
+    """Eğitim günü numarasından merdiven aşaması (egitim_gunu=g ile)."""
+    asamalar = yontem.deger("merdiven.asamalar")
     for a in asamalar:
         if a["gun"][0] <= g <= a["gun"][1]:
             return dict(a, egitim_gunu=g)
@@ -409,10 +415,14 @@ def kisa_gunduz_plan_duzelt(content: dict, baby: Any) -> tuple[dict, list[tuple[
     return c, tum
 
 
-def plan_icerigi_isle(content: dict | None, user: Any, baby: Any, gun: date) -> dict | None:
+def plan_icerigi_isle(content: dict | None, user: Any, baby: Any, gun: date,
+                      gece_gunu: int | None = None) -> dict | None:
     """_plan_yaniti'nda okuma anında çağrılır (bayrak açıkken). Önce kısa gündüz
     cümlesi düzelir; sonra kart (yoksa içerik o hâliyle döner). Build < 28 /
-    bilinmiyor → kart çıkarılır."""
+    bilinmiyor → kart çıkarılır.
+
+    `gece_gunu`: gecesi sayılan eğitim günü (sor_baglam.gece_sayilan_gun — Sor ile
+    aynı hesap; 02:30 → önceki akşamın gecesi). Verilmezse takvim günü `gun`."""
     if content:
         content, _ = kisa_gunduz_plan_duzelt(content, baby)
     if not content or "night_wake_protocol" not in content:
@@ -425,8 +435,11 @@ def plan_icerigi_isle(content: dict | None, user: Any, baby: Any, gun: date) -> 
         return c
     if not c.get("night_wake_protocol"):
         return c
-    a = asama(getattr(baby, "training_started_at", None),
-              getattr(baby, "training_completed_at", None), gun) if baby is not None else None
+    if gece_gunu is not None:
+        a = asama_gunden(gece_gunu)
+    else:
+        a = asama(getattr(baby, "training_started_at", None),
+                  getattr(baby, "training_completed_at", None), gun) if baby is not None else None
     c["night_wake_protocol"] = gece_karti(c["night_wake_protocol"], a)
     return c
 

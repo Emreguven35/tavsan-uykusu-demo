@@ -285,8 +285,8 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
     # Gece kuralları GECESİ SAYILAN günden (02:30 → önceki gün), gündüz kuralları
     # (kısa gündüz uykusu) uygulamanın gösterdiği günden: 02:30'da sabahki
     # gündüz uykuları YENİ günündür.
-    g = d["etkin_gun"] if d["sabah_once"] else d["app_gun"]
-    g = max(1, int(g or 1))
+    from api.services import sor_baglam
+    g = sor_baglam.gece_sayilan_gun(d)
     g_gunduz = max(1, int(d["app_gun"] or 1))
     gece = bool(d["gece"] or d["sabah_once"])
     asamalar = yontem.deger("merdiven.asamalar")
