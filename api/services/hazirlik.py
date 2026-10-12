@@ -176,9 +176,19 @@ GECIS_ADIMLARI = (
     "pusetten_kucaga_yataga",
     "salincaktan_yataga",
     "ortak_yataktan_besige",
-    "emzigi_birak",
+    # "emzigi_birak" 2026-10-12'de çıktı (İlayda): eğitim sürerken de listede
+    # kalır, metni SURUYOR_METINLERI'nden.
 )
 EGITIM_DURUMU_BOLUM = {"ilk_gun": "Eğitimin ilk günü", "suruyor": "Eğitim sürerken"}
+# "Eğitim sürerken" metinleri: geçiş adımı OLMAYAN ama eğitim sırasında farklı
+# anlatılan adımlar. İlayda, 12 Ekim: "1 dk bekledik taktık, 2 dk bekledik
+# taktık… her gün artacak. Emziği yavaş yavaş bırakarak başlarsa eğitim süresi
+# uzar."
+SURUYOR_METINLERI = {
+    "emzigi_birak": (
+        "Emziği tamamen kaldırdıysan geri verme; kademeli bırakıyorsan emziği "
+        "vermeden önceki bekleme süresini her gün 1 dakika artır."),
+}
 # İlk gün metinleri: İlayda metninde eğitimi ERTELEYEN ifade geçen adımlar
 # ("Eğitimden önceki 3 gün…", "eğitime sonra başla") için bugünden başlanan
 # karşılığı. Diğer adımların metni aynen kalır. İLAYDA ONAYI BEKLİYOR.
@@ -247,7 +257,8 @@ def on_hazirlik_listesi(baby, yas_ay: float | None,
     h = bebek_hazirligi(baby, yas_ay)
     adimlar = h["adimlar"]
     if egitim_durumu == "suruyor":
-        adimlar = [a for a in adimlar if a["kimlik"] not in GECIS_ADIMLARI]
+        adimlar = [dict(a, aciklama=SURUYOR_METINLERI.get(a["kimlik"], a["aciklama"]))
+                   for a in adimlar if a["kimlik"] not in GECIS_ADIMLARI]
     elif egitim_durumu == "ilk_gun":
         adimlar = [dict(a, aciklama=ILK_GUN_METINLERI.get(a["kimlik"], a["aciklama"]))
                    for a in adimlar]

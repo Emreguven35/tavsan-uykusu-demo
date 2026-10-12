@@ -28,6 +28,9 @@ Kapsam:
       sürerken / tamamlandı → bölüm yok); /plans/today, /plans, /plans/{tarih}
       hepsinde; DB'ye yazılmaz; bayrak kapalıyken metin aynen; "## Eğitim
       Planı", günler, çizelge değişmez; bekleme planı değişmez
+  H9  Emziği bırakma (İlayda, 12 Ekim): geçiş adımı DEĞİL — eğitim sürerken de
+      listede, kendi metniyle; ilk gün metni ve kime çıktığı (8 aydan küçük,
+      emzik) aynı
 
 Çalıştırma: python tests/test_hazirlik_kurallari.py
 """
@@ -522,6 +525,31 @@ check("H8h) Bekleme planı: metin DB'deki gibi aynen",
 bayrak(False)
 check("H8i) Bayrak tekrar kapalı: eski metin aynen geri",
       bugun(B_EGITIM)["content"]["markdown"] == _eski_md, "")
+
+# =============================================================================
+# H9 — emziği bırakma adımı eğitim sürerken de
+# =============================================================================
+from types import SimpleNamespace as _NS                      # noqa: E402
+_b22 = _NS(sleep_method="rocking", sleep_environment="loc:swing;a:pacifier;d:1")
+_sur = {h["kimlik"]: h for h in hazirlik.on_hazirlik_listesi(_b22, 7.0, "suruyor")}
+_ilk = {h["kimlik"]: h for h in hazirlik.on_hazirlik_listesi(_b22, 7.0, "ilk_gun")}
+check("H9a) Geçiş listesinde emzigi_birak YOK", "emzigi_birak" not in hazirlik.GECIS_ADIMLARI, "")
+check("H9b) Eğitim sürerken (7 ay, emzik): adım var, yeni metin",
+      list(_sur) == ["beslenme_1_saat", "emzigi_birak"]
+      and _sur["emzigi_birak"]["aksiyon"] == ("Emziği tamamen kaldırdıysan geri verme; "
+                                              "kademeli bırakıyorsan emziği vermeden önceki "
+                                              "bekleme süresini her gün 1 dakika artır."),
+      list(_sur))
+check("H9c) İlk gün metni aynı (İlayda'nın ilk metni)",
+      _ilk["emzigi_birak"]["aksiyon"] == hazirlik.ADIM_METINLERI["emzigi_birak"][1], "")
+check("H9d) Kime çıktığı aynı: 8 ay ve üstünde emzigi_birak yok, emzik_kullanimi var",
+      [h["kimlik"] for h in hazirlik.on_hazirlik_listesi(_b22, 8.0, "suruyor")]
+      == ["beslenme_1_saat", "emzik_kullanimi"]
+      and "emzigi_birak" not in [h["kimlik"] for h in hazirlik.on_hazirlik_listesi(
+          _NS(sleep_method="rocking", sleep_environment="loc:own_bed;d:1"), 7.0, "suruyor")], "")
+check("H9e) Durum yokken (bayrak kapalı / bekleme) metin değişmedi",
+      {h["kimlik"]: h["aksiyon"] for h in hazirlik.on_hazirlik_listesi(_b22, 7.0)}
+      ["emzigi_birak"] == hazirlik.ADIM_METINLERI["emzigi_birak"][1], "")
 
 plan_generator.plan_uret = _eski_uret
 check("Z) Canlı LLM çağrısı yapılmadı", canli_cagri_sayisi() == 0, canli_cagri_sayisi())
