@@ -8,6 +8,7 @@ Sayısal değerler ASLA LLM'den gelmez (deterministik):
     → master_knowledge_base.json.
 """
 import json
+import os
 import re
 from datetime import datetime, date
 from pathlib import Path
@@ -571,6 +572,29 @@ def _baslikla(anahtar: str) -> str:
     return anahtar.replace("_", " ").strip().capitalize()
 
 
+def _kisa_gunduz_13_yontem() -> str | None:
+    """13 günlük planın kısa gündüz kuralı yöntem tablosundan (v0.4) — yalnız
+    YONTEM_TABLOSU açıkken; kapalıyken None (eski metin kalır)."""
+    if (os.getenv("YONTEM_TABLOSU") or "").strip().lower() not in ("1", "true", "yes", "on"):
+        return None
+    from engine import yontem
+    g13 = yontem.deger("kisa_gunduz.gun_1_3_dis_ic_dk")
+    p = yontem.deger("kisa_gunduz.gun_4_12_dis_ic_dk")
+    toplam, artis, ust = int(p["toplam_dk"]), int(p["gunluk_dis_artis_dk"]), int(p["dis_ust_sinir_dk"])
+    gunler = []
+    for g in range(4, 13):
+        dis = min(ust, int(g13["gun_3"]["dis"]) + artis * (g - 3))
+        gunler.append(f"Gün {g}: {dis}+{toplam - dis}" if dis < toplam else f"Gün {g}: {dis} (hepsi dışarıda)")
+        if dis >= ust:
+            gunler[-1] = f"Gün {g}'dan itibaren {dis} dk'nın hepsi dışarıda"
+            break
+    return (f"Gün 1: dış {g13['gun_1']['dis']} dk + iç {g13['gun_1']['ic']} dk. "
+            f"Gün 2: {g13['gun_2']['dis']}+{g13['gun_2']['ic']}. Gün 3: {g13['gun_3']['dis']}+{g13['gun_3']['ic']}. "
+            f"4. günden itibaren dış süre her gün {artis} dk artar, iç süre {toplam} dakikadan kalan: "
+            + ", ".join(gunler) + f". Toplam her seferinde {toplam} dk; dışarıdaki süre bitince içeri "
+            f"girilip o günün pozisyonundan devam edilir.")
+
+
 def bekleme_sureleri_planla(plan_tipi: str) -> dict:
     """Bekleme sürelerini plan tipine göre belirle."""
     if plan_tipi == "13_gun_dirençli":
@@ -583,6 +607,9 @@ def bekleme_sureleri_planla(plan_tipi: str) -> dict:
         }
         # 13 günlük dirençli planda kısa gündüz uykusunda dışarıda bekleme daha kısa kademelenir.
         kisa_gunduz = "Dış bekleme kademesi: 1 dakika → 1,5 dakika → 2 dakika (içeri girince o günün pozisyonundan beklemeye devam, toplam ~45 dk hedefi)."
+        # YONTEM_TABLOSU (İlayda 12 Ekim, tablo v0.4): 5+40 / 10+35 / 15+30, sonra dış her
+        # gün +5, iç = 45 − dış. Bayrak kapalıyken metin AYNEN yukarıdaki.
+        kisa_gunduz = _kisa_gunduz_13_yontem() or kisa_gunduz
     elif plan_tipi == "6_gun_buyuk_cocuk":
         kademeli_yer = {
             "gun_1_2": "Yatak yanı",
