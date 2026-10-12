@@ -329,7 +329,7 @@ _rapor_eski = den.rapor([{"content": dict(_icerik, plan_secimi={"tip": "6_gun_bu
 check("D) Tablo dışı plan tipi karşılaştırılmaz", "tablo dışı plan tipi" in _rapor_eski)
 
 # =============================================================================
-# G — hiçbir uç/iş tabloyu okumuyor
+# G — tabloyu yalnız bayraklı iki modül okur; çağrıları bayrak kapısının ardında
 # =============================================================================
 _okuyan = []
 for kok in ("api", "engine", "app.py", "pages"):
@@ -341,8 +341,19 @@ for kok in ("api", "engine", "app.py", "pages"):
         metin = f.read_text(encoding="utf-8", errors="replace")
         if re.search(r"\bimport\s+yontem\b|from\s+engine\s+import\s+[^\n]*\byontem\b|engine\.yontem\b|yontem_tablosu",
                      metin):
-            _okuyan.append(str(f.relative_to(ROOT)))
-check("G) api/, engine/, app.py, pages/ içinde tabloyu okuyan kod yok", not _okuyan, _okuyan)
+            _okuyan.append(f.relative_to(ROOT).as_posix())
+check("G) Tabloyu yalnız yontem_kart (YONTEM_TABLOSU) ve sor_kural (SOR_KURAL_BLOGU/"
+      "SOR_SAYI_DOGRULAMA) okur",
+      sorted(_okuyan) == ["api/services/sor_kural.py", "api/services/yontem_kart.py"], _okuyan)
+_plans = (ROOT / "api/routers/plans.py").read_text(encoding="utf-8")
+_notif = (ROOT / "api/services/notifier.py").read_text(encoding="utf-8")
+_chat = (ROOT / "api/routers/chat.py").read_text(encoding="utf-8")
+check("G) Çağrılar bayrak kapısının ardında (plans, notifier, chat)",
+      re.search(r"if yontem_kart\.acik_mi\(\):\s*\n\s*try:\s*\n\s*resp\.content = yontem_kart\.plan_icerigi_isle", _plans)
+      and "yontemli = yontem_kart.acik_mi()" in _notif
+      and "if yontemli else UYKU_ONCE_DK" in _notif and "if yontemli and adim == \"once\"" in _notif
+      and "sor_kural.blok_acik_mi() or sor_kural.dogrulama_acik_mi()" in _chat
+      and "if kural and sor_kural.dogrulama_acik_mi()" in _chat)
 
 # =============================================================================
 print("\n" + "=" * 70)

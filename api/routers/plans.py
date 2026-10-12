@@ -26,7 +26,7 @@ from api.schemas.plan import (
     PlanAdaptResp, PlanGenerateReq, PlanJobResp, PlanJobStatusResp, PlanResp,
     RegresyonCevapReq, RegresyonCevapResp,
 )
-from api.services import hazirlik, plan_adapter, plan_jobs, plan_service
+from api.services import hazirlik, plan_adapter, plan_jobs, plan_service, yontem_kart
 from api.zaman import bugun_tr, tr_gunu
 
 logger = logging.getLogger("tavsan.plans")
@@ -66,6 +66,15 @@ def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
         except Exception:
             logger.exception("Hazırlık bölümü dönüştürülemedi (plan=%s) — "
                              "saklanan metin dönüyor", plan.id)
+    # YONTEM_TABLOSU — gece kartı v2 (okuma anında; DB'ye yazılmaz). Build < 28
+    # istekte kart hiç gönderilmez (eski uygulama "45 dk bekle" yazıyor).
+    if yontem_kart.acik_mi():
+        try:
+            resp.content = yontem_kart.plan_icerigi_isle(
+                resp.content, user, db.get(Baby, plan.baby_id), referans or plan.plan_date)
+        except Exception:
+            logger.exception("Gece kartı v2 kurulamadı (plan=%s) — saklanan kart "
+                             "dönüyor", plan.id)
     icerik, kilitli = erisim.plan_icerigi_kilitle(resp.content or {}, premium)
     if kilitli:
         resp.content = icerik

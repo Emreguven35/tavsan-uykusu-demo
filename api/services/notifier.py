@@ -40,7 +40,7 @@ from api.models import (
     Baby, PushToken, SentNotification, SleepLog, SleepPlan, User,
 )
 from api.models.user import DEFAULT_NOTIFICATION_PREFS
-from api.services import plan_adapter, plan_service
+from api.services import plan_adapter, plan_service, yontem_kart
 
 logger = logging.getLogger("tavsan.notifier")
 
@@ -556,7 +556,11 @@ def _uyku_dizisi(db: Session, user: User, baby: Baby, plan: SleepPlan,
             continue
         bas = int(blok["start_minute"])
         sinif = "gece" if blok.get("type") == "sleep" else "gunduz"
-        for adim, dk in (("once", bas - UYKU_ONCE_DK), ("zaman", bas),
+        # YONTEM_TABLOSU: gece rutin hatırlatması 15 dk (İlayda 25 Eylül), gündüz
+        # 30 dk — tablodan. Kapalıyken ikisi de UYKU_ONCE_DK.
+        yontemli = yontem_kart.acik_mi()
+        once = yontem_kart.once_dk(sinif) if yontemli else UYKU_ONCE_DK
+        for adim, dk in (("once", bas - once), ("zaman", bas),
                          ("sonra", bas + UYKU_SONRA_DK)):
             if not _vakti_geldi(dk, now_minute, kayma) or sessiz_saat(dk % 1440):
                 continue
@@ -577,6 +581,8 @@ def _uyku_dizisi(db: Session, user: User, baby: Baby, plan: SleepPlan,
                 stats["uyku_kota"] = stats.get("uyku_kota", 0) + 1
                 return
             baslik, govde = DIZI_METIN.get((adim, sinif)) or DIZI_METIN[(adim, None)]
+            if yontemli and adim == "once":
+                govde = yontem_kart.once_govde(sinif)
             _gonder(db, user, baby, plan, key, DIZI_KATEGORI[adim],
                     baslik.format(ad=ad), govde.format(ad=ad, ad_i=belirtme_hali(ad)),
                     stats,
