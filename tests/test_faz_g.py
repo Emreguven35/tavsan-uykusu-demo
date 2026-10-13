@@ -223,9 +223,13 @@ def test_g3():
         # ve bu dosya BETA_MODE'u bilerek KAPALI tutuyor (G5 "source=none"
         # bekliyor). Burada olcmek istedigimiz sey SAHIPLIK kontrolu, o yuzden
         # kullaniciya gercek bir abonelik veriliyor.
+        # 2026-10-13: bitişi boş mağaza kaydı erişim vermez → süreli ücretli dönem.
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
         dbs.add(Subscription(user_id=uid, platform="ios",
                              product_id="premium_monthly", status="active",
-                             receipt_data="A1b2C3realbase64receiptdata=="))
+                             receipt_data="A1b2C3realbase64receiptdata==",
+                             period_type="NORMAL",
+                             expires_at=_dt.now(_tz.utc) + _td(days=30)))
         dbs.commit()
     finally:
         dbs.close()
@@ -310,7 +314,10 @@ def test_g4():
 def test_g5():
     tok = _register("g5_user@example.com")
 
-    # Mock makbuz → 400
+    # Mock makbuz → 400 (2026-10-13: sahte makbuz YALNIZ production dışında test
+    # kaydı yazar; production'da reddedilir). Boş makbuz her ortamda 400.
+    from api.config import get_settings as _gs
+    _gs().is_production = True
     for rd in ("dev_receipt_123", "mock_receipt", "test_abc", "   "):
         r = client.post("/api/v1/subscriptions/verify", headers=_auth(tok),
                         json={"platform": "ios", "product_id": "premium_monthly",
@@ -318,6 +325,7 @@ def test_g5():
         # "   " min_length=1 geçer ama strip sonrası boş → 400
         check(f"G5.1 mock/boş makbuz reddi ({rd.strip() or 'bosluk'}) → 400",
               r.status_code == 400, f"status={r.status_code}")
+    _gs().is_production = False
 
     # /status: abonelik yokken premium=false/none
     st0 = client.get("/api/v1/subscriptions/status", headers=_auth(tok))
@@ -327,10 +335,18 @@ def test_g5():
           == {"premium": False, "source": "none"},
           str(st0.json()))
 
-    # Gerçek görünen makbuz → active
+    # Gerçek görünen makbuz → durum RevenueCat'ten (istemci makbuzu karar vermez).
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from api.services import premium as _psvc
+    _eski_cek = _psvc.musteri_cek
+    _psvc.musteri_cek = lambda uid: {"subscriber": {"subscriptions": {"premium_monthly": {
+        "store": "APP_STORE", "period_type": "NORMAL", "is_sandbox": True,
+        "purchase_date": _dt.now(_tz.utc).isoformat(),
+        "expires_date": (_dt.now(_tz.utc) + _td(days=30)).isoformat()}}}}
     r_ok = client.post("/api/v1/subscriptions/verify", headers=_auth(tok),
                        json={"platform": "ios", "product_id": "premium_monthly",
                              "receipt_data": "A1b2C3realbase64receiptdata=="})
+    _psvc.musteri_cek = _eski_cek
     check("G5.3 gerçek makbuz → 200 active",
           r_ok.status_code == 200 and r_ok.json().get("status") == "active",
           f"status={r_ok.status_code} body={r_ok.text[:120]}")

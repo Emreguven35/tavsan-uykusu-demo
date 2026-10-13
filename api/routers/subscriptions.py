@@ -61,6 +61,9 @@ def verify(req: SubscriptionVerifyReq, db: Session = Depends(get_db),
     """Satın alma sonrası: gerçek durum RevenueCat'ten çekilir; istemcinin
     makbuzu karar VERMEZ. Mağazada bu ürünün kaydı yoksa 404."""
     rd = (req.receipt_data or "").strip()
+    if not rd:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Geçersiz makbuz")
     if rd.lower().startswith(_MOCK_RECEIPT_PREFIXES):
         if get_settings().is_production:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,

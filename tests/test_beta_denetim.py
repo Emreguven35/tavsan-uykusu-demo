@@ -42,6 +42,9 @@ os.environ["DENETIM_ROOT"] = str(_DENETIM)
 os.environ["LOG_GELECEK_TOLERANS_DK"] = "1440"
 os.environ["MEDIA_ROOT"] = str(Path(tempfile.gettempdir()) / "beta_denetim_medya")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy")
+# 2026-10-13: premium olmayan kullanıcı training_started_at'i geriye alamaz
+# (deneme 1-3. günü açar). Bu dosya denetim/plan mantığını ölçer → prod gibi beta.
+os.environ["BETA_MODE"] = "true"
 
 from fastapi.testclient import TestClient                   # noqa: E402
 from api.db import Base, SessionLocal, engine               # noqa: E402
