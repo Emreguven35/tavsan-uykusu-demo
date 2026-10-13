@@ -15,6 +15,7 @@ Anne Sesi speech-to-speech (ANNE_SESI_STS) — ağ YOK, ElevenLabs MOCK.
 """
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -59,7 +60,15 @@ from api.services import voice as voice_svc                    # noqa: E402
 Base.metadata.create_all(bind=engine)
 usage_svc.SENKRON_MOD = True
 voice_sts.REFERANS_KLASOR = _REF
-voice_svc.delete_voice = lambda v: {"ok": True, "error": None, "status": 200}
+SILINEN_KLON: list[str] = []
+
+
+def _sahte_klon_sil(v):
+    SILINEN_KLON.append(v)
+    return {"ok": True, "error": None, "status": 200}
+
+
+voice_svc.delete_voice = _sahte_klon_sil
 results: list[tuple[str, bool, str]] = []
 
 
@@ -300,7 +309,175 @@ check("G3) Anahtar HİÇBİR log satırında yok",
 check("Y1) Yol kaçışı: referans_yolu('../x') None",
       voice_sts.referans_yolu("../stories") is None
       and voice_sts.referans_yolu("a/b") is None, "")
+
+# =============================================================================
+print("S) Önizleme süresi ayardan (VOICE_ONIZLEME_SN)")
+sifirla()
+os.environ["VOICE_ONIZLEME_SN"] = "20"
+_, pid = profil_ac(amac="onizleme")
+voice_uretim.uret(pid)
+_s = sesler(pid)[voice_paket.onizleme_icerik_id()]
+check("S1) STS yolu: referansın yalnız ilk 20 sn'si gitti, çıktı ≤ 20 sn",
+      len(STS) == 1 and STS[0]["sure"] <= 20.0 and mp3.sure(_s) <= 20.0,
+      f"{[x['sure'] for x in STS]} {mp3.sure(_s):.1f}")
 os.environ.pop("ANNE_SESI_STS")
+sifirla()
+_, pid = profil_ac(amac="onizleme")
+voice_uretim.uret(pid)
+_s = sesler(pid)[voice_paket.onizleme_icerik_id()]
+check("S2) TTS yolu: 20 sn'de kesildi ve TTS metni süreyle orantılı kısaldı",
+      STS == [] and mp3.sure(_s) <= 20.0 and len(TTS) == 1
+      and len(TTS[0]) <= voice_paket.onizleme_karakter() < voice_paket.ONIZLEME_KARAKTER,
+      f"{mp3.sure(_s):.1f} {[len(t) for t in TTS]} {voice_paket.onizleme_karakter()}")
+for _ham, _beklenen in (("abc", 30.0), ("0", 30.0), ("1000", 30.0), ("45", 45.0),
+                        ("12,5", 12.5)):
+    os.environ["VOICE_ONIZLEME_SN"] = _ham
+    check(f"S3) VOICE_ONIZLEME_SN={_ham!r} → {_beklenen}",
+          voice_paket.onizleme_sn() == _beklenen, str(voice_paket.onizleme_sn()))
+os.environ.pop("VOICE_ONIZLEME_SN")
+check("S4) Ayar yokken 30 sn", voice_paket.onizleme_sn() == 30.0, "")
+
+# =============================================================================
+print("Y) Klon yeri tasarrufu")
+sifirla()
+SILINEN_KLON.clear()
+_, pid = profil_ac(amac="onizleme")
+voice_uretim.uret(pid)
+s = SessionLocal()
+try:
+    _p = s.get(VoiceProfile, pid)
+    _a = s.query(VoiceAudio).filter(VoiceAudio.voice_profile_id == pid).all()
+    _durum = (_p.elevenlabs_voice_id, _p.released_at is not None, _p.status)
+finally:
+    s.close()
+check("Y2) Önizleme kaydedilince ElevenLabs klonu silindi",
+      SILINEN_KLON == ["ANNE_VOICE_1"] and _durum[0] is None and _durum[1]
+      and _durum[2] == "released", f"{SILINEN_KLON} {_durum}")
+check("Y3) Önizleme MP3'ü ve satırı KALDI",
+      len(_a) == 1 and storage.yerel_dosya(_a[0].storage_path) is not None, str(len(_a)))
+
+# =============================================================================
+print("D) tools/sts_deneme.py (sahte ElevenLabs)")
+import contextlib                                              # noqa: E402
+import io                                                      # noqa: E402
+sys.path.insert(0, str(ROOT / "tools"))
+import sts_deneme                                              # noqa: E402
+_env = _REF / "deneme.env"
+_env.write_text(f"ELEVENLABS_API_KEY={ANAHTAR}\n", encoding="utf-8")
+_sayac = {"n": 1000}
+
+
+def _sahte_get(url, headers=None, timeout=None):
+    _sayac["n"] += 0 if not STS else 500
+    return Yanit(200, govde={"character_count": _sayac["n"]})
+
+
+sifirla()
+sts_deneme.requests.get = _sahte_get
+sts_deneme.requests.post = _sahte_post
+_cikti = _REF / "deneme_cikti.mp3"
+_out = io.StringIO()
+with contextlib.redirect_stdout(_out):
+    _kod = sts_deneme.main([str(_REF / "ninni_dandini.mp3"), "--voice-id", "TEST_SES",
+                            "--sn", "30", "--env", str(_env), "--cikti", str(_cikti),
+                            "--evet"])
+_metin = _out.getvalue()
+check("D1) Tek STS çağrısı, ilk 30 sn, doğru ses ve model",
+      _kod == 0 and len(STS) == 1 and STS[0]["sure"] <= 30.0
+      and STS[0]["url"].endswith("/TEST_SES")
+      and STS[0]["data"]["model_id"] == "eleven_multilingual_sts_v2", _metin[-300:])
+check("D2) Çıktı dosyaya yazıldı", _cikti.exists() and mp3.sure(_cikti.read_bytes()) > 0, "")
+check("D3) Harcanan kredi gösterildi (tahmini + hesaptan)",
+      "Tahmini harcama: ~500 kredi" in _metin and "Harcanan kredi (hesaptan): 500" in _metin,
+      _metin)
+check("D4) Anahtar ekrana yazılmadı", ANAHTAR not in _metin, "")
+sifirla()
+DAVRANIS["mod"] = "izin"
+_out = io.StringIO()
+with contextlib.redirect_stdout(_out):
+    _kod = sts_deneme.main([str(_REF / "ninni_dandini.mp3"), "--voice-id", "TEST_SES",
+                            "--env", str(_env), "--cikti", str(_cikti), "--evet"])
+check("D5) İzin yoksa açık mesaj, çıkış kodu 3, anahtar yazılmadı",
+      _kod == 3 and "İZİN" in _out.getvalue() and ANAHTAR not in _out.getvalue(),
+      _out.getvalue())
+
+# =============================================================================
+print("H) tools/referans_hazirla.py (ffmpeg)")
+os.environ.pop("VOICE_PAKET_NINNILER", None)       # varsayılan paket listesi
+os.environ.pop("VOICE_PAKET_MASALLAR", None)
+import subprocess                                              # noqa: E402
+import referans_hazirla as rh                                  # noqa: E402
+_ff, _fp = shutil.which("ffmpeg"), shutil.which("ffprobe")
+if not (_ff and _fp):
+    print("  (ffmpeg yok — H atlandı)")
+else:
+    _hk = Path(tempfile.gettempdir()) / "anne_sesi_hazirla"
+    shutil.rmtree(_hk, ignore_errors=True)
+    _hk.mkdir()
+
+    def _uret(ad, kodlayici):
+        # 1,5 sn sessizlik + 3 sn ton + 2 sn sessizlik, 48 kHz STEREO, kısık ses
+        subprocess.run([_ff, "-hide_banner", "-loglevel", "error", "-y",
+                        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo:d=1.5",
+                        "-f", "lavfi", "-i", "sine=f=330:r=48000:d=3",
+                        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo:d=2",
+                        "-filter_complex",
+                        "[1]volume=0.05,aformat=channel_layouts=stereo[t];"
+                        "[0][t][2]concat=n=3:v=0:a=1",
+                        *kodlayici, str(_hk / ad)], check=True)
+
+    _uret("Dandini Dastana.m4a", ["-c:a", "aac"])
+    _uret("masal_aysecik_uyku_perisi.wav", [])
+    _uret("ay ışığı ninnisi.mp3", ["-c:a", "libmp3lame"])
+    _uret("bilinmeyen kayit.m4a", ["-c:a", "aac"])
+    _r = rh.calistir(_hk, _ff, _fp)
+
+    def _bilgi(yol):
+        o = subprocess.run([_fp, "-v", "error", "-show_entries",
+                            "stream=sample_rate,channels,codec_name,bit_rate",
+                            "-of", "json", str(yol)], capture_output=True, text=True)
+        return json.loads(o.stdout)["streams"][0]
+
+    import json                                                # noqa: E402
+    _hazir = sorted(p.name for p in _hk.glob("*.mp3"))
+    check("H1) m4a / wav / mp3 içerik kimliğiyle eşleşip hazırlandı",
+          _hazir == ["masal_aysecik_uyku_perisi.mp3", "ninni_ay_isigi.mp3",
+                     "ninni_dandini.mp3"], f"{_hazir} {_r['hata']}")
+    _b = _bilgi(_hk / "ninni_dandini.mp3")
+    check("H2) 44,1 kHz, mono, MP3, ~128 kbps",
+          _b["codec_name"] == "mp3" and _b["sample_rate"] == "44100"
+          and _b["channels"] == 1 and abs(int(_b["bit_rate"]) - 128000) < 2000, str(_b))
+    _sn = rh.sure(_fp, _hk / "ninni_dandini.mp3")
+    check("H3) Baş ve son sessizlik kırpıldı (6,5 sn → ~3,6 sn)",
+          _sn is not None and 3.0 <= _sn <= 4.2, str(_sn))
+    _vol = subprocess.run([_ff, "-hide_banner", "-i", str(_hk / "ninni_dandini.mp3"),
+                           "-af", "volumedetect", "-f", "null", "-"],
+                          capture_output=True, text=True).stderr
+    _ort = float(re.search(r"mean_volume: (-?[\d.]+) dB", _vol).group(1))
+    check("H4) Ses normalize edildi (kısık ton −32 dB → ~−18 dB civarı)",
+          -24 <= _ort <= -14, str(_ort))
+    check("H5) Ham dosyalar silinmedi, ham/ altına taşındı",
+          sorted(p.name for p in (_hk / "ham").iterdir())
+          == ["masal_aysecik_uyku_perisi.wav", "ninni_ay_isigi.mp3", "ninni_dandini.m4a"],
+          str(sorted(p.name for p in (_hk / "ham").iterdir())))
+    check("H6) Eşleşmeyen dosyaya dokunulmadı ve raporlandı",
+          (_hk / "bilinmeyen kayit.m4a").exists()
+          and _r["eslesmeyen"] == ["bilinmeyen kayit.m4a"], str(_r["eslesmeyen"]))
+    _mt = (_hk / "ninni_dandini.mp3").stat().st_mtime
+    _r2 = rh.calistir(_hk, _ff, _fp)
+    check("H7) İkinci çalıştırma hazır dosyayı yeniden işlemiyor",
+          _r2["hazirlanan"] == [] and (_hk / "ninni_dandini.mp3").stat().st_mtime == _mt,
+          str(_r2["hazirlanan"]))
+    _sat = {x["kimlik"]: x for x in _r2["satirlar"]}
+    check("H8) Liste: paketteki her içerik + süre; kaydı olmayan 'KAYIT YOK'",
+          _sat["ninni_dandini"]["sure_sn"] and "KAYIT YOK → TTS"
+          in _sat["masal_kelogan_sihirli_degnek"]["uyari"], "")
+    check("H9) Ad eşleştirme: başlık, kimlik, kopya eki, Türkçe harf",
+          rh.eslestir("Ayşecik ile Uyku Perisi.m4a", rh.katalog()) == "masal_aysecik_uyku_perisi"
+          and rh.eslestir("ninni_dandini (1).m4a", rh.katalog()) == "ninni_dandini"
+          and rh.eslestir("UYU YAVRUM.wav", rh.katalog()) == "ninni_uyu_yavrum"
+          and rh.eslestir("rastgele.m4a", rh.katalog()) is None, "")
+    shutil.rmtree(_hk, ignore_errors=True)
 
 print("=" * 78)
 gecen = sum(1 for _, ok, _ in results if ok)

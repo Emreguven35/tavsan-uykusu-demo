@@ -7,7 +7,7 @@ Dosyası olmayan içerik eskisi gibi TTS ile okunur.
 
 ## Dosya adları
 
-Dosya adı içerik kimliğiyle **birebir** aynı olmalı: `{icerik_id}.mp3`.
+Uygulamanın okuduğu dosya: `{icerik_id}.mp3` (hazırlama betiğinin çıktısı).
 
 | Dosya | İçerik |
 |---|---|
@@ -23,19 +23,34 @@ Dosya adı içerik kimliğiyle **birebir** aynı olmalı: `{icerik_id}.mp3`.
 Yeni iki ninni önce `data/stories.json` kataloğuna ve `VOICE_PAKET_NINNILER`
 ayarına eklenir; kayıtları da aynı kimlikle buraya konur.
 
+## Hazırlama
+
+Uzman kayıtları telefondan gelir: **m4a, wav ya da mp3** bu klasöre bırakılır ve
+
+    python tools/referans_hazirla.py
+
+çalıştırılır. Betik dosya adını içerik kimliğiyle (ya da başlıkla) eşleştirir,
+baş/son sessizliği kırpar, sesi normalize eder (−18 LUFS), 44,1 kHz mono
+128 kbps `{icerik_id}.mp3` üretir ve süreleri listeler. Ham dosyalar silinmez,
+`ham/` alt klasörüne taşınır (git'e girmez). Uygulama yalnız `{icerik_id}.mp3`
+dosyalarını okur.
+
+Gerçek ElevenLabs denemesi (tek çağrı, kredi harcar):
+`python tools/sts_deneme.py data/anne_sesi_referans/ninni_dandini.mp3 --voice-id <test_ses>`
+
 ## Kayıt kuralları (uzman için)
 
-- **Biçim:** MP3, 44,1 kHz, 128 kbps (ya da üstü), tercihen mono. WAV/M4A
-  kabul edilmez; dışa aktarırken MP3 seçin.
+Ayrıntılı liste, tam metinler ve kısaltma önerileri: `docs/uzman_kayit_listesi.md`.
+
 - **Ortam:** sessiz oda, müzik/fon sesi yok, yankısız (perdeli, eşyalı oda).
   Klima, buzdolabı, trafik sesi dönüşüme taşınır.
 - **Tek ses:** yalnız seslendiren kişi. Bebek sesi, ikinci konuşmacı, enstrüman yok.
-- **Mikrofon:** ağızdan 15–20 cm, kayıt boyunca aynı mesafe. Ses patlamasın
-  (tepe seviyesi yaklaşık −6 dB); nefesler çok yüksek olmasın.
-- **Süre:** ninni en fazla 3 dk, masal en fazla 6 dk. Her kayıt tek parça.
-  4 dk 30 sn'yi aşan kayıt otomatik bölünüp birleştirilir; bölme noktasında
-  küçük bir geçiş duyulabilir. Mümkünse masallar da 4 dk 30 sn altında kalsın.
-- **Baş/son sessizlik:** 1 sn'yi geçmesin (ücret ses dakikası başınadır).
-- **Önizleme masalı:** Ayşecik ile Uyku Perisi'nin ilk 30 sn'si ücretsiz
-  önizleme olarak kullanılır. İlk 30 sn masalın girişi gibi tamamlanmış bir
-  cümleyle bitsin.
+- **Telefon/mikrofon:** ağızdan 15–20 cm, kayıt boyunca aynı yerde. Ses
+  patlamasın; nefesler çok yüksek olmasın.
+- **Süre:** ninni 1:30–2:30, masal 4:00–4:30 (en fazla 6:00). Her kayıt tek
+  parça. 4:30'u aşan kayıt otomatik bölünüp birleştirilir; bölme noktasında
+  küçük bir geçiş duyulabilir.
+- **Baş/son sessizlik:** betik kırpar, yine de uzun bırakmayın.
+- **Önizleme masalı:** Ayşecik ile Uyku Perisi'nin ilk 30 sn'si (ayar:
+  VOICE_ONIZLEME_SN) ücretsiz önizleme olarak kullanılır; bu kısım tamamlanmış
+  bir cümleyle bitsin.

@@ -13,9 +13,11 @@ Eski `VOICE_PACKAGE=starter|full` seçimi KALKTI. Mevcut paket sahiplerinin
 dosyaları (voice_audios) ve katalog kimlikleri değişmedi; dinledikleri içerik
 aynen sunulur. Liste yalnız YENİ üretimleri belirler.
 
-ÖNİZLEME (premium olmayan, deneme dahil): tek masalın en fazla 30 sn'si.
-Metnin yalnız baş kısmı seslendirilir (maliyet), ses sunucuda 30 sn'de
-kesilir (services/mp3.kes). Masal ayardan: VOICE_ONIZLEME_ICERIK.
+ÖNİZLEME (premium olmayan, deneme dahil): tek masalın en fazla
+VOICE_ONIZLEME_SN saniyesi (varsayılan 30). Metnin yalnız baş kısmı
+seslendirilir (maliyet), ses sunucuda bu sürede kesilir (services/mp3.kes);
+STS yolunda referansın da yalnız bu kadarı dönüştürülür. Masal ayardan:
+VOICE_ONIZLEME_ICERIK.
 """
 import logging
 import os
@@ -44,10 +46,12 @@ PAKET_ADI = "standart"
 
 AMAC_PAKET = "paket"
 AMAC_ONIZLEME = "onizleme"
-ONIZLEME_SN = 30
+ONIZLEME_SN = 30                      # varsayılan; ayar: VOICE_ONIZLEME_SN
+ONIZLEME_SN_ARALIK = (5, 300)
 VARSAYILAN_ONIZLEME = "masal_aysecik_uyku_perisi"
 # Masal profili yavaş anlatım; 30 sn'yi rahat dolduracak kadar metin alınır,
-# fazlası kesilir. Tam masal (~4.000 karakter) seslendirilmez.
+# fazlası kesilir. Tam masal (~4.000 karakter) seslendirilmez. Süre ayarla
+# değişirse metin de orantılı büyür (onizleme_karakter).
 ONIZLEME_KARAKTER = 700
 
 
@@ -110,8 +114,30 @@ def onizleme_icerik_id() -> str:
     return (os.getenv("VOICE_ONIZLEME_ICERIK") or VARSAYILAN_ONIZLEME).strip()
 
 
-def onizleme_metni(metin: str, ust: int = ONIZLEME_KARAKTER) -> str:
+def onizleme_sn() -> float:
+    """Önizleme süresi (sn): VOICE_ONIZLEME_SN, yoksa 30. Geçersiz ya da aralık
+    dışı değer uyarıyla varsayılana düşer. Her çağrıda env'den okunur."""
+    ham = (os.getenv("VOICE_ONIZLEME_SN") or "").strip()
+    if not ham:
+        return float(ONIZLEME_SN)
+    try:
+        sn = float(ham.replace(",", "."))
+    except ValueError:
+        sn = -1
+    if not ONIZLEME_SN_ARALIK[0] <= sn <= ONIZLEME_SN_ARALIK[1]:
+        logger.warning("VOICE_ONIZLEME_SN=%r geçersiz (%s–%s sn) — %s sn kullanıldı",
+                       ham, *ONIZLEME_SN_ARALIK, ONIZLEME_SN)
+        return float(ONIZLEME_SN)
+    return sn
+
+
+def onizleme_karakter() -> int:
+    return max(1, round(ONIZLEME_KARAKTER * onizleme_sn() / ONIZLEME_SN))
+
+
+def onizleme_metni(metin: str, ust: int | None = None) -> str:
     """Metnin baş kısmı — cümle sınırında, en az bir cümle."""
+    ust = onizleme_karakter() if ust is None else ust
     metin = (metin or "").strip()
     if len(metin) <= ust:
         return metin
