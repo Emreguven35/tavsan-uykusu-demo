@@ -130,7 +130,8 @@ def kilitler() -> dict:
 
 k = kilitler()
 check("3a) Abonesiz: ücretsiz ses AÇIK", k["beyaz-gurultu"] is False, str(k))
-check("3b) Abonesiz: ücretli ses KİLİTLİ", k["pembe-gurultu"] is True, str(k))
+# 2026-10-13: uyku seslerinin hepsi ücretsiz (ERISIM_KURALLARI ses_diger).
+check("3b) Abonesiz: is_free olmayan ses de AÇIK", k["pembe-gurultu"] is False, str(k))
 
 _db = SessionLocal()
 try:
