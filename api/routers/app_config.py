@@ -17,7 +17,7 @@ tutabilir.
 """
 from fastapi import APIRouter, Depends, Header, Response
 
-from api.config import get_settings
+from api.config import DESTEK_EPOSTA, get_settings
 from api.deps import get_optional_user
 from api.models import User
 from api.services.denetim import surum_build
@@ -52,4 +52,6 @@ def istemci_ayarlari(response: Response,
                                                         alias="X-App-Version")) -> dict:
     response.headers["Cache-Control"] = f"private, max-age={ONBELLEK_SN}"
     response.headers["Vary"] = "Authorization, X-App-Version"
-    return {"ui": {"yeni_tasarim": yeni_tasarim_acik_mi(user, x_app_version)}}
+    return {"ui": {"yeni_tasarim": yeni_tasarim_acik_mi(user, x_app_version)},
+            # App Store 1.2 / destek: uygulama içinden ulaşılacak adres.
+            "destek_eposta": DESTEK_EPOSTA}

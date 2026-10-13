@@ -1,13 +1,21 @@
 """
 Premium kararı + RevenueCat olay işleme (B4).
 
-TEK KARAR NOKTASI: `durum(db, user)`. deps.premium_karari, require_premium,
-GET /subscriptions/status ve kilit alanları (locked / premium_required) hepsi
-buradan okur. Öncelik sırası:
-    1. beta     — BETA_MODE açık: herkes premium (bugünkü prod davranışı)
-    2. store    — aktif mağaza aboneliği (RevenueCat; deneme dahil)
-    3. manual   — admin hediyesi (premium_haklari)
-    4. kurucu   — lansmandan önce kayıt olan, lansmandan sonraki 30 gün
+TEK KARAR NOKTASI: `durum(db, user)`. deps.kademe_karari / premium_karari,
+require_premium, GET /abonelik/durum, GET /subscriptions/status ve kilit alanları
+(locked / premium_required) hepsi buradan okur.
+
+KADEME (2026-10-13): "ucretsiz" | "deneme" | "premium" — sütun DEĞİL, her
+istekte hesaplanır. Öncelik sırası:
+    1. beta     — BETA_MODE açık ve e-posta BETA_HARIC_EMAILS'te değil → premium
+    2. store    — aktif mağaza aboneliği, period_type TRIAL DEĞİL → premium
+    3. manual   — admin hediyesi (premium_haklari) → premium
+    4. kurucu   — lansmandan önce kayıt olan, lansmandan sonraki 30 gün → premium
+    5. store    — aktif mağaza DENEMESİ (period_type TRIAL) → deneme
+    6. aksi     → ucretsiz
+"Aktif" mağaza kaydı = status active/billing_issue VE expires_at GELECEKTE.
+Bitişi boş (süresiz) mağaza kaydı ERİŞİM VERMEZ — eski /verify istemci makbuzuyla
+süresiz "active" yazıyordu (güvenlik açığı). Süresiz hak yalnız premium_haklari'da.
 
 REVENUECAT: webhook `app_user_id` = bizim users.id. Olay idempotent işlenir
 (revenuecat_olaylari.id = event.id). Durum makinesi:
@@ -55,18 +63,29 @@ def _simdi() -> datetime:
 # ---------------------------------------------------------------------------
 # Karar
 # ---------------------------------------------------------------------------
-def aktif_abonelik(db: Session, user: User, simdi: datetime | None = None
-                   ) -> Subscription | None:
-    """Erişim veren mağaza aboneliği; birden çoksa en geç biten (süresiz önce)."""
+def deneme_mi(s: Subscription) -> bool:
+    return (s.period_type or "").upper() == "TRIAL"
+
+
+def _aktif_kayitlar(db: Session, user: User, simdi: datetime) -> list[Subscription]:
+    """Erişim veren mağaza kayıtları: durum active/billing_issue VE bitiş gelecekte.
+    Bitişi BOŞ kayıt sayılmaz (istemci makbuzuyla yazılmış süresiz satır)."""
+    return [s for s in db.query(Subscription)
+            .filter(Subscription.user_id == user.id,
+                    Subscription.status.in_(ERISIMLI_DURUMLAR)).all()
+            if s.expires_at is not None and _utc(s.expires_at) > simdi]
+
+
+def aktif_abonelik(db: Session, user: User, simdi: datetime | None = None,
+                   deneme: bool | None = None) -> Subscription | None:
+    """Erişim veren mağaza kaydı; birden çoksa en geç biten. `deneme`: None →
+    hepsi, False → yalnız ücretli dönem, True → yalnız deneme (TRIAL)."""
     simdi = simdi or _simdi()
-    adaylar = [s for s in db.query(Subscription)
-               .filter(Subscription.user_id == user.id,
-                       Subscription.status.in_(ERISIMLI_DURUMLAR)).all()
-               if s.expires_at is None or _utc(s.expires_at) > simdi]
+    adaylar = [s for s in _aktif_kayitlar(db, user, simdi)
+               if deneme is None or deneme_mi(s) == deneme]
     if not adaylar:
         return None
-    return max(adaylar, key=lambda s: (s.expires_at is None,
-                                       _utc(s.expires_at) or simdi))
+    return max(adaylar, key=lambda s: _utc(s.expires_at))
 
 
 def aktif_hak(db: Session, user: User, simdi: datetime | None = None
@@ -150,34 +169,84 @@ def kurucu_penceresi() -> tuple[datetime, datetime] | None:
     return None if an is None else (an, an + timedelta(days=KURUCU_PREMIUM_GUN))
 
 
+def beta_haric_mi(user: User) -> bool:
+    """BETA_MODE açıkken GERÇEK kademeyi görecek hesap mı (BETA_HARIC_EMAILS)."""
+    return (user.email or "").strip().lower() in get_settings().beta_haric_emails
+
+
 def durum(db: Session, user: User, simdi: datetime | None = None) -> dict:
-    """{premium, source, expires_at, product_id, will_renew, period_type,
-    kurucu_uye}. source: beta | store | manual | kurucu | none."""
+    """{kademe, premium, source, expires_at, product_id, will_renew, period_type,
+    kurucu_uye, deneme_bitis}. kademe: ucretsiz | deneme | premium;
+    premium = (kademe == "premium"). source: beta | store | manual | kurucu | none."""
     simdi = simdi or _simdi()
-    abonelik = aktif_abonelik(db, user, simdi)
+    ucretli = aktif_abonelik(db, user, simdi, deneme=False)
+    deneme = aktif_abonelik(db, user, simdi, deneme=True)
+    abonelik = ucretli or deneme
     kurucu = kurucu_uye_mi(user, db)
-    sonuc = {"premium": False, "source": "none", "expires_at": None,
-             "product_id": None, "will_renew": None, "period_type": None,
-             "kurucu_uye": kurucu}
+    sonuc = {"kademe": "ucretsiz", "premium": False, "source": "none",
+             "expires_at": None, "product_id": None, "will_renew": None,
+             "period_type": None, "kurucu_uye": kurucu, "deneme_bitis": None}
     if abonelik is not None:                       # beta'da da ayrıntı görünsün
         sonuc.update(expires_at=_utc(abonelik.expires_at),
                      product_id=abonelik.product_id,
                      will_renew=abonelik.will_renew,
                      period_type=abonelik.period_type)
-    if get_settings().beta_mode:
-        sonuc.update(premium=True, source="beta")
+    if get_settings().beta_mode and not beta_haric_mi(user):
+        sonuc.update(kademe="premium", premium=True, source="beta")
         return sonuc
-    if abonelik is not None:
-        sonuc.update(premium=True, source="store")
+    if ucretli is not None:
+        sonuc.update(kademe="premium", premium=True, source="store")
         return sonuc
     hak = aktif_hak(db, user, simdi)
     if hak is not None:
-        sonuc.update(premium=True, source="manual", expires_at=_utc(hak.bitis))
+        sonuc.update(kademe="premium", premium=True, source="manual",
+                     expires_at=_utc(hak.bitis))
         return sonuc
     pencere = kurucu_penceresi()
     if kurucu and pencere and pencere[0] <= simdi < pencere[1]:
-        sonuc.update(premium=True, source="kurucu", expires_at=pencere[1])
+        sonuc.update(kademe="premium", premium=True, source="kurucu",
+                     expires_at=pencere[1])
+        return sonuc
+    if deneme is not None:
+        sonuc.update(kademe="deneme", source="store",
+                     deneme_bitis=_utc(deneme.expires_at))
     return sonuc
+
+
+def deneme_gunu(user: User, d: dict, simdi: datetime | None = None) -> int | None:
+    """Denemenin kaçıncı günü (1..deneme süresi, Türkiye günü). Deneme değilse None.
+    Başlangıç users.deneme_baslangic; yoksa bitişten geriye deneme süresi."""
+    if d.get("kademe") != "deneme":
+        return None
+    simdi = simdi or _simdi()
+    sure = int((URUNLER.get(d.get("product_id") or "") or {}).get("deneme_gun") or 3)
+    bas = _utc(user.deneme_baslangic)
+    if bas is None and d.get("deneme_bitis") is not None:
+        bas = d["deneme_bitis"] - timedelta(days=sure)
+    if bas is None:
+        return 1
+    fark = (simdi.astimezone(TR).date() - bas.astimezone(TR).date()).days
+    return max(1, min(sure, fark + 1))
+
+
+def deneme_hakki_var(db: Session, user: User) -> bool:
+    """Hiç mağaza kaydı yoksa ve deneme daha önce kullanılmadıysa True."""
+    if user.deneme_kullanildi_at is not None:
+        return False
+    return db.query(Subscription.id).filter(Subscription.user_id == user.id).first() is None
+
+
+def deneme_kaydet(user: User, s: Subscription) -> None:
+    """Mağaza kaydı deneme dönemindeyse kullanıcının deneme alanlarını yaz.
+    Başlangıç ve "kullanıldı" anı ilk yazımda sabitlenir (yenilenmez)."""
+    if not deneme_mi(s):
+        return
+    if user.deneme_baslangic is None:
+        user.deneme_baslangic = _utc(s.purchased_at) or _simdi()
+    if user.deneme_kullanildi_at is None:
+        user.deneme_kullanildi_at = _simdi()
+    if s.expires_at is not None:
+        user.deneme_bitis = _utc(s.expires_at)
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +386,11 @@ def _uygula(db: Session, user: User, tur: str, olay: dict) -> tuple[str, str]:
         s.expires_at = bitis or s.expires_at or _simdi()
     elif tur == "PRODUCT_CHANGE":
         s.sonraki_urun = olay.get("new_product_id")
+    # DENEME (2026-10-13): TRIAL dönemli satın alma kullanıcının deneme alanlarını
+    # yazar. Denemeden ücretliye geçiş RENEWAL + period_type NORMAL ile gelir;
+    # period_type yukarıda güncellendiği için kademe kendiliğinden premium olur.
+    if tur in ("INITIAL_PURCHASE", "RENEWAL", "UNCANCELLATION"):
+        deneme_kaydet(user, s)
     db.flush()
     return "islendi", f"{tur}: {urun} → {s.status}"
 
@@ -362,12 +436,15 @@ def musteriden_guncelle(db: Session, user: User, veri: dict) -> list[str]:
         s.period_type = a.get("period_type") or s.period_type
         s.environment = "SANDBOX" if a.get("is_sandbox") else "PRODUCTION"
         s.will_renew = a.get("unsubscribe_detected_at") is None
-        if s.expires_at is not None and s.expires_at <= simdi:
+        # Bitişi olmayan abonelik kaydı erişim vermez (bkz. _aktif_kayitlar).
+        if s.expires_at is None or s.expires_at <= simdi:
             s.status = "expired"
         elif a.get("billing_issues_detected_at"):
             s.status = "billing_issue"
         else:
             s.status = "active"
+        if s.status != "expired":
+            deneme_kaydet(user, s)
         dokunulan.append(urun)
     for urun, alimlar in (abone.get("non_subscriptions") or {}).items():
         if not alimlar:

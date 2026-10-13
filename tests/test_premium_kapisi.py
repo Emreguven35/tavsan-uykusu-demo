@@ -405,6 +405,7 @@ check("10h) Bayat aşamasında hak İADE EDİLMEZ (son_klon damgası değişmedi
 # =============================================================================
 _ALT_SUREC = r'''
 import io, os, sys, tempfile, uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 ROOT = Path(sys.argv[1]); sys.path.insert(0, str(ROOT)); os.chdir(ROOT)
 db = Path(tempfile.gettempdir()) / "premium_kapisi_kapali.db"
@@ -459,8 +460,12 @@ tok2 = reg("aboneli@test.com")
 uid = uuid.UUID(decode_access_token(tok2)["sub"])
 s = SessionLocal()
 try:
+    # 2026-10-13: bitişi boş mağaza kaydı erişim VERMEZ — gerçek (RevenueCat)
+    # kaydı gibi süreli ve ücretli dönem.
     s.add(Subscription(user_id=uid, platform="ios", product_id="premium_monthly",
-                       status="active", receipt_data="A1b2C3real=="))
+                       status="active", receipt_data="A1b2C3real==",
+                       period_type="NORMAL",
+                       expires_at=datetime.now(timezone.utc) + timedelta(days=30)))
     prof = VoiceProfile(user_id=uid, elevenlabs_voice_id="VS1", status="ready")
     s.add(prof)
     s.commit()

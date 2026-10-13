@@ -39,6 +39,7 @@ from api.deps import require_demo_key # noqa: E402 — /ask + /avatar-session ko
 from api.deps import PremiumGerekli    # noqa: E402 — B4 premium kapısı 403 gövdesi
 from api.routers import auth          # noqa: E402 — /api/v1/auth/* (Faz 2)
 from api.routers import babies, logs, plans, subscriptions  # noqa: E402 — Faz 3
+from api.routers import abonelik      # noqa: E402 — premium abonelik (mobil sözleşmesi)
 from api.routers import chat, voice   # noqa: E402 — Faz 4 (RAG chat + ses)
 from api.routers import notifications # noqa: E402 — Faz 6.2 (push token + tercihler)
 from api.routers import community      # noqa: E402 — Faz T (anne topluluğu)
@@ -267,6 +268,8 @@ async def premium_gerekli(request: Request, exc: PremiumGerekli):
     govde = {"detail": exc.detail, "premium_required": True}
     if exc.kural:
         govde["kural"] = exc.kural
+    if exc.hata:
+        govde["hata"] = exc.hata
     return JSONResponse(status_code=exc.status_code, content=govde)
 
 
@@ -294,6 +297,7 @@ app.include_router(babies.router, prefix=API_V1_PREFIX)
 app.include_router(logs.router, prefix=API_V1_PREFIX)
 app.include_router(plans.router, prefix=API_V1_PREFIX)
 app.include_router(subscriptions.router, prefix=API_V1_PREFIX)
+app.include_router(abonelik.router, prefix=API_V1_PREFIX)
 app.include_router(chat.router, prefix=API_V1_PREFIX)
 app.include_router(voice.router, prefix=API_V1_PREFIX)
 app.include_router(notifications.router, prefix=API_V1_PREFIX)

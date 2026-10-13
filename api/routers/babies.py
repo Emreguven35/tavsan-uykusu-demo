@@ -10,6 +10,7 @@ HİÇBİR HESABA girmez (plan motoru, eğitim planı, sohbet, denetim).
 """
 import logging
 import uuid
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -48,6 +49,26 @@ def _egitim_baslangicini_suz(db: Session, baby: Baby) -> None:
         logger.info("training_started_at yok sayıldı (eğitim aktif değil): baby=%s",
                     baby.id)
         baby.training_started_at = None
+
+
+def _egitim_baslangicini_geri_alma(db: Session, user: User, baby: Baby,
+                                   eski: date | None) -> None:
+    """Premium abonelik (2026-10-13): eğitim günü training_started_at'ten
+    hesaplanır ve deneme yalnız 1-3. günü açar. Premium olmayan kullanıcı başlangıcı
+    GERİYE alamaz — aksi hâlde tarihi geri çekip kilitli günleri açabilirdi.
+    Yeni değer mevcut başlangıçtan (yoksa bugünden) erken olamaz; erkense o güne
+    çekilir. İstek REDDEDİLMEZ (eski istemci hata ekranı göstermesin)."""
+    yeni = baby.training_started_at
+    if yeni is None:
+        return
+    from api.deps import kademe_karari
+    if kademe_karari(db, user)[0] == "premium":
+        return
+    alt = eski or bugun_tr()
+    if yeni < alt:
+        logger.info("training_started_at geriye alınamaz (premium değil): baby=%s",
+                    baby.id)
+        baby.training_started_at = alt
 
 
 # --- Boy/kilo ----------------------------------------------------------------
@@ -137,6 +158,7 @@ def create_baby(req: BabyCreate, db: Session = Depends(get_db),
     baby = Baby(user_id=user.id, **req.model_dump(exclude=set(OLCUM_ALANLARI)))
     db.add(baby)
     db.flush()
+    _egitim_baslangicini_geri_alma(db, user, baby, None)
     _egitim_baslangicini_suz(db, baby)
     _olcum_yaz(db, baby, boy, kilo, "onboarding")
     db.commit()
@@ -163,9 +185,11 @@ def update_baby(baby_id: uuid.UUID, req: BabyUpdate, db: Session = Depends(get_d
     if hata is not None:
         return hata
     # Yalnız gönderilen alanları güncelle (exclude_unset).
+    eski_baslangic = baby.training_started_at
     for field, value in degisen.items():
         setattr(baby, field, value)
     if degisen.get("training_started_at") is not None:
+        _egitim_baslangicini_geri_alma(db, user, baby, eski_baslangic)
         _egitim_baslangicini_suz(db, baby)
     _olcum_yaz(db, baby, boy, kilo, "profil")
     db.commit()

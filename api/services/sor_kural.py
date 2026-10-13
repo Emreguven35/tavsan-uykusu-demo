@@ -277,9 +277,14 @@ def _sayi(v: float) -> str:
 # =============================================================================
 # Kurallar (blok + izin listesi aynı veriden)
 # =============================================================================
-def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
+def kurallar(d: dict, baby: Any, soru: str | None = None,
+             asama_siniri: int | None = None) -> dict | None:
     """`d`: sor_baglam.gun_durumu() çıktısı. Eğitim sürmüyorsa (yenidoğan,
-    başlamadı, tamamlandı) None — blok ve doğrulama uygulanmaz."""
+    başlamadı, tamamlandı) None — blok ve doğrulama uygulanmaz.
+
+    `asama_siniri` (premium abonelik, 2026-10-13): deneme/ücretsizde programın
+    gösterilen son günü (3). Bugün bu günü aşıyorsa blok YOK; takvimde sınırı
+    aşan günlerin aşama adı söylenmez (gelecek aşama sızmasın). None → sınırsız."""
     if d.get("durum") != "egitim":
         return None
     # Gece kuralları GECESİ SAYILAN günden (02:30 → önceki gün), gündüz kuralları
@@ -288,6 +293,8 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
     from api.services import sor_baglam
     g = sor_baglam.gece_sayilan_gun(d)
     g_gunduz = max(1, int(d["app_gun"] or 1))
+    if asama_siniri is not None and max(g, g_gunduz) > asama_siniri:
+        return None
     gece = bool(d["gece"] or d["sabah_once"])
     asamalar = yontem.deger("merdiven.asamalar")
     asama = next((a for a in asamalar if a["gun"][0] <= g <= a["gun"][1]), asamalar[-1])
@@ -387,6 +394,8 @@ def kurallar(d: dict, baby: Any, soru: str | None = None) -> dict | None:
     def _gun_asama(n: int) -> str:
         if n > toplam:
             return "program tamamlanmış olur"
+        if asama_siniri is not None and n > asama_siniri:
+            return f"eğitimin {n}. günü"
         a = next((x for x in asamalar if x["gun"][0] <= n <= x["gun"][1]), asamalar[-1])
         return f"eğitimin {n}. günü, aşama {a['ad']}"
 

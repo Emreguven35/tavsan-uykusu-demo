@@ -16,13 +16,14 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from api.config import SOR_GUNLUK_UCRETSIZ, _bayrak
+from api.config import DENEME_SON_GUN, SOR_GUNLUK_DENEME, _bayrak
 from api.db import get_db
-from api.deps import PremiumGerekli, get_current_user, get_owned_baby
+from api.deps import PremiumGerekli, get_current_user, get_owned_baby, kademe_karari
 from api.models import ChatMessage, User
 from api.schemas.chat import ChatReq, ChatResp, ChatSource
 from api.services import baby_context as baby_ctx
 from api.services import sor_baglam
+from api.services import sor_hakki
 from api.services import sor_kural
 from api.services import takma_ad
 from api.services import usage
@@ -69,43 +70,41 @@ def gecmis_hazirla(history: list, gercek_ad: str | None, takma: str | None,
     return out
 
 
-def _ucretsiz_kalan(db: Session, user: User) -> int | None:
-    """Premium'da None (sınırsız). Değilse bugün kalan ücretsiz soru sayısı."""
-    from api.deps import premium_karari
-    from api.services import erisim
-    premium, _k = premium_karari(db, user)
-    if not erisim.kilitli_mi("sor", premium):
-        return None
-    from api.zaman import bugun_tr, tr_gun_araligi
-    gun_basi, _ = tr_gun_araligi(bugun_tr())
-    sorulan = (db.query(ChatMessage)
-               .filter(ChatMessage.user_id == user.id, ChatMessage.role == "user",
-                       ChatMessage.created_at >= gun_basi)
-               .count())
-    return SOR_GUNLUK_UCRETSIZ - sorulan
-
-
 @router.post("", response_model=ChatResp)
 def chat(req: ChatReq, db: Session = Depends(get_db),
          user: User = Depends(get_current_user)):
     # Faz G6: geçmişi SON 6 mesaja kırp (karesel büyüme freni; sunucu tarafı garanti).
     req.history = trim_history(req.history)
 
-    # B4 — Sor: premium değilse günde SOR_GUNLUK_UCRETSIZ soru (2026-09-28: 0 → yalnız premium). Sayaç
-    # chat_messages'taki bugünkü (Türkiye günü) kullanıcı mesajlarıdır; LLM'e
-    # gitmeden ÖNCE kontrol edilir.
-    kalan = _ucretsiz_kalan(db, user)
-    if kalan is not None and kalan <= 0:
-        if SOR_GUNLUK_UCRETSIZ <= 0:                # Sor yalnız premium
+    # PREMIUM ABONELİK (2026-10-13) — kademe bazlı günlük hak: premium sınırsız,
+    # deneme SOR_GUNLUK_DENEME, ücretsiz kapalı (403 PREMIUM_GEREKLI). Hak model
+    # çağrısından ÖNCE koşullu atomik artırmayla alınır (sor_hakki — yarış yok);
+    # çağrı hata verirse aşağıda geri verilir. Kapanış mesajı ("teşekkürler" —
+    # modele gitmez) sayılmaz; önbellekten dönen cevap sayılır.
+    kapanis = _bayrak(GECMIS_BAYRAK) and chatbot.kapanis_mesaji_mi(req.message)
+    kademe, _kaynak = kademe_karari(db, user)
+    limit = sor_hakki.gunluk_limit(kademe)
+    if limit is not None and limit <= 0:
+        raise PremiumGerekli(detail="Sor yalnız Premium üyelikte kullanılabilir.",
+                             kural="sor_premium", hata="PREMIUM_GEREKLI")
+    hak_gunu = None
+    if limit is not None and not kapanis:
+        hak_gunu = sor_hakki.hak_al(db, user, limit)
+        if hak_gunu is None:
             raise PremiumGerekli(
-                detail="Sor yalnız Premium üyelikte kullanılabilir.",
-                kural="sor_premium")
-        raise PremiumGerekli(
-            detail=(f"Bugünkü {SOR_GUNLUK_UCRETSIZ} ücretsiz sorunuzu kullandınız. "
-                    "Sınırsız soru için Premium'a geçebilir ya da yarın tekrar "
-                    "sorabilirsiniz."),
-            kural="sor_gunluk_limit")
+                detail=(f"Bugünkü {SOR_GUNLUK_DENEME} sorunuzu kullandınız. Sınırsız "
+                        "soru için Premium'a geçebilir ya da yarın tekrar sorabilirsiniz."),
+                kural="sor_gunluk_limit", hata="GUNLUK_LIMIT", status_code=429)
+    try:
+        return _cevapla(req, db, user, kademe, kapanis, limit)
+    except Exception:
+        if hak_gunu is not None:
+            sor_hakki.iade(db, user, hak_gunu)
+        raise
 
+
+def _cevapla(req: ChatReq, db: Session, user: User, kademe: str, kapanis: bool,
+             limit: int | None) -> ChatResp:
     # Faz 6.5: baby_id verilmişse bebeğin profili + son 3 gün logu + bugünün planı
     # bağlama eklenir. Bebek çağırana ait değilse get_owned_baby 404 döner
     # (başka kullanıcının verisi sızmaz).
@@ -115,7 +114,9 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
     # anneye ilk soruda "adını ve kaç aylık olduğunu yazın" dedirtiyordu.
     # SOR_GECMIS: yalnız teşekkür/vedalaşma ya da yalnız emoji → bağlam, RAG ve
     # LLM YOK; sabit kısa cevap (bkz. chatbot.kapanis_mesaji_mi).
-    kapanis = _bayrak(GECMIS_BAYRAK) and chatbot.kapanis_mesaji_mi(req.message)
+    # Deneme: program 3. günden sonrasını göstermiyor → Sor'a giden plan satırı ve
+    # kural bloğu da o aşamaları anlatmaz (premium'da sınır yok).
+    asama_siniri = None if kademe == "premium" else DENEME_SON_GUN
     ctx = None
     kural = None                      # SOR_KURAL_BLOGU / SOR_SAYI_DOGRULAMA
     gercek_ad = takma = None
@@ -144,7 +145,7 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
         # LLM yazdığı için gerçek ad geçebilir → takma adla gizlenir.
         if ctx and sor_baglam.acik_mi():
             try:
-                ek = sor_baglam.zaman_satirlari(db, baby)
+                ek = sor_baglam.zaman_satirlari(db, baby, asama_siniri=asama_siniri)
                 if ek:
                     ctx = ctx + "\n" + takma_ad.adi_gizle(ek, gercek_ad, takma)
             except Exception:
@@ -157,7 +158,8 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
         if ctx and (sor_kural.blok_acik_mi() or sor_kural.dogrulama_acik_mi()):
             try:
                 kural = sor_kural.kurallar(sor_baglam.gun_durumu(db, baby), baby,
-                                           soru=req.message)    # yalnız yatış tespiti
+                                           soru=req.message,    # yalnız yatış tespiti
+                                           asama_siniri=asama_siniri)
                 if kural and sor_kural.blok_acik_mi():
                     ctx = ctx + "\n" + kural["blok"]
             except Exception:
@@ -264,4 +266,4 @@ def chat(req: ChatReq, db: Session = Depends(get_db),
         sources = [ChatSource(**s) for s in r["kaynaklar"]]
     return ChatResp(answer=r["cevap"], cached=r["cache_hit"], sources=sources,
                     retrieval_layer=layer,
-                    ucretsiz_kalan=None if kalan is None else max(0, kalan - 1))
+                    ucretsiz_kalan=None if limit is None else sor_hakki.kalan(db, user, kademe))

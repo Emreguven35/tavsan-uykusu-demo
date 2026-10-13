@@ -164,8 +164,15 @@ with saat_sabitle(GECE_0030):
 check("E1) 00:30 TR'de tamamlanan training_started_at = D+1 (eskiden D)",
       ts == D1.isoformat(), ts)
 check("E2) ... ve egitim_gunu = 1", a.get("egitim_gunu") == 1, a.get("egitim_gunu"))
-client.patch(f"/api/v1/babies/{BE}", headers=HE,
-             json={"training_started_at": (D - timedelta(days=4)).isoformat()})
+# 2026-10-13: premium olmayan kullanıcı PATCH ile başlangıcı geriye alamaz
+# (deneme 1-3. günü açar) — gün sınırı ölçümü için tarih doğrudan yazılır.
+from api.models import Baby                                  # noqa: E402
+_db = SessionLocal()
+try:
+    _db.get(Baby, uuid.UUID(BE)).training_started_at = D - timedelta(days=4)
+    _db.commit()
+finally:
+    _db.close()
 with saat_sabitle(tr(D, 23, 59)):
     g_once = client.get(f"/api/v1/plans/today?baby_id={BE}", headers=HE).json()["content"]["adaptation"]["egitim_gunu"]
 with saat_sabitle(tr(D1, 0, 1)):
@@ -184,29 +191,29 @@ chatbot._cevap_uret = lambda *a, **k: {"cevap": "C", "cache_hit": False, "kaynak
                                        "llm": False, "retrieval_layer": "k1",
                                        "top_score": 0.9}
 HS, _ = hesap("sor@gercek.com")
-from api.models import ChatMessage, User                    # noqa: E402
+from api.models import SorSayac, Subscription, User          # noqa: E402
+from api.config import SOR_GUNLUK_DENEME                     # noqa: E402
+# 2026-10-13: Sor ücretsizde kapalı; günlük kota DENEMEDE (10). Kullanıcı deneme
+# aboneliğinde, D günü (TR) hakkının hepsini 23:40'ta kullanmış.
 db = SessionLocal()
 try:
     uid = db.query(User).filter(User.email == "sor@gercek.com").one().id
-    for i in range(3):                                      # D 23:40 TR'de 3 soru
-        db.add(ChatMessage(user_id=uid, role="user", content=f"s{i}", cached=False,
-                           created_at=tr(D, 23, 40).astimezone(timezone.utc)))
+    db.add(Subscription(user_id=uid, platform="ios", product_id="tavsan_premium_aylik",
+                        status="active", period_type="TRIAL",
+                        expires_at=tr(D1, 0, 0).astimezone(timezone.utc) + timedelta(days=30)))
+    db.add(SorSayac(user_id=uid, gun=D, sayi=SOR_GUNLUK_DENEME))
     db.commit()
 finally:
     db.close()
-# Sor 2026-09-28'den beri yalnız premium (kota 0); gün sınırı mekanizması kota
-# > 0 iken ölçülür.
-import api.routers.chat as _chat_router                      # noqa: E402
-_chat_router.SOR_GUNLUK_UCRETSIZ = 3
 with saat_sabitle(tr(D, 23, 50)):
-    r_once = client.post("/api/v1/chat", headers=HS, json={"message": "dördüncü"})
+    r_once = client.post("/api/v1/chat", headers=HS, json={"message": "on birinci"})
 with saat_sabitle(tr(D1, 0, 10)):
     r_sonra = client.post("/api/v1/chat", headers=HS, json={"message": "yeni gün"})
-_chat_router.SOR_GUNLUK_UCRETSIZ = 0
-check("S1) 23:50 TR'de 4. soru kotaya takılıyor",
-      r_once.status_code == 403, str(r_once.status_code))
+check("S1) 23:50 TR'de 11. soru günlük limite takılıyor (429)",
+      r_once.status_code == 429, str(r_once.status_code))
 check("S2) 00:10 TR'de (UTC hâlâ D) kota sıfırlandı",
-      r_sonra.status_code == 200 and r_sonra.json().get("ucretsiz_kalan") == 2,
+      r_sonra.status_code == 200
+      and r_sonra.json().get("ucretsiz_kalan") == SOR_GUNLUK_DENEME - 1,
       f"{r_sonra.status_code} {r_sonra.text[:100]}")
 
 # =============================================================================

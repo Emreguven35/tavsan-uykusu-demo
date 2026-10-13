@@ -1,16 +1,20 @@
 """
 subscriptions router — /api/v1/subscriptions
 
-POST /verify: IAP makbuzunu al, KAYDET ve status=active dön.
-GERÇEK Apple/Google doğrulaması TODO (aşağıda işaretli) — şimdilik makbuz saklanır.
+POST /verify: istemcinin gönderdiği makbuza GÜVENİLMEZ (2026-10-13 güvenlik
+düzeltmesi — eskiden her makbuz süresiz "active" yazılıyordu). Gerçek durum
+RevenueCat REST'ten (REVENUECAT_API_KEY, GET /subscribers/{user_id}) çekilir ve
+kayıt ona göre güncellenir. Sahte (mock_ ...) makbuz YALNIZ production dışında,
+süreli bir test kaydı yazar.
 GET /: kullanıcının abonelik durumu (mobil paywall bunu tüketebilir).
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from api.config import get_settings
 from api.db import get_db
 from api.deps import get_current_user
 from api.models import Subscription, User
@@ -23,40 +27,62 @@ from api.services import premium as premium_svc
 logger = logging.getLogger("tavsan.subscriptions")
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
-# Faz G5: bariz sahte/mock makbuzlar kabul edilmez (gerçek IAP doğrulaması ayrı
-# sprint; o gelene kadar en azından çöp makbuz 'active' yapılmaz).
+# Sahte makbuz önekleri — YALNIZ production dışında (yerel/test) çalışır.
 _MOCK_RECEIPT_PREFIXES = ("dev_", "mock_", "mock_receipt", "test_", "fake_", "sahte")
+# Test makbuzunun yazdığı kaydın süresi; "trial" içeren makbuz deneme yazar.
+_MOCK_SURE = timedelta(days=30)
+_MOCK_DENEME_SURE = timedelta(days=3)
+
+
+def _mock_kayit(db: Session, user: User, req: SubscriptionVerifyReq) -> Subscription:
+    """Production DIŞINDA sahte makbuz: süreli test kaydı (SANDBOX)."""
+    deneme = "trial" in req.receipt_data.lower()
+    simdi = datetime.now(timezone.utc)
+    sub = (db.query(Subscription)
+           .filter(Subscription.user_id == user.id,
+                   Subscription.product_id == req.product_id).one_or_none())
+    if sub is None:
+        sub = Subscription(user_id=user.id, platform=req.platform,
+                           product_id=req.product_id)
+        db.add(sub)
+    sub.status, sub.will_renew, sub.environment = "active", True, "SANDBOX"
+    sub.period_type = "TRIAL" if deneme else "NORMAL"
+    sub.purchased_at = simdi
+    sub.expires_at = simdi + (_MOCK_DENEME_SURE if deneme else _MOCK_SURE)
+    premium_svc.deneme_kaydet(user, sub)
+    db.commit()
+    db.refresh(sub)
+    return sub
 
 
 @router.post("/verify", response_model=SubscriptionResp)
 def verify(req: SubscriptionVerifyReq, db: Session = Depends(get_db),
            user: User = Depends(get_current_user)):
-    # Faz G5: bariz sahte/mock/boş makbuzu reddet (400). Gerçek Apple/Google
-    # doğrulaması TODO (aşağıda) — ama çöp makbuz artık 'active' olmaz.
+    """Satın alma sonrası: gerçek durum RevenueCat'ten çekilir; istemcinin
+    makbuzu karar VERMEZ. Mağazada bu ürünün kaydı yoksa 404."""
     rd = (req.receipt_data or "").strip()
-    if not rd or rd.lower().startswith(_MOCK_RECEIPT_PREFIXES):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Geçersiz makbuz")
-
-    # Aynı (user, platform, product) varsa güncelle; yoksa oluştur (upsert).
+    if rd.lower().startswith(_MOCK_RECEIPT_PREFIXES):
+        if get_settings().is_production:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Geçersiz makbuz")
+        sub = _mock_kayit(db, user, req)
+        logger.info("Test aboneliği (sahte makbuz): user=%s product=%s",
+                    user.id, req.product_id)
+        return sub
+    try:
+        veri = premium_svc.musteri_cek(user.id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail=str(e))
+    premium_svc.musteriden_guncelle(db, user, veri)
     sub = (db.query(Subscription)
            .filter(Subscription.user_id == user.id,
-                   Subscription.platform == req.platform,
-                   Subscription.product_id == req.product_id)
-           .one_or_none())
+                   Subscription.product_id == req.product_id).one_or_none())
     if sub is None:
-        sub = Subscription(user_id=user.id, platform=req.platform,
-                           product_id=req.product_id)
-        db.add(sub)
-    sub.receipt_data = req.receipt_data
-    # TODO(IAP doğrulama): Apple App Store Server API / Google Play Developer API ile
-    # makbuzu doğrula, gerçek expires_at ve status'u oradan al. Şimdilik active.
-    sub.status = "active"
-    sub.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(sub)
-    logger.info("Abonelik doğrulandı (kayıt): user=%s platform=%s product=%s",
-                user.id, req.platform, req.product_id)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Mağazada bu ürün için satın alma bulunamadı.")
+    logger.info("Abonelik doğrulandı (RevenueCat): user=%s product=%s durum=%s",
+                user.id, req.product_id, sub.status)
     return sub
 
 

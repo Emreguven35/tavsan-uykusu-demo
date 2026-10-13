@@ -118,6 +118,29 @@ def export_bekleme(user: User) -> int:
     return max(0, int(kalan.total_seconds()))
 
 
+def _kilitli_planlar(db: Session, user: User, planlar: list) -> list[dict]:
+    """Planlar, uygulamadaki kilitle AYNI biçimde (services.erisim): ücretsizde
+    eğitim programı ve gece kartı yok, denemede yalnız izinli günler. Aksi hâlde
+    dışa aktarma kilitli 13 günü açardı. Ham içerik DB'de aynen kalır."""
+    from api.deps import kademe_karari
+    from api.models import Baby
+    from api.services import erisim, plan_adapter
+    kademe, _k = kademe_karari(db, user)
+    out = []
+    for p in planlar:
+        satir = _satir(p)
+        if kademe != "premium" and isinstance(p.content, dict):
+            gun = None
+            if kademe == "deneme":
+                bebek = db.get(Baby, p.baby_id)
+                gun = (plan_adapter.egitim_gunu(bebek.training_started_at, p.plan_date)
+                       if bebek is not None else None)
+            satir["content"] = erisim.plan_icerigi_kilitle(
+                p.content, kademe, erisim.izinli_son_gun(kademe, gun))[0]
+        out.append(satir)
+    return out
+
+
 def disa_aktar(db: Session, user: User) -> dict:
     from api.models import Bookmark, ToplulukBildirimi
     from api.models import (Baby, BebekOlcumu, Block, ChatMessage,
@@ -142,7 +165,8 @@ def disa_aktar(db: Session, user: User) -> dict:
             db.query(Baby.id).filter(Baby.user_id == user.id))),
         "uyku_kayitlari": hepsi(SleepLog, SleepLog.user_id == user.id),
         "silinen_uyku_kayitlari": hepsi(SilinenSleepLog, SilinenSleepLog.user_id == user.id),
-        "planlar": hepsi(SleepPlan, SleepPlan.user_id == user.id),
+        "planlar": _kilitli_planlar(
+            db, user, db.query(SleepPlan).filter(SleepPlan.user_id == user.id).all()),
         "plan_geri_bildirimleri": hepsi(PlanFeedback, PlanFeedback.user_id == user.id),
         "sohbet": hepsi(ChatMessage, ChatMessage.user_id == user.id),
         "topluluk": {

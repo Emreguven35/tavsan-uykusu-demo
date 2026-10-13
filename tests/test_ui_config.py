@@ -84,8 +84,9 @@ check("F1) Cache-Control: private, max-age=300",
 check("F2) Vary: Authorization, X-App-Version",
       "authorization" in (h.get("vary") or "").lower()
       and "x-app-version" in (h.get("vary") or "").lower(), h.get("vary"))
-check("G1) Yanıt şekli tam {'ui': {'yeni_tasarim': bool}}",
-      r.json() == {"ui": {"yeni_tasarim": False}}, r.text)
+check("G1) Yanıt şekli tam {'ui': {'yeni_tasarim': bool}, 'destek_eposta': …}",
+      r.json() == {"ui": {"yeni_tasarim": False},
+                   "destek_eposta": "tavsanuykusu@hotmail.com"}, r.text)
 
 # E — genel bayrak açılınca build ≥ 26 herkese true (Settings süreç başına önbellekli).
 V26 = {"X-App-Version": "1.0.0+26"}
