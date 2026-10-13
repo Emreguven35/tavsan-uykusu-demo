@@ -479,6 +479,26 @@ else:
           and rh.eslestir("rastgele.m4a", rh.katalog()) is None, "")
     shutil.rmtree(_hk, ignore_errors=True)
 
+# =============================================================================
+print("C) Katalog (kısaltılmış masallar, 2026-10-13)")
+import json as _json                                           # noqa: E402
+_kat = _json.loads((ROOT / "data" / "stories.json").read_text(encoding="utf-8"))
+_m = {x["id"]: x["text"] for x in _kat["masallar"]}
+check("C1) 5 masalın her biri en fazla 4:15 (≤ 446 kelime, dakikada 105)",
+      len(_m) == 5 and all(len(t.split()) <= 446 for t in _m.values()),
+      str({k: len(t.split()) for k, t in _m.items()}))
+_PAR = "\n\n"                                                  # paragraf ayracı
+_ilk = _m["masal_aysecik_uyku_perisi"].split(_PAR)[0]
+check("C2) Ayşecik ilk paragrafı ~30 sn (45–55 kelime) ve tam cümleyle biter",
+      45 <= len(_ilk.split()) <= 55 and _ilk.rstrip()[-1] in ".!?…\"", _ilk[-60:])
+_msj = (ROOT / "docs" / "uzman_mesaj.txt").read_text(encoding="utf-8")
+check("C3) Uzman mesajı katalogla aynı metni taşıyor, önizleme işareti ilk paragraftan sonra",
+      all(t.split(_PAR)[-1] in _msj for t in _m.values())
+      and _ilk + _PAR + "— (buraya kadar önizleme) —" in _msj, "")
+check("C4) Mesajda yasak kelime yok, tek WhatsApp mesajına sığıyor",
+      not any(y in _msj for y in ("İlayda", "uzman", "STS", "kredi"))
+      and len(_msj) < 65536, str(len(_msj)))
+
 print("=" * 78)
 gecen = sum(1 for _, ok, _ in results if ok)
 print(f"TOPLAM: {gecen}/{len(results)} geçti")
