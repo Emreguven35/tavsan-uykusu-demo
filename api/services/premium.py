@@ -35,8 +35,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from api.config import (KURUCU_PREMIUM_GUN, PREMIUM_ENTITLEMENT, URUNLER,
-                        get_settings)
+from api.config import (DEMO_EPOSTALARI, KURUCU_PREMIUM_GUN, PREMIUM_ENTITLEMENT,
+                        URUNLER, get_settings)
 from api.models import PremiumHak, RevenueCatOlayi, Subscription, User
 
 logger = logging.getLogger("tavsan.premium")
@@ -107,7 +107,7 @@ def lansman_ani() -> datetime | None:
 # Kurucu üyeliğe HİÇ girmeyen hesaplar: test alanları, resmi hesap (.invalid),
 # admin/moderatörler ve env KURUCU_HARIC (virgülle e-posta) ile elle çıkarılanlar.
 KURUCU_TEST_ALANLARI = ("@example.com", "@tavsanduman.com", "@tavsansmoke.com",
-                        ".invalid")
+                        ".invalid", *DEMO_EPOSTALARI)
 
 
 def kurucu_haric_epostalar() -> set[str]:

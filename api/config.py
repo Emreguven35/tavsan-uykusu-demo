@@ -108,6 +108,11 @@ SOR_GUNLUK_DENEME = 10
 DENEME_SON_GUN = 3
 # Destek iletişimi — /config yanıtında (App Store 1.2) ve e-postalarda.
 DESTEK_EPOSTA = "tavsanuykusu@hotmail.com"
+# App Review demo hesabı (2026-10-13) — elle verilmiş süresiz premium hakkıyla
+# tam açık. Denetim raporu / bebek numaraları ve kurucu listesi DIŞINDA (test
+# hesabı). E-posta tam adres olarak yazılır; alan adı eşleşmesiyle aynı yoldan
+# (sonek) hariç tutulur.
+DEMO_EPOSTALARI = ("appreview@tavsanuykusu.com.tr",)
 
 # Uygulama içi ürünler (RevenueCat / App Store Connect ürün kimlikleri).
 # Yenilenmeyen bir ürün eklenirse süresi ("gun") burada tanımlanmalı — mağaza

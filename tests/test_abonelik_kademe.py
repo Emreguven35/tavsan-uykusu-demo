@@ -509,6 +509,12 @@ check("E3) Ürünler: yalnız aylık 1.499,99 TL / 3 gün deneme (eski 999 TL / 
       premium_svc.URUNLER.get(URUN) == {"tur": "abonelik", "fiyat_tl": 1499.99, "donem": "P1M",
                                          "deneme_gun": 3}
       and "tu_aylik" not in premium_svc.URUNLER and "tu_yillik" not in premium_svc.URUNLER, "")
+from api.services import denetim as _denetim                 # noqa: E402
+from types import SimpleNamespace as _N                      # noqa: E402
+check("E5) App Review demo hesabı test hesabı: denetim/numara ve kurucu listesi dışında",
+      "appreview@tavsanuykusu.com.tr".endswith(_denetim.TEST_ALANLARI)
+      and premium_svc.kurucu_disinda_mi(None, _N(email="appreview@tavsanuykusu.com.tr"))
+      and not "anne@tavsanuykusu.com.tr".endswith(_denetim.TEST_ALANLARI), _denetim.TEST_ALANLARI)
 check("E4) Bilinmeyen özellik açık", ERISIM_KURALLARI.get("yok") is None
       and erisim.kilitli_mi("yok", "ucretsiz") is False, "")
 
