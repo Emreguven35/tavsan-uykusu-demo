@@ -12,7 +12,8 @@ yanıtıydı ve bize ayırt edilemeyen bir 502 olarak dönüyordu.
 
 Kapsam:
   1. BETA_MODE=true → ücretsiz hesap /voice/generate ve /voice/clone 200
-  2. BETA_MODE=false → 403 + Türkçe detail (hem clone hem generate)
+  2. BETA_MODE=false → 403 + Türkçe detail (generate; clone'da yalnız
+     amac=paket — 2026-10-13'ten beri ücretsiz kayıt önizleme üretir)
   3. BETA_MODE=false + AKTİF ABONELİK → yine 200 (kapı aboneliği tanıyor)
   4. /subscriptions/status ile uçlar AYNI kararı verir (ayrışma yok)
   5. 422 gövdesi: detail tek Türkçe cümle (İngilizce hata listesi değil)
@@ -454,6 +455,11 @@ rc = c.post("/api/v1/voice/clone", headers=H(tok),
 rg = c.post("/api/v1/voice/generate", headers=H(tok),
             json={"voiceId": "VS1", "storyId": "ninni_dandini"})
 st = c.get("/api/v1/subscriptions/status", headers=H(tok)).json()
+# 2026-10-13: ücretsiz kullanıcı tam paket İSTEYEMEZ (amac=paket → 403).
+tok3 = reg("ucretsiz-paket@test.com")
+rp = c.post("/api/v1/voice/clone", headers=H(tok3),
+            files={"audio": ("s.mp3", io.BytesIO(b"A" * 900), "audio/mpeg")},
+            data={"name": "Ses", "amac": "paket"})
 
 # Aktif abonelikli kullanıcı: kapı aboneliği de tanımalı
 tok2 = reg("aboneli@test.com")
@@ -486,6 +492,8 @@ st2 = c.get("/api/v1/subscriptions/status", headers=H(tok2)).json()
 import json
 print("SONUC" + json.dumps({
     "clone_status": rc.status_code, "clone_detail": rc.json().get("detail"),
+    "clone_onizleme": rc.json().get("onizleme"),
+    "paket_status": rp.status_code, "paket_detail": rp.json().get("detail"),
     "gen_status": rg.status_code, "gen_detail": rg.json().get("detail"),
     "status_body": st,
     "abone_gen_status": rg2.status_code, "abone_status_body": st2,
@@ -504,10 +512,13 @@ if _satir is None:
 else:
     import json as _json
     _r = _json.loads(_satir[len("SONUC"):])
-    check("2a) BETA_MODE=false: ücretsiz hesapla /voice/clone → 403",
-          _r["clone_status"] == 403, str(_r["clone_status"]))
-    check("2b) 403 detail Türkçe ve TAM METİN",
-          _r["clone_detail"] == PREMIUM_MESAJ, repr(_r["clone_detail"]))
+    # 2026-10-13: ücretsiz kullanıcı da kaydeder; ona 30 sn ÖNİZLEME üretilir.
+    check("2a) BETA_MODE=false: ücretsiz hesapla /voice/clone → 200 + onizleme",
+          _r["clone_status"] == 200 and _r["clone_onizleme"] is True,
+          f'{_r["clone_status"]} {_r["clone_onizleme"]}')
+    check("2b) Ücretsiz hesapla amac=paket → 403, detail Türkçe ve TAM METİN",
+          _r["paket_status"] == 403 and _r["paket_detail"] == PREMIUM_MESAJ,
+          f'{_r["paket_status"]} {_r["paket_detail"]!r}')
     check("2c) BETA_MODE=false: ücretsiz hesapla /voice/generate → 403",
           _r["gen_status"] == 403, str(_r["gen_status"]))
     check("2d) /voice/generate 403 detail de Türkçe (gövde boş değil)",

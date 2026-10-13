@@ -63,6 +63,11 @@ class VoiceProfile(Base):
     last_cloned_at: Mapped["object | None"] = mapped_column(
         DateTime(timezone=True), nullable=True)
 
+    # Kaydın amacı (2026-10-13): "onizleme" → premium olmayan annenin tek
+    # masaldan 30 sn'lik önizlemesi; "paket" → tam paket. ESKİ SATIRLARDA NULL
+    # = tam paket (önizleme öncesi her kayıt paketti).
+    amac: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     user = relationship("User", back_populates="voice_profiles")
     audios = relationship("VoiceAudio", back_populates="profile",
                           cascade="all, delete-orphan")

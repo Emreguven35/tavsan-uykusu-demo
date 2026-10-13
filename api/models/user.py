@@ -62,6 +62,11 @@ class User(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True)
     deneme_kullanildi_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # Anne Sesi (2026-10-13): önizlemeyle kayıt yapmış anne premium alınca
+    # `amac=paket` ile BİR KEZ 30 günlük beklemesiz yeniden kaydeder. Hakkın
+    # kullanıldığı an burada — NULL ise hak duruyor.
+    ses_paket_kaydi_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
     # KVKK silme hakkı: kullanıcı silinince ilişkili tüm veriler cascade ile gider.
     babies = relationship("Baby", back_populates="user",

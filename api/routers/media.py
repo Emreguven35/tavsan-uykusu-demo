@@ -1,11 +1,13 @@
 """
 media router — eğitim videolarının ve kapak görsellerinin PUBLIC sunumu.
 
-    GET /media/videos/{slug}.mp4     → video (Range destekli)
+    GET /media/videos/{slug}.mp4     → video (Range destekli, İMZALI — 24 saat)
     GET /media/posters/{slug}.jpg    → kapak görseli
     GET /media/sounds/{slug}.m4a     → uyku sesi (Range destekli, döngü)
 
 NEDEN AUTH YOK: bunlar kişisel veri içermez ve herkese aynı dosya sunulur.
+(Videolar 2026-10-13'ten beri premium kilidi yüzünden İMZALIDIR; imza
+Authorization başlığı gerektirmez, oynatıcı yine çalar.)
 Daha önemlisi iOS/AVPlayer Range isteklerini **Authorization başlığı taşımadan**
 yapar; korumalı bir uca bağlanan oynatıcı ilk byte'ta 401 alır. Ses paketleri
 (PRIVATE, kişiye özel) imzalı `/media/{yol:path}` ucundan sunulmaya devam eder.
@@ -34,6 +36,8 @@ router = APIRouter(prefix="/media", tags=["media"])
 # Bir yıl. Dosya içeriği slug başına DEĞİŞMEZ (yeni içerik → yeni slug), bu
 # yüzden immutable işaretlenebilir: mobil bir kez indirir, bir daha sormaz.
 CACHE = "public, max-age=31536000, immutable"
+# İmzalı video: bağlantı 24 saat yaşar; ara önbellekler paylaşmasın.
+VIDEO_CACHE = "private, max-age=86400"
 
 # Slug sözleşmesi: küçük harf, rakam, tire. CSV üretimi bunu garanti eder;
 # burada ayrıca doğrulanır (traversal ve sürpriz dosya adı engeli).
@@ -73,11 +77,12 @@ def _akit(p: Path, bas: int, bit: int):
             yield blok
 
 
-def _range_yaniti(request: Request, p: Path, tur: str) -> Response:
+def _range_yaniti(request: Request, p: Path, tur: str,
+                  cache: str = CACHE) -> Response:
     """Range varsa 206, yoksa 200. Geçersiz/kapsam dışı aralıkta 416."""
     boyut = p.stat().st_size
     ham = request.headers.get("range")
-    ortak = {"Cache-Control": CACHE, "Accept-Ranges": "bytes"}
+    ortak = {"Cache-Control": cache, "Accept-Ranges": "bytes"}
 
     if not ham:
         # Range yok → tam dosya. FileResponse sendfile kullanır (daha hızlı).
@@ -117,10 +122,20 @@ def _range_yaniti(request: Request, p: Path, tur: str) -> Response:
 
 
 @router.get("/videos/{slug}.mp4")
-def video(slug: str, request: Request):
-    """Eğitim videosu. Range destekli (iOS oynatıcı için ŞART), 1 yıl cache."""
-    return _range_yaniti(request, _dosya(storage.video_yolu(_slug_dogrula(slug))),
-                         "video/mp4")
+def video(slug: str, request: Request, exp: int = 0, sig: str = ""):
+    """Eğitim videosu. Range destekli (iOS oynatıcı için ŞART).
+
+    2026-10-13: İMZALI — bağlantı `exp` + `sig` taşır ve 24 saat yaşar
+    (GET /education/videos üretir). Kilitli video premium olmayana hiç adres
+    almadığı için açılamaz. Oynatıcı Range isteklerini aynı adresle attığından
+    Authorization başlığı yine gerekmez. Önce imza, sonra dosya: geçersiz
+    imzada dosyanın var olup olmadığı sızdırılmaz."""
+    yol = storage.video_yolu(_slug_dogrula(slug))
+    if not storage.imza_gecerli_mi(yol, exp, sig):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Bağlantının süresi doldu, listeyi yenileyin")
+    return _range_yaniti(request, _dosya(yol), "video/mp4",
+                         cache=VIDEO_CACHE)
 
 
 @router.get("/posters/{slug}.jpg")

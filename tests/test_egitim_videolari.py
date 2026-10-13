@@ -388,19 +388,28 @@ _VERI = bytes(range(256)) * 400                    # 102.400 bayt sahte mp4
 storage.depo().yaz(storage.video_yolu("ilk-gunler"), _VERI)
 storage.depo().yaz(storage.poster_yolu("ilk-gunler"), b"\xff\xd8\xff" + b"x" * 500)
 
-r = client.get("/media/videos/ilk-gunler.mp4")
+
+def _imzali(slug: str, omur: int = 86400) -> str:
+    """2026-10-13: video ucu imza istiyor — katalogdaki gibi imzalı göreli adres."""
+    u = storage.imzali_url(storage.video_yolu(slug), omur)
+    return u[u.index("/media/"):]
+
+
+_IMZALI = _imzali("ilk-gunler")
+
+r = client.get(_IMZALI)
 check("5) Range'siz istek 200 ve tam dosya",
       r.status_code == 200 and len(r.content) == len(_VERI),
       f"{r.status_code} {len(r.content)}")
 check("5a) Accept-Ranges: bytes ilan ediliyor",
       r.headers.get("accept-ranges") == "bytes", r.headers.get("accept-ranges"))
-check("5b) Cache 1 yıl ve immutable",
-      r.headers.get("cache-control") == "public, max-age=31536000, immutable",
+check("5b) İmzalı video: özel önbellek, 1 gün",
+      r.headers.get("cache-control") == "private, max-age=86400",
       r.headers.get("cache-control"))
 check("5c) Doğru içerik türü", r.headers.get("content-type") == "video/mp4",
       r.headers.get("content-type"))
 
-r = client.get("/media/videos/ilk-gunler.mp4", headers={"Range": "bytes=0-1"})
+r = client.get(_IMZALI, headers={"Range": "bytes=0-1"})
 check("5d) AVPlayer'ın ilk yoklaması (bytes=0-1) → 206",
       r.status_code == 206 and r.content == _VERI[0:2], f"{r.status_code}")
 check("5e) Content-Range doğru",
@@ -409,43 +418,67 @@ check("5e) Content-Range doğru",
 check("5f) Content-Length aralık kadar",
       r.headers.get("content-length") == "2", r.headers.get("content-length"))
 
-r = client.get("/media/videos/ilk-gunler.mp4",
+r = client.get(_IMZALI,
                headers={"Range": "bytes=1000-1999"})
 check("5g) Ortadan aralık (sarma) doğru baytları veriyor",
       r.status_code == 206 and r.content == _VERI[1000:2000], str(r.status_code))
 
-r = client.get("/media/videos/ilk-gunler.mp4", headers={"Range": "bytes=102000-"})
+r = client.get(_IMZALI, headers={"Range": "bytes=102000-"})
 check("5h) Açık uçlu aralık dosya sonuna kadar gider",
       r.status_code == 206 and r.content == _VERI[102000:]
       and r.headers.get("content-range") == f"bytes 102000-{len(_VERI)-1}/{len(_VERI)}",
       r.headers.get("content-range"))
 
-r = client.get("/media/videos/ilk-gunler.mp4", headers={"Range": "bytes=-500"})
+r = client.get(_IMZALI, headers={"Range": "bytes=-500"})
 check("5i) Sondan aralık (bytes=-500)",
       r.status_code == 206 and r.content == _VERI[-500:], str(r.status_code))
 
-r = client.get("/media/videos/ilk-gunler.mp4",
+r = client.get(_IMZALI,
                headers={"Range": "bytes=999999-1000000"})
 check("5j) Kapsam dışı aralık → 416 + Content-Range: bytes */boyut",
       r.status_code == 416
       and r.headers.get("content-range") == f"bytes */{len(_VERI)}",
       f"{r.status_code} {r.headers.get('content-range')}")
 
-r = client.get("/media/videos/ilk-gunler.mp4", headers={"Range": "sayfa=1-2"})
+r = client.get(_IMZALI, headers={"Range": "sayfa=1-2"})
 check("5k) Anlaşılmayan Range yok sayılır (200, tam dosya)",
       r.status_code == 200 and len(r.content) == len(_VERI), str(r.status_code))
 
 check("5l) Poster sunuluyor",
       client.get("/media/posters/ilk-gunler.jpg").status_code == 200, "")
 check("5m) Olmayan slug → 404",
-      client.get("/media/videos/hic-yok.mp4").status_code == 404, "")
+      client.get(_imzali("hic-yok")).status_code == 404, "")
 check("5n) Yol kaçışı denemesi slug deseninde takılıyor",
       client.get("/media/videos/..%2F..%2Fetc.mp4").status_code in (400, 404),
       str(client.get("/media/videos/..%2F..%2Fetc.mp4").status_code))
-check("5o) Video ucu AUTH İSTEMİYOR (oynatıcı başlık taşımıyor)",
+check("5o) Video ucu AUTH İSTEMİYOR (oynatıcı başlık taşımıyor; imza yeter)",
       "authorization" not in {k.lower() for k in
-                              client.get("/media/videos/ilk-gunler.mp4")
+                              client.get(_IMZALI)
                               .request.headers}, "")
+
+# 2026-10-13 — video adresi İMZALI ve süreli.
+check("5q) İmzasız video isteği → 403",
+      client.get("/media/videos/ilk-gunler.mp4").status_code == 403,
+      str(client.get("/media/videos/ilk-gunler.mp4").status_code))
+check("5r) Süresi dolmuş imza → 403",
+      client.get(_imzali("ilk-gunler", -10)).status_code == 403, "")
+_baska = _imzali("hic-yok").split("?", 1)[1]
+check("5s) Başka videonun imzası bu videoyu açmaz → 403",
+      client.get(f"/media/videos/ilk-gunler.mp4?{_baska}").status_code == 403, "")
+_kat = client.get("/api/v1/education/videos", headers=H).json()
+_adr = [v["video_url"] for c in _kat["categories"] for v in c["videos"]]
+check("5t) Katalog adresi imzalı (exp+sig) ve ~24 saatlik",
+      _adr and all("exp=" in a and "sig=" in a for a in _adr if a)
+      and all(0 < int(a.split("exp=")[1].split("&")[0])
+              - int(datetime.now(timezone.utc).timestamp()) <= 86400
+              for a in _adr if a), str(_adr[:1]))
+# Bu dosyadaki test videolarının başlıkları ücretsiz üçlüde değil (kilitli,
+# adres yok); adres üreten fonksiyon doğrudan denenir.
+_ilk = education.video_adresi("/media/videos/ilk-gunler.mp4")
+check("5u) Katalogdaki imzalı adres videoyu açıyor",
+      _ilk is not None and client.get(_ilk[_ilk.index("/media/"):],
+                                      headers={"Range": "bytes=0-1"}).status_code == 206,
+      str(_ilk))
 
 # İmzalı ses ucu BOZULMADI: /media/{yol:path} yakalayıcısı hâlâ çalışıyor.
 check("5p) Ses paketi ucu hâlâ imza istiyor (rota sırası bozulmadı)",

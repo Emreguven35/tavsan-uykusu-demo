@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field, model_validator
 class VoiceCloneResp(BaseModel):
     voiceId: str
     sampleUrl: str | None = None
+    # 2026-10-13: premium olmayan (deneme dahil) kayıt → tek masaldan 30 sn'lik
+    # önizleme üretilir, tam paket DEĞİL.
+    onizleme: bool = False
 
 
 class SesSilResp(BaseModel):
@@ -60,6 +63,11 @@ class VoiceStatusResp(BaseModel):
     retry_after_days: int = 0
     # v2.7.2 — aynı sınırın sayı hâli (mobil "1/1 hak" gösterir).
     kayit_hakki: KayitHakki = KayitHakki()
+    # 2026-10-13 — güncel kayıt yalnız 30 sn'lik önizleme mi?
+    onizleme: bool = False
+    # Premium anne `amac=paket` ile 30 gün beklemeden BİR KEZ yeniden
+    # kaydedebilir mi (önizlemeden tam pakete geçiş)?
+    paket_kaydi_hakki: bool = False
 
 
 class StoryItem(BaseModel):
@@ -73,14 +81,17 @@ class StoryItem(BaseModel):
     audio_url: str | None = None
     # Mobilin basacağı durum metni.
     durum: str = "hazirlaniyor"      # hazir | hazirlaniyor | uretilemedi
-    # Aktif ses paketinde (VOICE_PACKAGE) mi? False ise bu içerik anne sesiyle
+    # Aktif ses paketinde (voice_paket.paket_listesi) mi? False ise bu içerik anne sesiyle
     # HİÇ üretilmeyecek — `durum` "hazirlaniyor" görünse bile beklemek boşuna.
     in_package: bool = False
-    # B4 — Anne Sesi premium; yalnız UCRETSIZ_NINNI ücretsiz. BETA_MODE'da False.
+    # B4 — Anne Sesi premium (2026-10-13: ücretsiz ninni kalktı; premium
+    # olmayana yalnız önizleme). Deneme premium sayılmaz. BETA_MODE'da False.
     locked: bool = False
     premium_required: bool = False
-    # B5 — herkese açık içerik (config.UCRETSIZ_NINNI).
+    # B5 — herkese açık içerik (config.UCRETSIZ_NINNI; artık hiçbiri).
     is_free: bool = False
+    # 2026-10-13 — bu dosya masalın 30 sn'lik önizlemesi (tam masal değil).
+    onizleme: bool = False
     # Çalınacak sürümün sesi: "anne" (kendi klonu) | "genel" (anlatıcı) | None.
     ses_kaynagi: str | None = None
 
@@ -90,7 +101,7 @@ class StoriesResp(BaseModel):
     ninniler: list[StoryItem]
     # Pakette OLMAYAN içerikler de listelenir (hazir=False) ki mobil katalogun
     # tamamını gösterebilsin; bu alan hangilerinin üretileceğini söyler.
-    paket: str = "starter"
+    paket: str = "standart"
     paket_icerikleri: list[str] = []
 
 

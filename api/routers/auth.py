@@ -235,6 +235,11 @@ def delete_account(db: Session = Depends(get_db),
     db.delete(user)                      # relationship cascade + FK ON DELETE CASCADE
     db.commit()
     logger.info("Hesap silindi (KVKK): user_id=%s", user_id)
+    # RevenueCat müşteri kaydı da silinir (anahtar yoksa/başarısızsa yalnız
+    # log — hesap silme ENGELLENMEZ). DB silindikten SONRA: çağrı yavaşlarsa
+    # ya da düşerse hesap yine silinmiş olur.
+    from api.services import revenuecat_silme
+    revenuecat_silme.aboneyi_sil(user_id)
     return MessageResp(detail="Hesap ve tüm ilişkili veriler silindi")
 
 

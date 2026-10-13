@@ -99,7 +99,7 @@ ERISIM_KURALLARI: dict[str, str] = {
 }
 KADEME_SIRASI: dict[str, int] = {"ucretsiz": 0, "deneme": 1, "premium": 2}
 UCRETSIZ_VIDEO_KATEGORILERI = ("baslarken",)
-UCRETSIZ_NINNI = "ninni_dandini"
+UCRETSIZ_NINNI = None  # 2026-10-13: ücretsiz ninni kalktı (eskiden "ninni_dandini"); premium olmayana yalnız 30 sn önizleme
 # 2026-09-28 ürün kararı: Sor ücretsiz kullanıcıya KAPALI (günlük hak 0).
 SOR_GUNLUK_UCRETSIZ = 0
 # 2026-10-13: deneme süresince günde 10 soru; premium sınırsız.
@@ -110,13 +110,14 @@ DENEME_SON_GUN = 3
 DESTEK_EPOSTA = "tavsanuykusu@hotmail.com"
 
 # Uygulama içi ürünler (RevenueCat / App Store Connect ürün kimlikleri).
-# Yenilenmeyen ürünün süresi mağazadan gelmez — burada tanımlıdır.
+# Yenilenmeyen bir ürün eklenirse süresi ("gun") burada tanımlanmalı — mağaza
+# vermez; süresiz kayıt erişim VERMEZ (services.premium).
 # 2026-10-13: tek abonelik — aylık 1.499,99 TL, 3 gün ücretsiz deneme. Eski
-# tu_aylik (999 TL) / tu_yillik (3.999 TL), 7 gün denemeli kayıtlar kaldırıldı.
+# tu_aylik (999 TL) / tu_yillik (3.999 TL), 7 gün denemeli kayıtlar ve 45 günlük
+# yenilenmeyen tu_egitim_45 kaldırıldı.
 URUNLER: dict[str, dict] = {
     "tavsan_premium_aylik": {"tur": "abonelik", "fiyat_tl": 1499.99, "donem": "P1M",
                              "deneme_gun": 3},
-    "tu_egitim_45": {"tur": "yenilenmeyen", "fiyat_tl": 2499, "gun": 45},
 }
 PREMIUM_ENTITLEMENT = "premium"
 

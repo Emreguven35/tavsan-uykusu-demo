@@ -151,12 +151,13 @@ d = durum(HA)
 check("W9) Bitiş → premium değil", d["premium"] is False and d["source"] == "none", str(d))
 
 HB, UB = hesap("paket@gercek.com")
+# 2026-10-13: tu_egitim_45 kaldırıldı. Süresi tanımsız yenilenmeyen ürün
+# (bitişi olmayan kayıt) erişim VERMEZ.
 gonder(olay("NON_RENEWING_PURCHASE", UB, urun="tu_egitim_45",
             purchased_at_ms=MS(SIMDI - timedelta(days=1))))
 d = durum(HB)
-check("W10) 45 günlük paket → premium, bitiş satın alma + 45 gün, yenilenmez",
-      d["premium"] and d["will_renew"] is False
-      and d["expires_at"].startswith((SIMDI + timedelta(days=44)).date().isoformat()), str(d))
+check("W10) Süresi tanımsız yenilenmeyen ürün → bitişsiz kayıt, premium DEĞİL",
+      d["premium"] is False and d["kademe"] == "ucretsiz", str(d))
 
 HC, UC = hesap("odeme-sorunu@gercek.com")
 gonder(olay("INITIAL_PURCHASE", UC, expiration_at_ms=MS(SIMDI - timedelta(hours=1))))
@@ -285,8 +286,11 @@ BL = client.post("/api/v1/babies", headers=HL, json={
     "birth_date": (date.today() - timedelta(days=245)).isoformat()}).json()["id"]
 _db = SessionLocal()
 try:
-    for slug, kat in (("uyku-egitimine-giris", "baslarken"), ("gun-1-3", "adim_adim")):
-        _db.add(EducationVideo(id=uuid.uuid4(), slug=slug, title=slug, category=kat,
+    # 2026-10-13: açık videolar BAŞLIKLA belirlenir (services.ucretsiz_erisim).
+    for slug, kat, baslik in (
+            ("uyku-egitimine-giris", "baslarken", "Uyku eğitimine giriş ve genel bilgilendirme"),
+            ("gun-1-3", "adim_adim", "gun-1-3")):
+        _db.add(EducationVideo(id=uuid.uuid4(), slug=slug, title=baslik, category=kat,
                                order_in_category=1, duration_sec=60, chapters=[],
                                video_url=storage.video_url(slug), stage_tags=["genel"]))
     for slug, bedava in (("beyaz-gurultu", True), ("fan", False)):
@@ -330,14 +334,18 @@ kl = kilit_durumu(HL, BL)
 check("L1) Eğitim programı kilitli: premium_required + days çıkarıldı, çizelge kaldı",
       kl["plan_kilit"][0] is True and "egitim_programi" in kl["plan_kilit"][1]
       and kl["plan_kilit"][2] == 0 and kl["plan_kilit"][3] > 0, str(kl["plan_kilit"]))
-check("L2) Videolar: Başlarken açık, diğerleri kilitli",
+check("L2) Videolar: açık listedeki (başlık) açık, diğerleri kilitli",
       kl["video"] == {"uyku-egitimine-giris": False, "gun-1-3": True}, str(kl["video"]))
 # 2026-10-13: uyku seslerinin hepsi ücretsiz (ERISIM_KURALLARI ses_diger).
 check("L3) Sesler: hepsi açık (ücretsiz)",
       kl["ses"] == {"beyaz-gurultu": False, "fan": False}, str(kl["ses"]))
-check("L4) Anne Sesi: yalnız 1 ninni açık",
-      [k for k, v in kl["hikaye"].items() if not v] == ["ninni_dandini"], str(kl["hikaye"]))
-check("L5) Ses klonlama 403 + premium_required", kl["klon"] == (403, True), str(kl["klon"]))
+# 2026-10-13: ücretsiz ninni kalktı — premium olmayana yalnız 30 sn önizleme.
+check("L4) Anne Sesi: premium değilse hiçbir içerik açık değil",
+      kl["hikaye"] and all(kl["hikaye"].values()), str(kl["hikaye"]))
+# 2026-10-13: ücretsiz kullanıcı da kaydeder (önizleme) — kapı 403 DEĞİL
+# (burada ElevenLabs sahte anahtarla 503 döner; premium kapısına takılmadı).
+check("L5) Ses klonlama premium kapısına takılmıyor (önizleme)",
+      kl["klon"][0] != 403 and kl["klon"][1] is not True, str(kl["klon"]))
 check("L6) Kayıt girme ücretsiz (200)", kl["kayit"] == 200, str(kl["kayit"]))
 # 2026-09-28: Sor YALNIZ PREMIUM (SOR_GUNLUK_UCRETSIZ = 0) — ilk soru 403.
 _sor0 = client.post("/api/v1/chat", headers=HL, json={"message": "soru"})

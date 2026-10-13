@@ -1,57 +1,95 @@
 """
 Ses paketi tanımı — anne başına hangi içerikler üretilecek.
 
-KARAR (2026-09-22, maliyet ölçümünden sonra): `starter` paketi 3 ninni + EN KISA
-1 masal. Ölçüm — tam set (5 masal + 3 ninni) anne başına 24.233 karakter /
-2,67 USD; ElevenLabs kotası 30.000 kredi/ay ise bu AYDA 2 ANNE demek. Starter
-4.986 karakter / 0,55 USD → aynı kotada ayda ~12 anne. Masallar ninnilerden
-12 kat pahalı; maliyetin tamamı masal sayısında.
+KARAR (2026-10-13): paket 5 ninni + 5 masal. Liste AYARDAN gelir:
+    VOICE_PAKET_NINNILER  virgülle ayrılmış içerik kimlikleri (en fazla 5)
+    VOICE_PAKET_MASALLAR  virgülle ayrılmış içerik kimlikleri (en fazla 5)
+Ayar yoksa aşağıdaki varsayılanlar. Katalogda (data/stories.json) henüz
+BULUNMAYAN kimlik üretilmez — o yer boş kalır (yeni ninni kayıtları gelince
+kataloğa ve listeye eklenir; içerik uydurulmaz). Bugün katalogda 3 ninni var,
+yani ninni tarafında 2 yer boş.
 
-Paket env ile seçilir (VOICE_PACKAGE=starter|full); içerik listesi KODDA durur
-ki hangi annenin ne aldığı sürümlenebilsin.
+Eski `VOICE_PACKAGE=starter|full` seçimi KALKTI. Mevcut paket sahiplerinin
+dosyaları (voice_audios) ve katalog kimlikleri değişmedi; dinledikleri içerik
+aynen sunulur. Liste yalnız YENİ üretimleri belirler.
+
+ÖNİZLEME (premium olmayan, deneme dahil): tek masalın en fazla 30 sn'si.
+Metnin yalnız baş kısmı seslendirilir (maliyet), ses sunucuda 30 sn'de
+kesilir (services/mp3.kes). Masal ayardan: VOICE_ONIZLEME_ICERIK.
 """
 import logging
 import os
+import re
 
 from api.services import voice as voice_svc
 
 logger = logging.getLogger("tavsan.voice.paket")
 
-# Başlangıç paketi — 3 ninni + en kısa masal (Ayşecik ile Uyku Perisi, 3.870
-# karakter). Sıra ÜRETİM sırasıdır: ninniler önce, çünkü kısa ve anne ilk
-# dakikalarda bir şey dinleyebilsin.
-STARTER_ICERIKLER = (
+PAKET_NINNI_SAYISI = 5
+PAKET_MASAL_SAYISI = 5
+VARSAYILAN_NINNILER = (
     "ninni_dandini",
     "ninni_ay_isigi",
     "ninni_uyu_yavrum",
+)
+VARSAYILAN_MASALLAR = (
     "masal_aysecik_uyku_perisi",
+    "masal_kelogan_sihirli_degnek",
+    "masal_cirkin_ordek_yavrusu",
+    "masal_uc_kucuk_domuzcuk",
+    "masal_kirmizi_baslikli_kiz",
 )
 
-VARSAYILAN_PAKET = "starter"
+PAKET_ADI = "standart"
+
+AMAC_PAKET = "paket"
+AMAC_ONIZLEME = "onizleme"
+ONIZLEME_SN = 30
+VARSAYILAN_ONIZLEME = "masal_aysecik_uyku_perisi"
+# Masal profili yavaş anlatım; 30 sn'yi rahat dolduracak kadar metin alınır,
+# fazlası kesilir. Tam masal (~4.000 karakter) seslendirilmez.
+ONIZLEME_KARAKTER = 700
+
+
+def _liste(env: str, varsayilan: tuple, ust: int) -> list[str]:
+    ham = os.getenv(env)
+    if ham is None or not ham.strip():
+        idler = list(varsayilan)
+    else:
+        idler = [p.strip() for p in ham.split(",") if p.strip()]
+    idler = list(dict.fromkeys(idler))
+    if len(idler) > ust:
+        logger.warning("%s %d içerik veriyor, ilk %d alındı", env, len(idler), ust)
+    return idler[:ust]
+
+
+def paket_listesi() -> dict[str, list[str]]:
+    """Ayardaki paket: {"ninniler": [...], "masallar": [...]} (katalog süzülmeden)."""
+    return {"ninniler": _liste("VOICE_PAKET_NINNILER", VARSAYILAN_NINNILER,
+                               PAKET_NINNI_SAYISI),
+            "masallar": _liste("VOICE_PAKET_MASALLAR", VARSAYILAN_MASALLAR,
+                               PAKET_MASAL_SAYISI)}
 
 
 def paket_adi() -> str:
-    ad = (os.getenv("VOICE_PACKAGE") or VARSAYILAN_PAKET).strip().lower()
-    return ad if ad in ("starter", "full") else VARSAYILAN_PAKET
+    return PAKET_ADI
 
 
 def paket_icerikleri() -> list[dict]:
-    """Bu kurulumda üretilecek içerikler (katalogdaki tam kayıtlar).
+    """Paket üretiminde seslendirilecek içerikler (katalogdaki tam kayıtlar).
 
-    `full`: katalogdaki her şey. `starter`: yukarıdaki dört kimlik.
-    Katalogda BULUNMAYAN bir kimlik sessizce atlanmaz — uyarı loglanır, çünkü
-    listeyle katalog ayrışırsa anne eksik paket alır ve kimse fark etmez."""
+    Sıra ÜRETİM sırasıdır: ninniler önce (kısa, anne ilk dakikalarda bir şey
+    dinleyebilsin), sonra masallar. Katalogda BULUNMAYAN kimlik atlanır ve
+    uyarı loglanır — yer boş kalır."""
     cat = voice_svc.load_stories()
-    tumu = list(cat.get("ninniler", [])) + list(cat.get("masallar", []))
-    if paket_adi() == "full":
-        return tumu
-
-    indeks = {x["id"]: x for x in tumu}
+    indeks = {x["id"]: x for x in
+              list(cat.get("ninniler", [])) + list(cat.get("masallar", []))}
+    liste = paket_listesi()
     out = []
-    for cid in STARTER_ICERIKLER:
+    for cid in liste["ninniler"] + liste["masallar"]:
         item = indeks.get(cid)
         if item is None:
-            logger.warning("Paket içeriği katalogda YOK: %s — atlandı", cid)
+            logger.warning("Paket içeriği katalogda YOK: %s — yer boş kalır", cid)
             continue
         out.append(item)
     return out
@@ -66,3 +104,42 @@ def icerik_bul(content_id: str) -> dict | None:
         if x["id"] == content_id:
             return x
     return None
+
+
+def onizleme_icerik_id() -> str:
+    return (os.getenv("VOICE_ONIZLEME_ICERIK") or VARSAYILAN_ONIZLEME).strip()
+
+
+def onizleme_metni(metin: str, ust: int = ONIZLEME_KARAKTER) -> str:
+    """Metnin baş kısmı — cümle sınırında, en az bir cümle."""
+    metin = (metin or "").strip()
+    if len(metin) <= ust:
+        return metin
+    cumleler = re.split(r"(?<=[.!?…])\s+", metin)
+    out = ""
+    for c in cumleler:
+        if out and len(out) + 1 + len(c) > ust:
+            break
+        out = f"{out} {c}".strip()
+    return out or metin[:ust]
+
+
+def onizleme_icerigi() -> dict | None:
+    """Önizlemede seslendirilecek tek içerik (metni kısaltılmış kopya)."""
+    item = voice_svc.find_story(onizleme_icerik_id())
+    if item is None:
+        logger.warning("Önizleme içeriği katalogda YOK: %s", onizleme_icerik_id())
+        return None
+    kopya = dict(item)
+    kopya["text"] = onizleme_metni(item.get("text", ""))
+    kopya["onizleme"] = True
+    return kopya
+
+
+def uretim_icerikleri(amac: str | None) -> list[dict]:
+    """Profilin amacına göre üretilecek içerikler. Önizleme → tek kısa masal;
+    paket ya da eski profiller (amac NULL) → paket."""
+    if amac == AMAC_ONIZLEME:
+        item = onizleme_icerigi()
+        return [item] if item else []
+    return paket_icerikleri()

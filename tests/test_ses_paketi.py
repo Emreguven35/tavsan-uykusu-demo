@@ -52,7 +52,11 @@ os.environ["JWT_SECRET"] = "test-secret-en-az-otuz-iki-karakter-uzunlugunda"
 os.environ["ENVIRONMENT"] = "development"
 os.environ["MAIL_PROVIDER"] = "disabled"
 os.environ["MEDIA_ROOT"] = str(_MEDYA)
-os.environ["VOICE_PACKAGE"] = "starter"
+# 2026-10-13: paket listesi ayardan (VOICE_PAKET_*). Bu dosya eski 4'lü
+# paketle (3 ninni + en kısa masal) ölçülüyor; varsayılan 5+5 yapı
+# tests/test_premium_yan_isler.py'de.
+os.environ["VOICE_PAKET_NINNILER"] = "ninni_dandini,ninni_ay_isigi,ninni_uyu_yavrum"
+os.environ["VOICE_PAKET_MASALLAR"] = "masal_aysecik_uyku_perisi"
 os.environ["BETA_MODE"] = "true"                 # premium kapısı açık
 os.environ["ELEVENLABS_API_KEY"] = "test-key"
 os.environ["ELEVENLABS_VOICE_ID"] = "ANLATICI"
@@ -229,7 +233,7 @@ check("P1o) Hazır içerikte imzalı audio_url + durum=hazir",
 check("P1p) Pakette OLMAYAN masallar 'hazirlaniyor' değil listede duruyor",
       len(_hepsi) == 8 and any(not x["hazir"] for x in _hepsi), str(len(_hepsi)))
 check("P1q) Yanıt paket adını ve içerik listesini taşıyor",
-      _st["paket"] == "starter" and set(_st["paket_icerikleri"]) == set(PAKET),
+      _st["paket"] == "standart" and set(_st["paket_icerikleri"]) == set(PAKET),
       str(_st.get("paket_icerikleri")))
 check("P1q2) Her içerikte in_package: paketteki 4 True, kalan 4 False",
       {x["id"] for x in _hepsi if x.get("in_package") is True} == set(PAKET)
@@ -303,8 +307,16 @@ _gercek_paket = voice_router.voice_paket
 
 
 class PatlayanPaket:
+    AMAC_PAKET = _gercek_paket.AMAC_PAKET
+    AMAC_ONIZLEME = _gercek_paket.AMAC_ONIZLEME
+
     @staticmethod
     def paket_boyutu():
+        raise RuntimeError("DB yazımı simüle edilen hata")
+
+    # 2026-10-13: profil satırı uretim_icerikleri(amac) ile kuruluyor.
+    @staticmethod
+    def uretim_icerikleri(amac=None):
         raise RuntimeError("DB yazımı simüle edilen hata")
 
 

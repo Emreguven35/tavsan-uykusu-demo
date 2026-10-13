@@ -185,6 +185,14 @@ check("E6a) Konu ve cevap şikâyeti 200", r1.status_code == 200 and r2.status_c
       (r1.text[:100], r2.text[:100]))
 check("E6b) Aynı kişiden tekrar şikâyet 409", sikayet(A, "thread", tE).status_code == 409, "")
 check("E6c) Olmayan içerik 404", sikayet(A, "thread", str(uuid.uuid4())).status_code == 404, "")
+# 2026-10-13: oto-hide yalnız 24 saatten eski hesapların şikâyetini sayar.
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: E402
+from api.db import SessionLocal as _SL                                  # noqa: E402
+from api.models import User as _U                                       # noqa: E402
+_s = _SL()
+for _u in _s.query(_U).filter(_U.email.in_(["a@test.com", "c@test.com"])).all():
+    _u.created_at = _dt.now(_tz.utc) - _td(days=2)
+_s.commit(); _s.close()
 r3 = sikayet(C, "thread", tE)
 check("E6d) İkinci farklı kişi şikâyet edince içerik incelemeye alınır (gizlenir)",
       r3.status_code == 200 and "Şikâyet edilecek konu" not in basliklar(A), r3.text[:100])
