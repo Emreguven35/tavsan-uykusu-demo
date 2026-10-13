@@ -76,6 +76,8 @@ def send_email(to: str, subject: str, text: str, html: str | None = None) -> dic
     }
     if html:
         payload["html"] = html
+    if settings.mail_reply_to:
+        payload["reply_to"] = settings.mail_reply_to
 
     try:
         r = requests.post(

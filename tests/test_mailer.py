@@ -5,6 +5,7 @@ Kapsam:
   1. RESEND_API_KEY yoksa console fallback (ok=True, akış kırılmaz)
   2. Anahtar varsa Resend'e doğru payload gider (from/to/subject/text/html)
   3. Authorization başlığı Bearer <key>
+  3b. MAIL_REPLY_TO yalnız tanımlıysa reply_to olarak gider
   4. Resend HTTP hatası → ok=False ama EXCEPTION YOK
   5. Ağ hatası (exception) → ok=False ama EXCEPTION YOK
   6. Sıfırlama e-postası: derin bağlantı + düz metin token, 6 haneli kod YOK
@@ -108,6 +109,25 @@ check("2) Resend'e doğru payload gider",
 check("3) Authorization: Bearer <key>",
       (_c.get("headers") or {}).get("Authorization") == "Bearer re_test_key_123",
       str(_c.get("headers")))
+check("3b) MAIL_REPLY_TO tanımsız → payload'da reply_to YOK (bugünkü davranış)",
+      "reply_to" not in _p and set(_p) == {"from", "to", "subject", "text", "html"},
+      str(sorted(_p)))
+
+# MAIL_REPLY_TO tanımlı → reply_to gider; boşluklar atılır, diğer alanlar aynı
+reload_settings(MAIL_REPLY_TO="  cevap@example.com ")
+CALLS.clear()
+r = mailer.send_email("anne@example.com", "Konu", "Düz metin", html="<p>HTML</p>")
+_p2 = (CALLS[0] if CALLS else {}).get("json", {})
+check("3c) MAIL_REPLY_TO tanımlı → reply_to gider, diğer alanlar aynı",
+      r["ok"] is True and _p2.get("reply_to") == "cevap@example.com"
+      and {k: v for k, v in _p2.items() if k != "reply_to"} == _p,
+      str(_p2.get("reply_to")))
+reload_settings(MAIL_REPLY_TO="")
+CALLS.clear()
+mailer.send_email("anne@example.com", "Konu", "Düz metin")
+check("3d) MAIL_REPLY_TO boş → reply_to gönderilmez",
+      CALLS and "reply_to" not in CALLS[0]["json"], str(CALLS[0]["json"] if CALLS else None))
+reload_settings(MAIL_REPLY_TO=None)
 
 # =============================================================================
 # 4-5) Hata yolları — exception YOK

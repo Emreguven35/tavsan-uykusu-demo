@@ -185,6 +185,9 @@ class Settings:
         self.resend_api_key = (os.getenv("RESEND_API_KEY") or "").strip()
         self.mail_from = (os.getenv("MAIL_FROM")
                           or "Tavşan Uykusu <onboarding@resend.dev>").strip()
+        # İsteğe bağlı cevap adresi (2026-10-13): gönderen bildirim@ adresine cevap
+        # verilmesin, kullanıcının cevabı bu kutuya gitsin. Tanımsızsa alan gönderilmez.
+        self.mail_reply_to = (os.getenv("MAIL_REPLY_TO") or "").strip()
         _provider = (os.getenv("MAIL_PROVIDER") or "").strip().lower()
         if not _provider:
             if self.resend_api_key:
