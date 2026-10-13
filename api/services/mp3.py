@@ -1,5 +1,6 @@
 """
-MP3'ü çerçeve sınırında kesme — Anne Sesi önizlemesi (30 sn) için.
+MP3'ü çerçeve sınırında kesme, parçalama ve birleştirme — Anne Sesi
+önizlemesi (30 sn) ve speech-to-speech parçaları için.
 
 Çözücü/ffmpeg bağımlılığı YOK: MPEG ses çerçeveleri başlıklarından boyut ve
 süre okunarak sayılır, süre dolunca kalan çerçeveler atılır. Çerçeve sınırında
@@ -102,3 +103,51 @@ def sure(veri: bytes) -> float:
         toplam += c[1]
         i += c[0]
     return toplam
+
+
+def _cerceveler(veri: bytes):
+    """(çerçeve baytları, saniye, süre_notu_mu) — ID3 ve çöp baytlar atlanır."""
+    i, ilk = _id3_atla(veri), True
+    while i < len(veri):
+        c = _cerceve(veri, i)
+        if c is None:
+            j = veri.find(b"\xff", i + 1)
+            if j < 0:
+                break
+            i = j
+            continue
+        govde = veri[i:i + c[0]]
+        not_mu = ilk and any(e in govde[:200] for e in (b"Xing", b"Info", b"VBRI"))
+        ilk = False
+        yield govde, c[1], not_mu
+        i += c[0]
+
+
+def parcala(veri: bytes, saniye: float) -> list[bytes]:
+    """En fazla `saniye` uzunluğunda parçalar (çerçeve sınırında). ID3 ve süre
+    notu atılır; her parça kendi başına geçerli bir MP3'tür. Çerçeve
+    okunamazsa tek parça (veri olduğu gibi) döner."""
+    parcalar: list[bytes] = []
+    simdiki: list[bytes] = []
+    toplam = 0.0
+    for govde, sure_, not_mu in _cerceveler(veri):
+        if not_mu:
+            continue
+        if simdiki and toplam + sure_ > saniye + 1e-9:
+            parcalar.append(b"".join(simdiki))
+            simdiki, toplam = [], 0.0
+        simdiki.append(govde)
+        toplam += sure_
+    if simdiki:
+        parcalar.append(b"".join(simdiki))
+    return parcalar or ([veri] if veri else [])
+
+
+def birlestir(parcalar: list[bytes]) -> bytes:
+    """Parçaları tek MP3'te birleştir: her parçanın ID3 etiketi ve süre notu
+    atılır (aksi hâlde oynatıcı ilk parçanın süresini toplam sanır)."""
+    out: list[bytes] = []
+    for veri in parcalar:
+        cerceveler = [g for g, _, n in _cerceveler(veri) if not n]
+        out.append(b"".join(cerceveler) if cerceveler else veri)
+    return b"".join(out)

@@ -150,8 +150,12 @@ def uret(voice_profile_id) -> dict:
             logger.info("Üretim durdu: profil=%s silinmiş", pid)
             break
         yol = storage.ses_yolu(user_id, pid, cid)
-        veri = None
+        # ANNE_SESI_STS açıksa ve uzmanın referans kaydı varsa speech-to-speech;
+        # bayrak kapalı / kayıt yok / izin yok / STS düştüyse aynen TTS.
+        veri = _sts_dene(icerik, voice_id, user_id, pid)
         for deneme in range(1, DENEME_SAYISI + 1):
+            if veri:
+                break
             veri = _seslendir(voice_id, icerik["text"], user_id)
             if veri:
                 break
@@ -248,6 +252,27 @@ def _seslendir(voice_id: str, metin: str, user_id) -> bytes | None:
     konusma = masal_metni_hazirla(metin)
     return tts.synthesize(konusma, voice_id=voice_id, profil=tts.MASAL_PROFILI,
                           usage_op=usage_svc.OP_TTS, user_id=user_id)
+
+
+def _sts_dene(icerik: dict, voice_id: str, user_id, pid) -> bytes | None:
+    """Referans kayıttan STS. None → TTS'e düşülür. Önizlemede referansın
+    yalnız ilk ONIZLEME_SN saniyesi dönüştürülür. Geçici hatada DENEME_SAYISI
+    kadar denenir; izin yoksa hiç tekrar edilmez."""
+    from api.services import voice_sts
+    if not voice_sts.acik_mi():
+        return None
+    sinir = voice_paket.ONIZLEME_SN if icerik.get("onizleme") else None
+    for deneme in range(1, DENEME_SAYISI + 1):
+        if voice_sts.izin_yok_mu() or voice_sts.referans_yolu(icerik["id"]) is None:
+            return None
+        veri = voice_sts.seslendir(icerik, voice_id, user_id, en_fazla_sn=sinir)
+        if veri:
+            return veri
+        logger.warning("STS başarısız (deneme %d/%d): profil=%s icerik=%s",
+                       deneme, DENEME_SAYISI, pid, icerik["id"])
+    logger.warning("STS üretilemedi, TTS'e düşülüyor: profil=%s icerik=%s",
+                   pid, icerik["id"])
+    return None
 
 
 def _sure_tahmini(boyut: int) -> int:
