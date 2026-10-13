@@ -1,13 +1,16 @@
 """
-Genel (anlatıcı sesli) içerikler — B5: ücretsiz ninni.
+Genel (anlatıcı sesli) içerikler — B5: eskiden ücretsiz ninni.
 
-Anne Sesi premium; ücretsiz kullanıcının da dinleyebileceği TEK ninni
-(config.UCRETSIZ_NINNI) anlatıcı sesiyle (env ELEVENLABS_VOICE_ID) BİR KEZ
+Dandini Dastana anlatıcı sesiyle (env ELEVENLABS_VOICE_ID) BİR KEZ
 üretilir ve depoda `genel-sesler/{icerik_id}.mp3` olarak durur. Herkese aynı
 dosya; kişisel veri yok. Sunum yine imzalı bağlantıyla (/media/{yol}).
 
 /voice/stories kuralı: kullanıcının KENDİ sesiyle hazır sürümü varsa o;
-yoksa ve içerik genel sürümü olan ücretsiz ninniyse genel sürüm.
+yoksa ve içerik genel sürümü olan ninniyse genel sürüm.
+
+2026-10-13: ücretsiz ninni KALKTI (config.UCRETSIZ_NINNI = None). Genel sürüm
+yine sunulur ama Anne Sesi kilidine tabidir: premium olmayana bağlantı
+verilmez, premium anne (kendi sesiyle sürümü yoksa) dinlemeye devam eder.
 
 Üretim: scripts/genel_ninni_uret.py (konteyner içinde; ElevenLabs anahtarı orada).
 """
@@ -16,13 +19,12 @@ from __future__ import annotations
 import logging
 import os
 
-from api.config import UCRETSIZ_NINNI
 from api.services import storage
 
 logger = logging.getLogger("tavsan.genel_ses")
 
 KOVA_GENEL = "genel-sesler"
-GENEL_ICERIKLER = (UCRETSIZ_NINNI,)
+GENEL_ICERIKLER = ("ninni_dandini",)
 
 
 def genel_yol(icerik_id: str) -> str:
@@ -33,7 +35,7 @@ def genel_surum_var_mi(icerik_id: str) -> bool:
     return icerik_id in GENEL_ICERIKLER and storage.depo().var_mi(genel_yol(icerik_id))
 
 
-def uret(icerik_id: str = UCRETSIZ_NINNI, zorla: bool = False) -> dict:
+def uret(icerik_id: str = GENEL_ICERIKLER[0], zorla: bool = False) -> dict:
     """Anlatıcı sesiyle üret ve depoya yaz. Dönen: {durum, yol, bytes}.
     Depoda varsa (zorla değilse) YENİDEN ÜRETİLMEZ — kredi bir kez harcanır."""
     from api.services import voice as voice_svc

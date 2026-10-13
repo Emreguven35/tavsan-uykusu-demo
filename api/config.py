@@ -91,7 +91,7 @@ ERISIM_KURALLARI: dict[str, str] = {
     "sor": "premium",                     # yalnız premium (SOR_GUNLUK_UCRETSIZ = 0)
 }
 UCRETSIZ_VIDEO_KATEGORILERI = ("baslarken",)
-UCRETSIZ_NINNI = "ninni_dandini"
+UCRETSIZ_NINNI = None  # 2026-10-13: ücretsiz ninni kalktı (eskiden "ninni_dandini"); premium olmayana yalnız 30 sn önizleme
 # 2026-09-28 ürün kararı: Sor YALNIZ PREMIUM — ücretsiz kullanıcıya günlük hak
 # 0. BETA_MODE açıkken herkes premium olduğu için etkisiz. Eskiden 3'tü.
 SOR_GUNLUK_UCRETSIZ = 0

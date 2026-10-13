@@ -29,7 +29,7 @@ from api.schemas.community import (
     ProfileCreateReq, ProfileResp, ProfileUpdateReq, ReplyCreateReq, ReplyItem,
     ReportReq, ThreadCreateReq, ThreadDetailResp, ThreadListItem, ThreadListResp,
     Yazar)
-from api.services import moderation, topluluk, topluluk_bildirim
+from api.services import moderation, topluluk, topluluk_bildirim, topluluk_sikayet
 
 logger = logging.getLogger("tavsan.community")
 router = APIRouter(prefix="/community", tags=["community"])
@@ -142,8 +142,18 @@ def create_profile(req: ProfileCreateReq, db: Session = Depends(get_db),
     nick = req.nickname.strip()
     if moderation.check_content(nick) is not None:      # takma ad da K0'dan geçer
         raise _content_blocked("hakaret")
+    # KURALLAR ONAYI (2026-10-13): yalnız kullanıcı kabul edince yazılır.
+    #   rules_accepted=true  → şimdi yazılır
+    #   rules_accepted=false → yazılmaz (sonra POST /community/rules/accept)
+    #   alan YOK (bugünkü mobil) → yazılır: mobil bu isteği YALNIZ kurallar
+    #     ekranındaki "Kabul ediyorum" düğmesinden atıyor ve kabulü başka
+    #     yoldan göndermiyor. Yazılmasaydı kapı her açılışta yeniden çıkar,
+    #     ikinci istek 409 alır ve kullanıcı topluluğa giremezdi. Mobil alanı
+    #     göndermeye başlayınca bu geri uyum kaldırılabilir.
+    kabul = True if req.rules_accepted is None else bool(req.rules_accepted)
     prof = CommunityProfile(user_id=user.id, nickname=nick,
-                            rules_accepted_at=datetime.now(timezone.utc))
+                            rules_accepted_at=(datetime.now(timezone.utc)
+                                               if kabul else None))
     db.add(prof)
     try:
         db.commit()
@@ -152,6 +162,17 @@ def create_profile(req: ProfileCreateReq, db: Session = Depends(get_db),
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Bu takma ad kullanılıyor")
     db.refresh(prof)
+    return _profil_yaniti(prof, user)
+
+
+@router.post("/rules/accept", response_model=ProfileResp)
+def accept_rules(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Topluluk kurallarını kabul et. İdempotent: ilk kabul anı korunur."""
+    prof = _require_profile(db, user)
+    if prof.rules_accepted_at is None:
+        prof.rules_accepted_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(prof)
     return _profil_yaniti(prof, user)
 
 
@@ -558,18 +579,25 @@ def toggle_like(req: LikeReq, db: Session = Depends(get_db),
 
 
 @router.post("/report", response_model=MessageResp)
-def report(req: ReportReq, db: Session = Depends(get_db),
+def report(req: ReportReq, background: BackgroundTasks, db: Session = Depends(get_db),
            user: User = Depends(get_current_user)):
     """K3: şikayet. Anında değerlendirilir.
+      - Kullanıcı başına günde (TR) en fazla 20 şikâyet (429).
       - Aynı şikayetçi aynı hedefi tekrar edemez (409).
-      - 2 FARKLI kullanıcı şikayet ederse Haiku ne derse desin oto-hide.
-      - Aksi halde senkron Haiku: izin=false & güven yeterli → hide."""
+      - 2 FARKLI kullanıcı şikayet ederse Haiku ne derse desin oto-hide —
+        yalnız hesabı 24 saatten ESKİ şikâyetçiler sayılır.
+      - Aksi halde senkron Haiku: izin=false & güven yeterli → hide.
+      - Her yeni şikâyet moderatöre e-postayla bildirilir (arka planda)."""
     obj = _target_obj(db, req.target_type, req.target_id)
     if obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="İçerik bulunamadı")
+    if topluluk_sikayet.sinir_doldu_mu(db, user.id):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail={"code": "rate_limited", "reason": "cok_sik_sikayet"})
 
-    db.add(Report(target_type=req.target_type, target_id=req.target_id,
-                  reporter_id=user.id, reason=req.reason, note=req.note))
+    rapor = Report(target_type=req.target_type, target_id=req.target_id,
+                   reporter_id=user.id, reason=req.reason, note=req.note)
+    db.add(rapor)
     try:
         db.commit()
     except IntegrityError:                       # aynı kullanıcı + aynı hedef
@@ -577,10 +605,17 @@ def report(req: ReportReq, db: Session = Depends(get_db),
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Bu içeriği zaten şikayet ettiniz")
 
-    # Kaç FARKLI kullanıcı şikayet etti?
-    distinct_reporters = (db.query(func.count(func.distinct(Report.reporter_id)))
-                          .filter(Report.target_type == req.target_type,
-                                  Report.target_id == req.target_id).scalar() or 0)
+    # Moderatöre e-posta: metin şimdi (oturum açıkken) kurulur, gönderim yanıt
+    # döndükten sonra. Hata şikâyeti düşürmez.
+    try:
+        konu, metin = topluluk_sikayet.eposta_metni(db, rapor, obj, user)
+        background.add_task(topluluk_sikayet.moderatore_gonder, konu, metin)
+    except Exception:
+        logger.exception("Şikâyet e-postası hazırlanamadı: rapor=%s", rapor.id)
+
+    # Kaç FARKLI (ve hesabı 24 saatten eski) kullanıcı şikayet etti?
+    distinct_reporters = topluluk_sikayet.sayilan_sikayetci_sayisi(
+        db, req.target_type, req.target_id)
     if distinct_reporters >= 2:
         moderation.hide_content(db, req.target_type, req.target_id, "report",
                                 "coklu_sikayet")
@@ -708,12 +743,18 @@ def mod_reports(db: Session = Depends(get_db), user: User = Depends(get_current_
     items = []
     for rep in rows:
         obj = _target_obj(db, rep.target_type, rep.target_id)
+        # Yazar (2026-10-13): moderatör kuyruktan doğrudan yasaklayabilsin diye
+        # gerçek takma ad + kullanıcı kimliği (içerik anonim olsa da).
+        y = (topluluk_sikayet.yazar_bilgisi(db, obj) if obj is not None
+             else {"user_id": None, "nickname": None, "status": None, "anonim": False})
         items.append(ModReportItem(
             id=rep.id, target_type=rep.target_type, target_id=rep.target_id,
             reason=rep.reason, note=rep.note, resolved=rep.resolved,
             created_at=rep.created_at,
             content_status=(obj.status if obj is not None else None),
-            content_body=((obj.body[:300]) if obj is not None else None)))
+            content_body=((obj.body[:300]) if obj is not None else None),
+            author_user_id=y["user_id"], author_nickname=y["nickname"],
+            author_status=y["status"], author_anonim=y["anonim"]))
     return ModReportsResp(reports=items)
 
 
@@ -735,6 +776,20 @@ def mod_action(req: ModActionReq, db: Session = Depends(get_db),
         obj.status = "removed"
         moderation.log_action(db, req.target_type, req.target_id, "remove", "admin",
                               "mod_remove", actor_id=user.id)
+    elif req.action == "ban_author":
+        # Kuyruktan doğrudan yasaklama (2026-10-13): içeriğin yazarı banned
+        # olur ve içerik gizlenir. Geri almak: /mod/user unban + action restore.
+        yazar = _profile_of(db, obj.user_id) if obj.user_id is not None else None
+        if yazar is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail="Bu içeriğin yazarı artık uygulamada değil")
+        yazar.status = "banned"
+        yazar.muted_until = None
+        moderation.log_action(db, "thread", obj.user_id, "ban", "admin",
+                              "mod_ban", actor_id=user.id)
+        if obj.status == "published":
+            moderation.hide_content(db, req.target_type, req.target_id, "admin",
+                                    "mod_ban", actor_id=user.id, commit=False)
     # ilgili şikayetleri çözüldü işaretle
     db.query(Report).filter(Report.target_type == req.target_type,
                             Report.target_id == req.target_id,

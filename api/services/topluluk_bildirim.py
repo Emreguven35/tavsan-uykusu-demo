@@ -133,9 +133,23 @@ def cevap_olayi(db: Session, thread: Thread, reply, uzman_mi: bool, ust_cevap=No
         if alici is None or not cevap_acik_mi(alici):
             sonuc[str(alici_id)] = "kapali"
             continue
+        # Alıcı cevabı yazanı ENGELLEMİŞSE bildirim yok (App Store 1.2):
+        # engellenen kişi engelleyene bildirimle ulaşamaz.
+        if _engellemis_mi(db, alici_id, reply.user_id):
+            sonuc[str(alici_id)] = "engelli"
+            continue
         sonuc[str(alici_id)] = _gonder(db, alici_id, f"cevap:{reply.id}", tur, METIN[tur],
                                        ozet, an, thread.id, reply.id)
     return sonuc
+
+
+def _engellemis_mi(db: Session, engelleyen_id, engellenen_id) -> bool:
+    from api.models import Block
+    if engelleyen_id is None or engellenen_id is None:
+        return False
+    return db.query(Block.id).filter(Block.user_id == engelleyen_id,
+                                     Block.blocked_user_id == engellenen_id
+                                     ).first() is not None
 
 
 def sabah_ozeti(db: Session, an: datetime | None = None) -> int:

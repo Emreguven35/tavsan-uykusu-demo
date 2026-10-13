@@ -32,12 +32,15 @@ class VideoResp(BaseModel):
     title: str
     description: str | None = None
     duration_sec: int
-    video_url: str               # GÖRELİ: /media/videos/{slug}.mp4
+    # İmzalı ve 24 saatlik: /media/videos/{slug}.mp4?exp=…&sig=… (PUBLIC_BASE_URL
+    # varsa mutlak). Kilitli videoda None — adres hiç gönderilmez.
+    video_url: str | None = None
     poster_url: str | None = None
     stage_tags: list[str]
     chapters: list[Any] = []
     progress: dict[str, Any]     # {"position_sec": int, "completed": bool}
-    # B4 — "Başlarken" dışı videolar premium. BETA_MODE'da hep False.
+    # Premium olmayana yalnız üç video açık (ucretsiz_erisim.ACIK_VIDEOLAR);
+    # deneme kullanıcısı da premium sayılmaz. BETA_MODE'da hep False.
     locked: bool = False
     premium_required: bool = False
 

@@ -10,8 +10,9 @@ AŞAMA (mobilin "şu an neredesin" rozeti):
     hesaptan üstündür: "planım 9. günde ama ben hâlâ kapıdayım" diyebilmeli.
   • NULL ise eğitim gününden türetilir (kaynak "plan").
 
-TÜM VİDEOLAR HER ZAMAN ERİŞİLEBİLİR. Aşama yalnız SIRALAMA/ÖNERİ içindir;
-hiçbir video kilitlenmez — anne merak ettiğini istediği an izleyebilmeli.
+Aşama yalnız SIRALAMA/ÖNERİ içindir; aşamaya göre video kilitlenmez. Kilit
+yalnız premium'dandır: premium olmayana sabit üç video açık (2026-10-13,
+services/ucretsiz_erisim.ACIK_VIDEOLAR), kilitli videoda adres verilmez.
 """
 from __future__ import annotations
 
@@ -104,10 +105,26 @@ def _plandan_asama(baby: Baby | None, today: date | None) -> str:
 # ---------------------------------------------------------------------------
 # Katalog
 # ---------------------------------------------------------------------------
+# İmzalı video bağlantısının ömrü. Oynatıcı Range isteklerini AYNI adresle
+# atar; liste ekranı açık kalsa da bir gün yeter, ertesi açılışta yenilenir.
+VIDEO_IMZA_OMRU_SN = 24 * 3600
+_VIDEO_YOLU = "/media/videos/"
+
+
+def video_adresi(video_url: str | None) -> str | None:
+    """/media/videos/{slug}.mp4 → imzalı, 24 saatlik bağlantı. Başka biçimdeki
+    adres (dış bağlantı) olduğu gibi döner."""
+    if not video_url or not video_url.startswith(_VIDEO_YOLU)             or not video_url.endswith(".mp4"):
+        return video_url
+    return storage.imzali_url(video_url[len("/media/"):], VIDEO_IMZA_OMRU_SN)
+
+
 def _video_sozlugu(v: EducationVideo, ilerleme: VideoProgress | None,
                    premium: bool = True) -> dict:
-    from api.services import erisim
-    kilit = erisim.video_kilitli_mi(v.category, premium)
+    # 2026-10-13: premium olmayana açık videolar sabit üç BAŞLIKLA belirlenir
+    # (services/ucretsiz_erisim.ACIK_VIDEOLAR). Kilitli videoda adres VERİLMEZ.
+    from api.services import ucretsiz_erisim
+    kilit = ucretsiz_erisim.video_kilitli_mi(v.title, premium)
     return {
         "locked": kilit,
         "premium_required": kilit,
@@ -116,7 +133,7 @@ def _video_sozlugu(v: EducationVideo, ilerleme: VideoProgress | None,
         "title": v.title,
         "description": v.description,
         "duration_sec": int(v.duration_sec or 0),
-        "video_url": v.video_url,
+        "video_url": None if kilit else video_adresi(v.video_url),
         "poster_url": v.poster_url,
         "stage_tags": list(v.stage_tags or []),
         "chapters": v.chapters or [],

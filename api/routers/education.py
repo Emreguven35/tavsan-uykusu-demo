@@ -7,9 +7,9 @@ POST /education/videos/{id}/progress    oynatıcı ilerlemesi (upsert)
 İŞ MANTIĞI BURADA DEĞİL: api/services/education.py içindedir (betik de aynı
 servisi kullanıyor). Bu router yalnız HTTP kabuğudur.
 
-Video DOSYALARI buradan sunulmaz — onlar public `/media/videos/...` ucundadır
-(bkz. api/routers/media.py). Katalog korumalı, dosya public: kişisel olan
-"kim ne izledi" bilgisidir, videonun kendisi değil.
+Video DOSYALARI buradan sunulmaz — `/media/videos/...` ucundadır (bkz.
+api/routers/media.py). 2026-10-13: dosya adresi İMZALI ve 24 saatliktir;
+kilitli videoda katalog adresi hiç vermez.
 """
 import logging
 import uuid
@@ -51,8 +51,8 @@ def egitim_videolari(baby_id: uuid.UUID | None = Query(default=None),
     """Eğitim sekmesi — kategoriler, ilerleme, günün önerisi, aşama rozeti.
 
     Tek çağrı bilinçli: liste ekranı açılırken ikinci bir istek atmasın."""
-    from api.deps import premium_karari
-    premium, _k = premium_karari(db, user)
+    from api.services import ucretsiz_erisim
+    premium = ucretsiz_erisim.premium_mi(db, user)      # deneme premium sayılmaz
     return education.katalog(db, user, _bebek(db, user, baby_id), premium=premium)
 
 

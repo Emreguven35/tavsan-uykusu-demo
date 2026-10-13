@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from api import tts
 from api.db import SessionLocal, upsert
 from api.models import VoiceAudio, VoiceProfile
-from api.services import storage
+from api.services import mp3, storage
 from api.services import voice as voice_svc
 from api.services import voice_paket
 
@@ -105,14 +105,15 @@ def uret(voice_profile_id) -> dict:
     Döner: {"uretilen": n, "toplam": N, "status": ...}
     SAF DEĞİL: DB'ye yazar, ağa çıkar. Testlerde tts/voice_svc mock'lanır."""
     pid = _uuid(voice_profile_id)
-    icerikler = voice_paket.paket_icerikleri()
-    toplam = len(icerikler)
 
     db = SessionLocal()
     try:
         profil = db.get(VoiceProfile, pid)
         if profil is None:
-            return {"uretilen": 0, "toplam": toplam, "status": "yok"}
+            return {"uretilen": 0, "toplam": 0, "status": "yok"}
+        # Önizleme (premium olmayan) → tek masalın 30 sn'si; diğerleri paket.
+        icerikler = voice_paket.uretim_icerikleri(profil.amac)
+        toplam = len(icerikler)
         if profil.status in BITMIS:
             return {"uretilen": profil.progress_done, "toplam": toplam,
                     "status": profil.status}
@@ -143,6 +144,11 @@ def uret(voice_profile_id) -> dict:
         cid = icerik["id"]
         if cid in mevcut:
             continue                       # restart: bu içerik hazır
+        # Hesap / "Sesimi sil" üretim sürerken geldiyse profil yoktur: TTS'e
+        # gidip sahipsiz MP3 yazmanın anlamı yok.
+        if not _profil_var(pid):
+            logger.info("Üretim durdu: profil=%s silinmiş", pid)
+            break
         yol = storage.ses_yolu(user_id, pid, cid)
         veri = None
         for deneme in range(1, DENEME_SAYISI + 1):
@@ -154,6 +160,9 @@ def uret(voice_profile_id) -> dict:
         if not veri:
             basarisiz.append(cid)
             continue
+        if icerik.get("onizleme"):
+            # Önizleme sunucuda kesilir: istemci tam dosyayı hiç almaz.
+            veri = mp3.kes(veri, voice_paket.ONIZLEME_SN)
         try:
             boyut = depo.yaz(yol, veri, "audio/mpeg")
         except Exception:
@@ -162,7 +171,13 @@ def uret(voice_profile_id) -> dict:
             continue
 
         db = SessionLocal()
+        sahipsiz = False
         try:
+            # Dosya yazılırken profil silindiyse (hesap silme) satır açılmaz,
+            # dosya geri alınır: sahipsiz MP3 kalmasın.
+            if db.get(VoiceProfile, pid) is None:
+                sahipsiz = True
+                raise _ProfilYok()
             # ATOMİK UPSERT (v2.4.4). Eskiden düz INSERT'ti ve UNIQUE
             # (voice_profile_id, content_id) ihlali "yazılamadı" sayılıyordu:
             # dosya depoya YAZILMIŞ olmasına rağmen içerik BAŞARISIZ'a düşüyor,
@@ -187,14 +202,43 @@ def uret(voice_profile_id) -> dict:
                                    .count())
             db.commit()
             uretilen += 1
-        except Exception:
+        except Exception as e:
             db.rollback()
-            logger.exception("voice_audios yazılamadı: profil=%s icerik=%s", pid, cid)
+            # FK ihlali de olabilir (profil commit anında silindi): yeniden bak.
+            if sahipsiz or not _profil_var(pid):
+                _dosyayi_sil(depo, yol)
+                logger.info("Üretim durdu: profil=%s silinmiş, %s geri alındı",
+                            pid, cid)
+                break
+            if not isinstance(e, _ProfilYok):
+                logger.exception("voice_audios yazılamadı: profil=%s icerik=%s",
+                                 pid, cid)
             basarisiz.append(cid)
         finally:
             db.close()
 
-    return _tamamla(pid, voice_id, uretilen, toplam, basarisiz)
+    return _tamamla(pid, voice_id, uretilen, toplam, basarisiz, user_id)
+
+
+class _ProfilYok(Exception):
+    pass
+
+
+def _profil_var(pid) -> bool:
+    db = SessionLocal()
+    try:
+        return db.get(VoiceProfile, _uuid(pid)) is not None
+    except Exception:
+        return True                       # emin değilsek silme
+    finally:
+        db.close()
+
+
+def _dosyayi_sil(depo, yol: str) -> None:
+    try:
+        depo.sil(yol)
+    except Exception:
+        logger.exception("Sahipsiz ses dosyası silinemedi: %s", yol)
 
 
 def _seslendir(voice_id: str, metin: str, user_id) -> bytes | None:
@@ -215,7 +259,7 @@ def _sure_tahmini(boyut: int) -> int:
 
 
 def _tamamla(pid, voice_id: str, uretilen: int, toplam: int,
-             basarisiz: list[str]) -> dict:
+             basarisiz: list[str], user_id=None) -> dict:
     """Paket bitti: sesi serbest bırak, durumu yaz, gerekiyorsa hakkı iade et."""
     yeterli = toplam > 0 and (uretilen / toplam) > KISMI_BASARI_ORANI
 
@@ -227,6 +271,16 @@ def _tamamla(pid, voice_id: str, uretilen: int, toplam: int,
     try:
         p = db.get(VoiceProfile, _uuid(pid))
         if p is None:
+            # Üretim sürerken hesap/ses silindi: bu profilin klasöründe kalan
+            # her dosya SAHİPSİZDİR (silme anında henüz yazılmamış olabilir).
+            if user_id is not None:
+                try:
+                    n = storage.depo().klasor_sil(storage.ses_klasoru(user_id, pid))
+                    if n:
+                        logger.info("Silinmiş profilin %d sahipsiz dosyası "
+                                    "silindi: profil=%s", n, pid)
+                except Exception:
+                    logger.exception("Sahipsiz ses klasörü silinemedi: profil=%s", pid)
             return {"uretilen": uretilen, "toplam": toplam, "status": "yok"}
         p.progress_done, p.progress_total = uretilen, toplam
         if silindi:

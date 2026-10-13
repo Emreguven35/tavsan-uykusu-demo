@@ -78,6 +78,17 @@ def uid_of(tok):
     return _uuid.UUID(decode_access_token(tok)["sub"])
 
 
+def hesabi_eskit(user_id, gun=2):
+    from datetime import datetime, timedelta, timezone
+    from api.models import User
+    db = SessionLocal()
+    try:
+        db.get(User, user_id).created_at = datetime.now(timezone.utc) - timedelta(days=gun)
+        db.commit()
+    finally:
+        db.close()
+
+
 def set_profile(user_id, **fields):
     db = SessionLocal()
     try:
@@ -186,6 +197,8 @@ def test_k3():
     set_profile(uid_of(author), post_count=5)
     u1 = reg("t_k3_u1@example.com"); mkprofile(u1, "Sikayetci1")
     u2 = reg("t_k3_u2@example.com"); mkprofile(u2, "Sikayetci2")
+    # 2026-10-13: oto-hide yalnız 24 saatten eski hesapların şikâyetini sayar.
+    hesabi_eskit(uid_of(u1)); hesabi_eskit(uid_of(u2))
 
     tid = mkthread(author, title="şikayet edilecek konu başlık", body="içerik metni burada").json()["id"]
     _HAIKU["verdict"] = {"izin": True, "sebep": "temiz", "guven": 0.9}   # Haiku temiz dese bile

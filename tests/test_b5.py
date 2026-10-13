@@ -104,16 +104,18 @@ HS, US, _ = hesap("sessiz@gercek.com")
 st = client.get("/api/v1/voice/stories", headers=HS).json()
 _hepsi = {x["id"]: x for x in st["masallar"] + st["ninniler"]}
 _d = _hepsi["ninni_dandini"]
-check("N3) Sesi olmayan (ücretsiz) kullanıcı: dandini genel sürümle hazır + is_free",
-      _d["hazir"] and _d["ses_kaynagi"] == "genel" and _d["is_free"]
-      and _d["locked"] is False and "sig=" in (_d["audio_url"] or ""), str(_d))
-check("N4) Diğer içerikler kilitli ve bağlantısız",
+# 2026-10-13: ücretsiz ninni KALKTI (config.UCRETSIZ_NINNI = None). Genel
+# sürüm hâlâ "hazır" görünür ama premium olmayana kilitli ve bağlantısız.
+check("N3) Sesi olmayan (ücretsiz) kullanıcı: dandini genel sürümle hazır ama KİLİTLİ",
+      _d["hazir"] and _d["ses_kaynagi"] == "genel" and not _d["is_free"]
+      and _d["locked"] is True and _d["audio_url"] is None, str(_d))
+check("N4) Diğer içerikler de kilitli ve bağlantısız; ücretsiz içerik yok",
       all(x["locked"] and x["audio_url"] is None and not x["is_free"]
-          for k, x in _hepsi.items() if k != "ninni_dandini"), "")
-_u = client.get(_d["audio_url"].split("tavsan", 1)[-1] if _d["audio_url"].startswith("http")
-                else _d["audio_url"])
-check("N5) Genel sürümün imzalı bağlantısı çalıyor", _u.status_code == 200
-      and _u.content.startswith(b"ID3"), str(_u.status_code))
+          for x in _hepsi.values()), "")
+_gu = storage.imzali_url(genel_ses.genel_yol("ninni_dandini"))
+_u = client.get(_gu.split("tavsan", 1)[-1] if _gu.startswith("http") else _gu)
+check("N5) Genel sürüm dosyası imzalı bağlantıyla hâlâ sunuluyor (premium için)",
+      _u.status_code == 200 and _u.content.startswith(b"ID3"), str(_u.status_code))
 
 HV, UV, _ = hesap("sesli@gercek.com")
 _db = SessionLocal()

@@ -148,9 +148,23 @@ def _son_profil(db: Session, user: User) -> VoiceProfile | None:
                         429: {"description": "Aylık klonlama hakkı dolu"},
                         503: {"description": "Ses servisi/kapasitesi yok"}})
 async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Sesi"),
+                amac: str | None = Form(None),
                 db: Session = Depends(get_db),
-                user: User = Depends(require_premium),
+                user: User = Depends(get_current_user),
                 x_app_version: str | None = Header(default=None, alias="X-App-Version")):
+    # 2026-10-13 — PREMIUM OLMAYAN da kaydedip klonlayabilir; ona tam paket
+    # değil, tek masaldan 30 sn'lik ÖNİZLEME üretilir (deneme de premium
+    # sayılmaz). `amac=paket` premium ister: premium anne önizlemeden sonra
+    # BİR KEZ 30 gün beklemeden yeniden kaydeder (_paket_kaydi_hakki).
+    from api.deps import PremiumGerekli
+    from api.services import ucretsiz_erisim
+    premium = ucretsiz_erisim.premium_mi(db, user)
+    if amac not in (None, "", voice_paket.AMAC_PAKET, voice_paket.AMAC_ONIZLEME):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Geçersiz kayıt amacı")
+    if amac == voice_paket.AMAC_PAKET and not premium:
+        raise PremiumGerekli()
+    hedef = voice_paket.AMAC_PAKET if premium else voice_paket.AMAC_ONIZLEME
     # AÇIK RIZA (2026-10-07) — ses kaydı biyometrik veri. Build 28+ `acik_riza_ses`
     # onayı (güncel sürüm) olmadan kayıt alınmaz; eski build'ler bugünkü gibi.
     # Ses OKUNMADAN ve ElevenLabs'e gitmeden ÖNCE.
@@ -161,7 +175,9 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
     # almayalım ve ElevenLabs'e hiç gitmeyelim.
     onceki = _son_profil(db, user)
     durum = _klon_durumu(onceki, user=user)
-    if not durum["can_clone"]:
+    paket_gecisi = (amac == voice_paket.AMAC_PAKET and not durum["can_clone"]
+                    and _paket_kaydi_hakki(onceki, user, premium))
+    if not durum["can_clone"] and not paket_gecisi:
         tarih = durum["next_clone_available_at"].strftime("%d.%m.%Y")
         logger.info("Klonlama limiti: user=%s sonraki=%s", user.id, tarih)
         return JSONResponse(
@@ -225,12 +241,15 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
     # olmadığı için silinmez, slotu süresiz tutar. O yüzden yazım başarısız
     # olursa ses HEMEN silinir.
     try:
+        simdi = datetime.now(timezone.utc)
         profile = VoiceProfile(
             user_id=user.id, elevenlabs_voice_id=voice_id, sample_url=None,
             status="cloning", progress_done=0,
-            progress_total=voice_paket.paket_boyutu(),
-            last_cloned_at=datetime.now(timezone.utc))
+            progress_total=len(voice_paket.uretim_icerikleri(hedef)),
+            last_cloned_at=simdi, amac=hedef)
         db.add(profile)
+        if paket_gecisi:                    # tek seferlik hak burada yanar
+            user.ses_paket_kaydi_at = simdi
         db.commit()
         db.refresh(profile)
     except Exception:
@@ -241,8 +260,9 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail=SES_SERVIS_MESAJ)
 
-    logger.info("Voice clone tamam: user=%s voice_id=%s profil=%s",
-                user.id, voice_id, profile.id)
+    logger.info("Voice clone tamam: user=%s voice_id=%s profil=%s amac=%s%s",
+                user.id, voice_id, profile.id, hedef,
+                " (paket geçişi, bekleme uygulanmadı)" if paket_gecisi else "")
 
     # ESKİ SESİ ve ESKİ PAKETİ TEMİZLE (Faz 4.3 — tek aktif ses).
     _eski_sesleri_temizle(db, user, yeni_voice_id=voice_id,
@@ -252,7 +272,21 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
     voice_uretim.kuyruga_al(profile.id)
     # sampleUrl artık ÜRETİLMİYOR: ses dakikalar içinde silineceği için ayrı bir
     # örnek dosya hem kota harcar hem yanıltıcı olur. Paketin kendisi örnektir.
-    return VoiceCloneResp(voiceId=voice_id, sampleUrl=None)
+    return VoiceCloneResp(voiceId=voice_id, sampleUrl=None,
+                          onizleme=hedef == voice_paket.AMAC_ONIZLEME)
+
+
+def _onizleme_mi(profile: VoiceProfile | None) -> bool:
+    return getattr(profile, "amac", None) == voice_paket.AMAC_ONIZLEME
+
+
+def _paket_kaydi_hakki(profile: VoiceProfile | None, user: User,
+                       premium: bool) -> bool:
+    """Premium anne, güncel kaydı ÖNİZLEME ise, 30 günlük beklemeye takılmadan
+    BİR KEZ `amac=paket` ile yeniden kaydedebilir. Hak kullanılınca
+    users.ses_paket_kaydi_at dolar ve bir daha verilmez."""
+    return (premium and _onizleme_mi(profile)
+            and getattr(user, "ses_paket_kaydi_at", None) is None)
 
 
 def _eski_sesleri_temizle(db: Session, user: User, yeni_voice_id: str,
@@ -337,7 +371,14 @@ def voice_status(db: Session = Depends(get_db), user: User = Depends(get_current
                           total=profile.progress_total or 0),
         hazir_icerik=hazir,
         error=profile.error,
-        released_at=profile.released_at)
+        released_at=profile.released_at,
+        onizleme=_onizleme_mi(profile),
+        paket_kaydi_hakki=_paket_kaydi_hakki(profile, user, _premium_mi(db, user)))
+
+
+def _premium_mi(db: Session, user: User) -> bool:
+    from api.services import ucretsiz_erisim
+    return ucretsiz_erisim.premium_mi(db, user)
 
 
 @router.get("/stories", response_model=StoriesResp)
@@ -356,9 +397,11 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
                 VoiceAudio.voice_profile_id == profile.id).all()}
     paket_idler = [x["id"] for x in voice_paket.paket_icerikleri()]
     paket_kume = set(paket_idler)
-    from api.deps import premium_karari
     from api.services import erisim
-    premium, _k = premium_karari(db, user)
+    premium = _premium_mi(db, user)          # deneme premium sayılmaz
+    # Önizleme kaydında tek dosya var ve o masalın 30 sn'si: kilitsiz verilir,
+    # `onizleme: true` taşır. Diğer içerikler premium değilse kilitli.
+    onizleme = _onizleme_mi(profile)
     uretilemeyen = set()
     if profile is not None and (profile.error or "").startswith("Üretilemedi:"):
         uretilemeyen = {p.strip() for p in
@@ -373,6 +416,8 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
         # B5 — kendi sesiyle sürümü yoksa ücretsiz ninninin GENEL sürümü.
         if not yol and genel_ses.genel_surum_var_mi(x["id"]):
             yol, kaynak = genel_ses.genel_yol(x["id"]), "genel"
+        on = onizleme and kaynak == "anne"
+        kilit = erisim.hikaye_kilitli_mi(x["id"], premium) and not on
         if yol:
             durum = "hazir"
         elif x["id"] in uretilemeyen:
@@ -384,12 +429,9 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
             duration_hint=x.get("duration_hint"),
             hazir=bool(yol), durum=durum, in_package=x["id"] in paket_kume,
             is_free=x["id"] == UCRETSIZ_NINNI, ses_kaynagi=kaynak if yol else None,
-            locked=erisim.hikaye_kilitli_mi(x["id"], premium),
-            premium_required=erisim.hikaye_kilitli_mi(x["id"], premium),
+            locked=kilit, premium_required=kilit, onizleme=on,
             # Kilitliyse dosya bağlantısı VERİLMEZ (imzalı bağlantı = erişim).
-            audio_url=(storage.imzali_url(yol)
-                       if yol and not erisim.hikaye_kilitli_mi(x["id"], premium)
-                       else None))
+            audio_url=(storage.imzali_url(yol) if yol and not kilit else None))
 
     return StoriesResp(
         masallar=[_item(x) for x in cat.get("masallar", [])],

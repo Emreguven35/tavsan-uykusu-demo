@@ -53,6 +53,11 @@ class User(Base, TimestampMixin):
     # ne verir ne alır (api/routers/voice.py _klon_durumu).
     ses_son_kayit_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # Anne Sesi (2026-10-13): önizlemeyle kayıt yapmış anne premium alınca
+    # `amac=paket` ile BİR KEZ 30 günlük beklemesiz yeniden kaydeder. Hakkın
+    # kullanıldığı an burada — NULL ise hak duruyor.
+    ses_paket_kaydi_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
     # KVKK silme hakkı: kullanıcı silinince ilişkili tüm veriler cascade ile gider.
     babies = relationship("Baby", back_populates="user",

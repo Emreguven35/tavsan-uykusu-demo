@@ -18,6 +18,10 @@ DELETED_NICKNAME = "Silinmiş kullanıcı"
 # --- Profil ------------------------------------------------------------------
 class ProfileCreateReq(BaseModel):
     nickname: str = Field(min_length=2, max_length=24)
+    # Kurallar onayı (2026-10-13). true → rules_accepted_at yazılır, false →
+    # yazılmaz. Alan gönderilmezse (bugünkü mobil, kabul düğmesinden atıyor)
+    # kabul sayılır — bkz. routers/community.create_profile.
+    rules_accepted: bool | None = None
 
 
 class ProfileUpdateReq(BaseModel):
@@ -241,6 +245,12 @@ class ModReportItem(BaseModel):
     created_at: datetime
     content_status: str | None = None    # hedef içeriğin güncel durumu
     content_body: str | None = None      # moderatör görsün (kısaltılmış)
+    # İçeriğin yazarı (2026-10-13) — içerik anonim olsa da gerçek takma ad.
+    # Hesap silinmişse kimlik None. Yasaklama: /mod/action ban_author.
+    author_user_id: uuid.UUID | None = None
+    author_nickname: str | None = None
+    author_status: str | None = None     # active | muted | banned
+    author_anonim: bool = False
 
 
 class ModReportsResp(BaseModel):
@@ -250,7 +260,8 @@ class ModReportsResp(BaseModel):
 class ModActionReq(BaseModel):
     target_type: str = Field(pattern=TARGET_PATTERN)
     target_id: uuid.UUID
-    action: str = Field(pattern="^(hide|restore|remove)$")
+    # ban_author: içeriğin yazarını yasakla + içeriği gizle (kuyruktan).
+    action: str = Field(pattern="^(hide|restore|remove|ban_author)$")
 
 
 class ModUserReq(BaseModel):
