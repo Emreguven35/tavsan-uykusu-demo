@@ -106,24 +106,27 @@ def send_email(to: str, subject: str, text: str, html: str | None = None) -> dic
 # =============================================================================
 # Şablonlar
 # =============================================================================
+KOD_YONERGESI = ("Uygulamada açılan 'Yeni şifreni belirle' ekranına bu kodu yapıştır "
+                 "ya da aşağıdaki bağlantıya dokun.")
+
+
 def send_password_reset(to: str, raw_token: str) -> dict:
     """Parola sıfırlama e-postası.
 
     6 haneli kod DEĞİL, derin bağlantı gönderilir:
         tavsan-uykusu://reset-password?token=...
     Ayrıca düz metin token da yazılır — derin bağlantı açılmazsa kullanıcı
-    mobil ekranda elle girebilsin (alternatif yol)."""
+    mobildeki "Yeni şifreni belirle" ekranına yapıştırır (alternatif yol)."""
     settings = get_settings()
     link = f"{settings.app_deep_link_scheme}://reset-password?token={raw_token}"
     subject = "Tavşan Uykusu — Şifre Sıfırlama"
+    # 2026-10-13: kod uzun bir metin — elle yazılmaz, YAPIŞTIRILIR.
     text = (
         "Merhaba,\n\n"
         "Tavşan Uykusu hesabınız için parola sıfırlama talebinde bulundunuz.\n\n"
-        "Aşağıdaki bağlantıya dokunarak yeni parolanızı belirleyebilirsiniz:\n"
-        f"{link}\n\n"
-        "Bağlantı açılmazsa, uygulamadaki 'Şifre Sıfırlama' ekranına şu kodu "
-        "elle girebilirsiniz:\n\n"
+        f"{KOD_YONERGESI}\n\n"
         f"{raw_token}\n\n"
+        f"{link}\n\n"
         "Bu bağlantı 1 saat geçerlidir ve yalnızca bir kez kullanılabilir.\n"
         "Bu talebi siz yapmadıysanız bu e-postayı yok sayabilirsiniz; "
         "parolanız değişmez.\n\n"
@@ -132,10 +135,9 @@ def send_password_reset(to: str, raw_token: str) -> dict:
     html = (
         "<p>Merhaba,</p>"
         "<p>Tavşan Uykusu hesabınız için parola sıfırlama talebinde bulundunuz.</p>"
-        f'<p><a href="{link}">Yeni parolamı belirle</a></p>'
-        "<p>Bağlantı açılmazsa, uygulamadaki <strong>Şifre Sıfırlama</strong> "
-        "ekranına şu kodu elle girebilirsiniz:</p>"
+        f"<p>{KOD_YONERGESI}</p>"
         f"<p><code>{raw_token}</code></p>"
+        f'<p><a href="{link}">Yeni parolamı belirle</a></p>'
         "<p>Bu bağlantı 1 saat geçerlidir ve yalnızca bir kez kullanılabilir.<br>"
         "Bu talebi siz yapmadıysanız bu e-postayı yok sayabilirsiniz; "
         "parolanız değişmez.</p>"

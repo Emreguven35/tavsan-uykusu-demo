@@ -28,12 +28,14 @@ from pathlib import Path
 from sqlalchemy import not_, or_
 from sqlalchemy.orm import Session
 
+from api.config import DEMO_EPOSTALARI
 from api.models import Baby, PlanFeedback, SleepLog, SleepPlan, User
 from api.services import plan_adapter, plan_service, storage
 
 logger = logging.getLogger("tavsan.denetim")
 
-TEST_ALANLARI = ("@example.com", "@tavsanduman.com", "@tavsansmoke.com")
+# Sonek eşleşmesi: alan adları + App Review demo hesabı (config.DEMO_EPOSTALARI).
+TEST_ALANLARI = ("@example.com", "@tavsanduman.com", "@tavsansmoke.com", *DEMO_EPOSTALARI)
 BAGLANTI_GUN = 7
 TZ = plan_adapter.TZ_OFFSET_MIN
 KILIT_ID = 776699002                  # notifier 776699001 kullanıyor

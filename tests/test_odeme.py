@@ -120,8 +120,10 @@ E1 = str(uuid.uuid4())
 r = gonder(olay("INITIAL_PURCHASE", UA, eid=E1, period_type="TRIAL",
                 expiration_at_ms=MS(SIMDI + timedelta(days=7))))
 d = durum(HA)
-check("W4) Deneme başladı → premium, source=store, TRIAL, yenilenecek",
-      r.status_code == 200 and d["premium"] and d["source"] == "store"
+# 2026-10-13: deneme ayrı kademe — premium DEĞİL (kademe "deneme").
+check("W4) Deneme başladı → kademe deneme (premium değil), source=store, TRIAL, yenilenecek",
+      r.status_code == 200 and d["kademe"] == "deneme" and d["premium"] is False
+      and d["source"] == "store"
       and d["period_type"] == "TRIAL" and d["will_renew"] is True
       and d["product_id"] == "tu_aylik", f"{r.json()} {d}")
 r2 = gonder(olay("INITIAL_PURCHASE", UA, eid=E1, period_type="TRIAL",
@@ -149,12 +151,13 @@ d = durum(HA)
 check("W9) Bitiş → premium değil", d["premium"] is False and d["source"] == "none", str(d))
 
 HB, UB = hesap("paket@gercek.com")
+# 2026-10-13: tu_egitim_45 kaldırıldı. Süresi tanımsız yenilenmeyen ürün
+# (bitişi olmayan kayıt) erişim VERMEZ.
 gonder(olay("NON_RENEWING_PURCHASE", UB, urun="tu_egitim_45",
             purchased_at_ms=MS(SIMDI - timedelta(days=1))))
 d = durum(HB)
-check("W10) 45 günlük paket → premium, bitiş satın alma + 45 gün, yenilenmez",
-      d["premium"] and d["will_renew"] is False
-      and d["expires_at"].startswith((SIMDI + timedelta(days=44)).date().isoformat()), str(d))
+check("W10) Süresi tanımsız yenilenmeyen ürün → bitişsiz kayıt, premium DEĞİL",
+      d["premium"] is False and d["kademe"] == "ucretsiz", str(d))
 
 HC, UC = hesap("odeme-sorunu@gercek.com")
 gonder(olay("INITIAL_PURCHASE", UC, expiration_at_ms=MS(SIMDI - timedelta(hours=1))))
@@ -283,8 +286,11 @@ BL = client.post("/api/v1/babies", headers=HL, json={
     "birth_date": (date.today() - timedelta(days=245)).isoformat()}).json()["id"]
 _db = SessionLocal()
 try:
-    for slug, kat in (("uyku-egitimine-giris", "baslarken"), ("gun-1-3", "adim_adim")):
-        _db.add(EducationVideo(id=uuid.uuid4(), slug=slug, title=slug, category=kat,
+    # 2026-10-13: açık videolar BAŞLIKLA belirlenir (services.ucretsiz_erisim).
+    for slug, kat, baslik in (
+            ("uyku-egitimine-giris", "baslarken", "Uyku eğitimine giriş ve genel bilgilendirme"),
+            ("gun-1-3", "adim_adim", "gun-1-3")):
+        _db.add(EducationVideo(id=uuid.uuid4(), slug=slug, title=baslik, category=kat,
                                order_in_category=1, duration_sec=60, chapters=[],
                                video_url=storage.video_url(slug), stage_tags=["genel"]))
     for slug, bedava in (("beyaz-gurultu", True), ("fan", False)):
@@ -326,34 +332,28 @@ chatbot._cevap_uret = lambda *a, **k: {
     "retrieval_layer": "k1", "top_score": 0.9}
 kl = kilit_durumu(HL, BL)
 check("L1) Eğitim programı kilitli: premium_required + days çıkarıldı, çizelge kaldı",
-      kl["plan_kilit"][0] is True and kl["plan_kilit"][1] == ["egitim_programi"]
+      kl["plan_kilit"][0] is True and "egitim_programi" in kl["plan_kilit"][1]
       and kl["plan_kilit"][2] == 0 and kl["plan_kilit"][3] > 0, str(kl["plan_kilit"]))
-check("L2) Videolar: Başlarken açık, diğerleri kilitli",
+check("L2) Videolar: açık listedeki (başlık) açık, diğerleri kilitli",
       kl["video"] == {"uyku-egitimine-giris": False, "gun-1-3": True}, str(kl["video"]))
-check("L3) Sesler: is_free açık, diğerleri kilitli",
-      kl["ses"] == {"beyaz-gurultu": False, "fan": True}, str(kl["ses"]))
-check("L4) Anne Sesi: yalnız 1 ninni açık",
-      [k for k, v in kl["hikaye"].items() if not v] == ["ninni_dandini"], str(kl["hikaye"]))
-check("L5) Ses klonlama 403 + premium_required", kl["klon"] == (403, True), str(kl["klon"]))
+# 2026-10-13: uyku seslerinin hepsi ücretsiz (ERISIM_KURALLARI ses_diger).
+check("L3) Sesler: hepsi açık (ücretsiz)",
+      kl["ses"] == {"beyaz-gurultu": False, "fan": False}, str(kl["ses"]))
+# 2026-10-13: ücretsiz ninni kalktı — premium olmayana yalnız 30 sn önizleme.
+check("L4) Anne Sesi: premium değilse hiçbir içerik açık değil",
+      kl["hikaye"] and all(kl["hikaye"].values()), str(kl["hikaye"]))
+# 2026-10-13: ücretsiz kullanıcı da kaydeder (önizleme) — kapı 403 DEĞİL
+# (burada ElevenLabs sahte anahtarla 503 döner; premium kapısına takılmadı).
+check("L5) Ses klonlama premium kapısına takılmıyor (önizleme)",
+      kl["klon"][0] != 403 and kl["klon"][1] is not True, str(kl["klon"]))
 check("L6) Kayıt girme ücretsiz (200)", kl["kayit"] == 200, str(kl["kayit"]))
 # 2026-09-28: Sor YALNIZ PREMIUM (SOR_GUNLUK_UCRETSIZ = 0) — ilk soru 403.
 _sor0 = client.post("/api/v1/chat", headers=HL, json={"message": "soru"})
 check("L7a) Sor ücretsizde KAPALI: ilk soru 403 + premium_required + kural sor_premium",
       _sor0.status_code == 403 and _sor0.json().get("premium_required") is True
-      and _sor0.json().get("kural") == "sor_premium", _sor0.text[:200])
-# Günlük kota mekanizması (sayı > 0 yapılırsa) aynen çalışmalı.
-import api.routers.chat as _chat_router                      # noqa: E402
-_chat_router.SOR_GUNLUK_UCRETSIZ = 3
-_sor = [client.post("/api/v1/chat", headers=HL, json={"message": f"soru {i}"})
-        for i in range(4)]
-_chat_router.SOR_GUNLUK_UCRETSIZ = 0
-check("L7) Sor (kota 3 yapılınca): 3 soru ücretsiz, kalan hak 2→1→0",
-      [x.status_code for x in _sor[:3]] == [200, 200, 200]
-      and [x.json().get("ucretsiz_kalan") for x in _sor[:3]] == [2, 1, 0],
-      str([(x.status_code, x.json().get("ucretsiz_kalan")) for x in _sor]))
-check("L8) 4. soru 403 + premium_required + kural",
-      _sor[3].status_code == 403 and _sor[3].json().get("premium_required") is True
-      and _sor[3].json().get("kural") == "sor_gunluk_limit", _sor[3].text[:200])
+      and _sor0.json().get("kural") == "sor_premium"
+      and _sor0.json().get("hata") == "PREMIUM_GEREKLI", _sor0.text[:200])
+# Denemede günlük 10 soru ve 429 GUNLUK_LIMIT: tests/test_abonelik_kademe.py.
 kp = kilit_durumu(HN, client.post("/api/v1/babies", headers=HN, json={
     "name": "B", "night_wakes": 2, **TAM_PROFIL,
     "birth_date": (date.today() - timedelta(days=245)).isoformat()}).json()["id"])

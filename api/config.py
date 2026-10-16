@@ -76,32 +76,53 @@ GUNLUK_MALIYET_ESIGI_USD = 20.0
 # B4 — ERİŞİM KURALLARI (ücretsiz / premium). TEK tablo; uçlar buradan okur.
 # =============================================================================
 # BETA_MODE açıkken herkes premium sayılır → bu tablodaki hiçbir kilit ETKİN
-# DEĞİLDİR. Beta kapanınca kural değiştirmek = burada bir değer değiştirmek.
-#   "ucretsiz" → herkese açık, "premium" → premium değilse kilitli.
+# DEĞİLDİR (BETA_HARIC_EMAILS'teki hesaplar hariç — gerçek kademeyi görürler).
+# Beta kapanınca kural değiştirmek = burada bir değer değiştirmek.
+# KADEME (2026-10-13, premium abonelik): ucretsiz < deneme < premium. Değer,
+# özelliğin açıldığı EN DÜŞÜK kademedir:
+#   "ucretsiz" → herkese açık, "deneme" → deneme + premium, "premium" → yalnız premium.
 ERISIM_KURALLARI: dict[str, str] = {
     "kayit_girme": "ucretsiz",            # POST /logs/batch, DELETE/PATCH /logs
     "gunluk_plan": "ucretsiz",            # /plans/today çizelgesi (temel)
-    "egitim_programi": "premium",         # 13 günlük adaptif program (days + metin)
+    # 13 günlük adaptif program (days + metin). Denemede gün gün: yalnız
+    # min(bugünkü eğitim günü, DENEME_SON_GUN)'e kadar (erisim.izinli_son_gun).
+    "egitim_programi": "deneme",
+    "gece_karti": "deneme",               # content.night_wake_protocol
+    "egitim_bildirimleri": "deneme",      # uyku dizisi, sabah sorusu, şekerleme, eksik kayıt
     "video_baslarken": "ucretsiz",        # "Başlarken" kategorisi
     "video_diger": "premium",             # diğer eğitim videoları
     "ses_ucretsiz": "ucretsiz",           # is_free sesler (beyaz gürültü, yağmur)
-    "ses_diger": "premium",
+    "ses_diger": "ucretsiz",              # 2026-10-13: uyku seslerinin hepsi ücretsiz
     "ninni_ucretsiz": "ucretsiz",         # UCRETSIZ_NINNI (anne sesiyle hazırsa)
     "anne_sesi": "premium",               # ses klonlama + diğer masal/ninniler
-    "sor": "premium",                     # yalnız premium (SOR_GUNLUK_UCRETSIZ = 0)
+    "sor": "deneme",                      # deneme günde SOR_GUNLUK_DENEME, premium sınırsız
 }
+KADEME_SIRASI: dict[str, int] = {"ucretsiz": 0, "deneme": 1, "premium": 2}
 UCRETSIZ_VIDEO_KATEGORILERI = ("baslarken",)
 UCRETSIZ_NINNI = None  # 2026-10-13: ücretsiz ninni kalktı (eskiden "ninni_dandini"); premium olmayana yalnız 30 sn önizleme
-# 2026-09-28 ürün kararı: Sor YALNIZ PREMIUM — ücretsiz kullanıcıya günlük hak
-# 0. BETA_MODE açıkken herkes premium olduğu için etkisiz. Eskiden 3'tü.
+# 2026-09-28 ürün kararı: Sor ücretsiz kullanıcıya KAPALI (günlük hak 0).
 SOR_GUNLUK_UCRETSIZ = 0
+# 2026-10-13: deneme süresince günde 10 soru; premium sınırsız.
+SOR_GUNLUK_DENEME = 10
+# Denemede açılan son eğitim günü (eğitimin 1-3. günü).
+DENEME_SON_GUN = 3
+# Destek iletişimi — /config yanıtında (App Store 1.2) ve e-postalarda.
+DESTEK_EPOSTA = "tavsanuykusu@hotmail.com"
+# App Review demo hesabı (2026-10-13) — elle verilmiş süresiz premium hakkıyla
+# tam açık. Denetim raporu / bebek numaraları ve kurucu listesi DIŞINDA (test
+# hesabı). E-posta tam adres olarak yazılır; alan adı eşleşmesiyle aynı yoldan
+# (sonek) hariç tutulur.
+DEMO_EPOSTALARI = ("appreview@tavsanuykusu.com.tr",)
 
 # Uygulama içi ürünler (RevenueCat / App Store Connect ürün kimlikleri).
-# Yenilenmeyen ürünün süresi mağazadan gelmez — burada tanımlıdır.
+# Yenilenmeyen bir ürün eklenirse süresi ("gun") burada tanımlanmalı — mağaza
+# vermez; süresiz kayıt erişim VERMEZ (services.premium).
+# 2026-10-13: tek abonelik — aylık 1.499,99 TL, 3 gün ücretsiz deneme. Eski
+# tu_aylik (999 TL) / tu_yillik (3.999 TL), 7 gün denemeli kayıtlar ve 45 günlük
+# yenilenmeyen tu_egitim_45 kaldırıldı.
 URUNLER: dict[str, dict] = {
-    "tu_aylik": {"tur": "abonelik", "fiyat_tl": 999, "donem": "P1M", "deneme_gun": 7},
-    "tu_yillik": {"tur": "abonelik", "fiyat_tl": 3999, "donem": "P1Y", "deneme_gun": 7},
-    "tu_egitim_45": {"tur": "yenilenmeyen", "fiyat_tl": 2499, "gun": 45},
+    "tavsan_premium_aylik": {"tur": "abonelik", "fiyat_tl": 1499.99, "donem": "P1M",
+                             "deneme_gun": 3},
 }
 PREMIUM_ENTITLEMENT = "premium"
 
@@ -245,6 +266,11 @@ class Settings:
                                           or "").strip()
         # REST API gizli anahtarı (sk_…) — /subscriptions/refresh için.
         self.revenuecat_api_key = (os.getenv("REVENUECAT_API_KEY") or "").strip()
+        # BETA_MODE açıkken bile GERÇEK kademeyi gören hesaplar (virgülle e-posta) —
+        # ücretsiz / deneme akışlarını prod'da denemek için. Küçük harfe çevrilir.
+        self.beta_haric_emails = {e.strip().lower() for e in
+                                  (os.getenv("BETA_HARIC_EMAILS") or "").split(",")
+                                  if "@" in e}
         # Lansman günü (YYYY-MM-DD, Türkiye saati). Bundan ÖNCE kayıt olanlar
         # kurucu üyedir; lansmandan itibaren KURUCU_PREMIUM_GUN gün premium.
         self.lansman_tarihi = None

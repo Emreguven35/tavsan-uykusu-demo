@@ -180,6 +180,20 @@ def _bolum_sinirlari(markdown: str) -> tuple[int, int] | None:
     return baslangic, bitis
 
 
+def egitim_bolumunu_cikar(markdown: str) -> str:
+    """'## Eğitim Planı' bölümünü (başlığıyla) metinden çıkar; geri kalanı aynen.
+    Bölüm yoksa metin aynen döner. Premium kilidi: bekleme planındaki 13 günlük
+    önizleme gönderilmez, beklemenin kendi rehberi kalır (services.erisim)."""
+    sinir = _bolum_sinirlari(markdown or "")
+    if sinir is None:
+        return markdown or ""
+    bas, son = sinir
+    # _bolum_sinirlari başlığın SONUNU döndürüyor; başlık satırı da çıkarılır.
+    baslik_bas = next((m.start() for m in _RE_BASLIK.finditer(markdown)
+                       if m.end() == bas), bas)
+    return (markdown[:baslik_bas].rstrip() + "\n\n" + markdown[son:].lstrip()).strip()
+
+
 def parse_days(markdown: str) -> list[dict]:
     """'## Eğitim Planı' bölümündeki gün bloklarını ayrıştır (doğrulama YOK).
 

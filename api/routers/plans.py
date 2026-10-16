@@ -48,8 +48,9 @@ def _gece_gunu(db: Session, bebek: Baby | None, gun: date) -> int | None:
 
 def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
                  referans: date | None = None) -> PlanResp | None:
-    """PlanResp + B4 kilidi. Premium değilse eğitim programı çıkarılır
-    (services.erisim.plan_icerigi_kilitle); günlük çizelge kalır.
+    """PlanResp + B4 kilidi (services.erisim.plan_icerigi_kilitle): ücretsizde
+    eğitim programı ve gece kartı çıkarılır, denemede program yalnız
+    min(bugünkü eğitim günü, 3)'e kadar gider; günlük çizelge her kademede kalır.
 
     ZAMANA BAĞLI ALANLAR (2026-09-30): `egitim_baslangic.kalan_gun` ve `yas`
     saklanan değerden DEĞİL, `referans` güne göre yeniden hesaplanır — bekleme
@@ -58,9 +59,9 @@ def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
     bugünü verir (geçişte dönen plan eski tarihli olabilir)."""
     if plan is None:
         return None
-    from api.deps import premium_karari
+    from api.deps import kademe_karari
     from api.services import erisim
-    premium, _k = premium_karari(db, user)
+    kademe, _k = kademe_karari(db, user)
     resp = PlanResp.model_validate(plan)
     # Tazeleme bir SÜSLEMEDİR: hesaplanamazsa saklanan içerik döner, plan ASLA
     # düşmez (eksik alanlı eski plan, doğum tarihi silinmiş bebek vb.).
@@ -89,7 +90,14 @@ def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
         except Exception:
             logger.exception("Gece kartı v2 kurulamadı (plan=%s) — saklanan kart "
                              "dönüyor", plan.id)
-    icerik, kilitli = erisim.plan_icerigi_kilitle(resp.content or {}, premium)
+    egitim_gunu = None
+    if kademe == "deneme":
+        bebek = db.get(Baby, plan.baby_id)
+        if bebek is not None:
+            egitim_gunu = plan_adapter.egitim_gunu(bebek.training_started_at,
+                                                   referans or plan.plan_date)
+    icerik, kilitli = erisim.plan_icerigi_kilitle(
+        resp.content or {}, kademe, erisim.izinli_son_gun(kademe, egitim_gunu))
     if kilitli:
         resp.content = icerik
         resp.locked = kilitli

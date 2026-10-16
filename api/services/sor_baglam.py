@@ -275,13 +275,23 @@ def gece_sayilan_gun(d: dict) -> int:
     return max(1, int(g or 1))
 
 
-def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None) -> str | None:
+def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None,
+                    asama_siniri: int | None = None) -> str | None:
     """Sor bağlamına eklenecek satırlar (düz metin). Kurulamazsa None.
 
-    `simdi`: Türkiye saatli an (testler); verilmezse api.zaman.simdi_tr()."""
+    `simdi`: Türkiye saatli an (testler); verilmezse api.zaman.simdi_tr().
+    `asama_siniri` (premium abonelik): deneme/ücretsizde plan içeriği uygulamadaki
+    kilitle AYNI biçimde kısılır (services.erisim) — plan satırı, gösterilmeyen
+    günün bölümünü ya da metnini Sor'a taşımaz. None → sınırsız."""
     from api.services import plan_service
 
     d = gun_durumu(db, baby, simdi)
+    if asama_siniri is not None and d.get("content"):
+        from api.services import erisim
+        izinli = min(max(1, int(d.get("app_gun") or 1)), asama_siniri)
+        if max(int(d.get("etkin_gun") or 0), int(d.get("app_gun") or 0)) > asama_siniri:
+            izinli = 0
+        d = dict(d, content=erisim.plan_icerigi_kilitle(d["content"], "deneme", izinli)[0])
     gun, dk, gece = d["gun"], d["dk"], d["gece"]
     plan, content, tip = d["plan"], d["content"], d["tip"]
     satirlar = [f"Şu an: {_tarih_metni(gun)}, saat {_ss(dk)} "

@@ -146,20 +146,32 @@ PREMIUM_GEREKLI_MESAJ = "Bu özellik Premium üyelik gerektiriyor."
 
 class PremiumGerekli(HTTPException):
     """403 + gövdede `premium_required: true` (main.py'deki işleyici ekler).
-    `detail` Türkçe tam metin kalır — mobil onu olduğu gibi gösteriyor."""
+    `detail` Türkçe tam metin kalır — mobil onu olduğu gibi gösteriyor.
 
-    def __init__(self, detail: str = PREMIUM_GEREKLI_MESAJ, kural: str | None = None):
-        super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+    `hata` (2026-10-13, premium abonelik): makinenin okuyacağı kod —
+    PREMIUM_GEREKLI (403) | GUNLUK_LIMIT (429, deneme günlük Sor hakkı bitti)."""
+
+    def __init__(self, detail: str = PREMIUM_GEREKLI_MESAJ, kural: str | None = None,
+                 hata: str | None = None, status_code: int = status.HTTP_403_FORBIDDEN):
+        super().__init__(status_code=status_code, detail=detail)
         self.kural = kural
+        self.hata = hata
+
+
+def kademe_karari(db: Session, user: User) -> tuple[str, str]:
+    """(kademe, kaynak). kademe: ucretsiz | deneme | premium. Asıl karar
+    services.premium.durum'da (TEK kaynak)."""
+    from api.services import premium as premium_svc
+    d = premium_svc.durum(db, user)
+    return d["kademe"], d["source"]
 
 
 def premium_karari(db: Session, user: User) -> tuple[bool, str]:
-    """(premium_mi, kaynak) — kısa biçim. Asıl karar services.premium.durum'da
-    (TEK kaynak): beta → store → manual → kurucu. kaynak: beta | store |
-    manual | kurucu | none."""
-    from api.services import premium as premium_svc
-    d = premium_svc.durum(db, user)
-    return d["premium"], d["source"]
+    """(premium_mi, kaynak) — kısa biçim; premium_mi = kademe "premium". Deneme
+    premium SAYILMAZ: bu kararı kullanan uçlar (videolar, Anne Sesi) yalnız
+    premium'a açıktır. Deneme açılan özellikler kademe_karari'na bakar."""
+    kademe, kaynak = kademe_karari(db, user)
+    return kademe == "premium", kaynak
 
 
 def require_admin(db: Session = Depends(get_db),

@@ -162,10 +162,15 @@ check("6) Konu doğru",
       _p["subject"] == "Tavşan Uykusu — Şifre Sıfırlama", _p["subject"])
 check("6b) Derin bağlantı içerir (tavsan-uykusu://reset-password?token=)",
       "tavsan-uykusu://reset-password?token=TOKEN_ABC123" in _text, _text[:200])
-check("6c) Düz metin token da var (elle girme alternatifi)",
-      "TOKEN_ABC123" in _text.split("elle girebilirsiniz")[-1], _text[-200:])
-check("6d) HTML sürümünde de bağlantı var",
-      "tavsan-uykusu://reset-password?token=TOKEN_ABC123" in _p["html"], _p["html"][:200])
+_YONERGE = ("Uygulamada açılan 'Yeni şifreni belirle' ekranına bu kodu yapıştır "
+            "ya da aşağıdaki bağlantıya dokun.")
+check("6c) Yönerge (yapıştır ya da dokun) ve ardından düz metin token",
+      _YONERGE in _text and "TOKEN_ABC123" in _text.split(_YONERGE)[-1]
+      and "elle gir" not in _text, _text[:300])
+check("6d) HTML: yönerge, kod ve bağlantı butonu",
+      _YONERGE in _p["html"] and "<code>TOKEN_ABC123</code>" in _p["html"]
+      and '<a href="tavsan-uykusu://reset-password?token=TOKEN_ABC123">' in _p["html"],
+      _p["html"][:300])
 
 # =============================================================================
 # 7) Hoş geldin — console modunda gönderilmez

@@ -40,6 +40,9 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_DB.as_posix()}"
 os.environ["JWT_SECRET"] = "test-secret-en-az-otuz-iki-karakter-uzunlugunda"
 os.environ["ENVIRONMENT"] = "development"
 os.environ["MAIL_PROVIDER"] = "disabled"
+# 2026-10-13: premium olmayan kullanıcı training_started_at'i geriye alamaz
+# (deneme 1-3. günü açar). Bu dosya regresyon akışını ölçer → prod gibi beta.
+os.environ["BETA_MODE"] = "true"
 
 from fastapi.testclient import TestClient                   # noqa: E402
 from api.db import Base, SessionLocal, engine               # noqa: E402

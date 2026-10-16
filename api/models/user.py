@@ -53,6 +53,15 @@ class User(Base, TimestampMixin):
     # ne verir ne alır (api/routers/voice.py _klon_durumu).
     ses_son_kayit_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # Premium abonelik (2026-10-13) — mağaza denemesi (RevenueCat period_type
+    # TRIAL). Kademe SÜTUN DEĞİLDİR: services.premium.durum her istekte hesaplar.
+    # Bunlar yalnız denemenin günü/bitişi ve "deneme hakkı kullanıldı mı" içindir.
+    deneme_baslangic: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    deneme_bitis: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    deneme_kullanildi_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     # Anne Sesi (2026-10-13): önizlemeyle kayıt yapmış anne premium alınca
     # `amac=paket` ile BİR KEZ 30 günlük beklemesiz yeniden kaydeder. Hakkın
     # kullanıldığı an burada — NULL ise hak duruyor.

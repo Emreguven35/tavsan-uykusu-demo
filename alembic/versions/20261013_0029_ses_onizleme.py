@@ -1,7 +1,7 @@
 """voice_profiles.amac + users.ses_paket_kaydi_at
 
-Revision ID: 0028_ses_onizleme
-Revises: 0027_engel_ses
+Revision ID: 0029_ses_onizleme
+Revises: 0028_premium_kademe
 Create Date: 2026-10-13
 
 Anne Sesi önizlemesi: premium olmayan anne de kayıt yapar, yalnız tek masalın
@@ -12,8 +12,8 @@ Eski satırlar NULL kalır: amac NULL = tam paket.
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0028_ses_onizleme"
-down_revision = "0027_engel_ses"
+revision = "0029_ses_onizleme"
+down_revision = "0028_premium_kademe"
 branch_labels = None
 depends_on = None
 

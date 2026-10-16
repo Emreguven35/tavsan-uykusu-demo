@@ -38,6 +38,10 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_DB.as_posix()}"
 os.environ["JWT_SECRET"] = "test-secret-en-az-otuz-iki-karakter-uzunlugunda"
 os.environ["ENVIRONMENT"] = "development"      # zamanlayıcı başlamamalı
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy")
+# 2026-10-13: eğitim bildirimleri ücretsiz kademede gitmez (ERISIM_KURALLARI
+# egitim_bildirimleri). Bu dosya bildirim MEKANİĞİNİ ölçer → herkes premium
+# (beta). Kademe kilidi tests/test_abonelik_kademe.py'de.
+os.environ["BETA_MODE"] = "true"
 
 from api.db import SessionLocal, engine          # noqa: E402
 from api.db.base import Base                     # noqa: E402

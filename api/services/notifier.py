@@ -351,6 +351,7 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
     baby_ids = [row[0] for row in
                 db.query(SleepPlan.baby_id).distinct().all()]
     stats = {"checked_plans": 0, "sent": 0, "skipped_duplicate": 0, "adapted": 0}
+    kademe_onbellek: dict = {}            # kullanıcı başına bir kez (tur içinde)
 
     for baby_id in baby_ids:
         baby = db.get(Baby, baby_id)
@@ -406,6 +407,14 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
         _uyandi_mi_sor(db, user, baby, plan, content, now_minute,
                        today_local, now, stats)
 
+        # PREMIUM ABONELİK (2026-10-13): eğitim bildirimleri (sabah sorusu, uyku
+        # dizisi, şekerleme, "uykuları eksik mi kaydettiniz?") ücretsizde gitmez.
+        # "Uyandı mı?" kayıt yardımıdır (kayıt ücretsiz) — yukarıda kalır.
+        # Topluluk bildirimleri ayrı yoldan (topluluk_bildirim) herkese gider.
+        if _egitim_bildirimi_kilitli(db, user, kademe_onbellek):
+            stats["kademe_kilidi"] = stats.get("kademe_kilidi", 0) + 1
+            continue
+
         if not _uyku_bildirimi_acik(user):
             continue
         adapt = content.get("adaptation")
@@ -426,6 +435,16 @@ def run_reminder_cycle(db: Session, now: datetime | None = None,
         _uyku_dizisi(db, user, baby, plan, content, now_minute, today_local,
                      stats, tz_offset_min)
     return stats
+
+
+def _egitim_bildirimi_kilitli(db: Session, user: User, onbellek: dict) -> bool:
+    """Kullanıcının kademesinde eğitim bildirimleri kapalı mı (ERISIM_KURALLARI
+    egitim_bildirimleri). Kademe tur boyunca kullanıcı başına bir kez hesaplanır."""
+    from api.services import erisim
+    from api.services import premium as premium_svc
+    if user.id not in onbellek:
+        onbellek[user.id] = premium_svc.durum(db, user)["kademe"]
+    return erisim.kilitli_mi("egitim_bildirimleri", onbellek[user.id])
 
 
 def _uyku_bildirimi_acik(user: User) -> bool:

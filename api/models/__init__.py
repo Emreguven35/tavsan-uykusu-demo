@@ -31,6 +31,7 @@ from api.models.plan_uretim_isi import PlanUretimIsi
 from api.models.consent import Consent
 from api.models.onay_kaniti import OnayKaniti
 from api.models.community_v2 import Bookmark, ToplulukBildirimi
+from api.models.sor_sayac import SorSayac
 
 __all__ = [
     "User", "Baby", "BebekOlcumu", "SleepLog", "SilinenSleepLog", "SleepPlan",
@@ -52,4 +53,6 @@ __all__ = [
     # B5 — KVKK
     "Consent", "OnayKaniti",
     "Bookmark", "ToplulukBildirimi",
+    # Premium abonelik — Sor günlük sayacı
+    "SorSayac",
 ]
