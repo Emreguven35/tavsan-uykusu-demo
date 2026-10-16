@@ -6,6 +6,10 @@ yazar ve harcanan krediyi gösterir. Uygulamanın veritabanına DOKUNMAZ.
     python tools/sts_deneme.py data/anne_sesi_referans/ninni_dandini.mp3 \\
         --voice-id <TEST_VOICE_ID> --sn 30
 
+  --gecici-klon <ses_dosyası>
+             --voice-id yerine: bu örnekten (ör. 1 dk'lık mp3/m4a/wav) geçici bir
+             klon açar, denemeden sonra (hata olsa da) siler. Hesapta 1 boş
+             klon slotu gerekir.
   --sn       referansın ilk kaç saniyesi gönderilsin (varsayılan 30; 0 = tamamı,
              en fazla 270 — tek çağrı, parçalama yok)
   --cikti    çıktı dosyası (varsayılan: sts_deneme_{dosya}_{zaman}.mp3)
@@ -20,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import os
 import sys
 import time
@@ -30,7 +35,7 @@ sys.path.insert(0, str(ROOT))
 
 import requests                                           # noqa: E402
 
-from api.services import mp3, voice_sts                   # noqa: E402
+from api.services import mp3, voice, voice_sts            # noqa: E402
 
 ABONELIK_URL = "https://api.elevenlabs.io/v1/user/subscription"
 
@@ -66,10 +71,34 @@ def _hata(r) -> str:
         return (r.text or "")[:300]
 
 
+def gecici_klon_ac(anahtar: str, ornek: Path) -> str | None:
+    """Örnekten geçici klon açar; voice_id ya da None döner."""
+    os.environ["ELEVENLABS_API_KEY"] = anahtar     # yalnız bu süreç; voice.py env'den okur
+    tur = mimetypes.guess_type(ornek.name)[0] or "audio/mpeg"
+    sonuc = voice.clone_voice(f"sts_deneme_gecici_{time.strftime('%Y%m%d-%H%M%S')}",
+                              ornek.read_bytes(), ornek.name, tur)
+    if not sonuc.get("ok"):
+        print(f"Geçici klon açılamadı ({sonuc.get('reason', '')}): {sonuc.get('error')}")
+        return None
+    print(f"Geçici klon açıldı: {sonuc['voice_id']}")
+    return sonuc["voice_id"]
+
+
+def gecici_klonu_sil(voice_id: str) -> None:
+    sonuc = voice.delete_voice(voice_id)
+    if sonuc.get("ok"):
+        print(f"Geçici klon silindi: {voice_id}")
+    else:
+        print(f"UYARI: geçici klon SİLİNEMEDİ ({sonuc.get('status')}): {sonuc.get('error')}")
+        print(f"ElevenLabs panelinden elle silin: {voice_id}")
+
+
 def main(argv=None) -> int:
     a = argparse.ArgumentParser(description="Tek seferlik gerçek STS denemesi")
     a.add_argument("referans", type=Path)
-    a.add_argument("--voice-id", required=True)
+    ses = a.add_mutually_exclusive_group(required=True)
+    ses.add_argument("--voice-id")
+    ses.add_argument("--gecici-klon", type=Path, metavar="SES_DOSYASI")
     a.add_argument("--sn", type=float, default=30.0)
     a.add_argument("--cikti", type=Path)
     a.add_argument("--env", type=Path)
@@ -82,6 +111,9 @@ def main(argv=None) -> int:
     anahtar = anahtar_bul(g.env)
     if not anahtar:
         print("ELEVENLABS_API_KEY bulunamadı (ortam değişkeni ya da --env).")
+        return 2
+    if g.gecici_klon and not g.gecici_klon.is_file():
+        print(f"Klon örneği bulunamadı: {g.gecici_klon}")
         return 2
 
     kaynak = g.referans.read_bytes()
@@ -97,16 +129,29 @@ def main(argv=None) -> int:
         return 2
     tahmini = voice_sts.kredi(giden)
     print(f"Referans: {g.referans.name} ({toplam:.1f} sn), gönderilecek: {giden:.1f} sn")
-    print(f"Model: {voice_sts.MODEL} · ses: {g.voice_id}")
+    print(f"Model: {voice_sts.MODEL} · ses: "
+          + (g.voice_id or f"geçici klon ({g.gecici_klon.name}; deneme sonunda silinir)"))
     print(f"Tahmini harcama: ~{tahmini} kredi (dakikada {voice_sts.KREDI_DAKIKA})")
     if not g.evet and input("Devam edilsin mi? [e/H] ").strip().lower() not in ("e", "evet", "y"):
         print("Vazgeçildi.")
         return 1
 
+    if not g.gecici_klon:
+        return _dene(g, anahtar, g.voice_id, kaynak, tahmini)
+    voice_id = gecici_klon_ac(anahtar, g.gecici_klon)
+    if not voice_id:
+        return 3
+    try:
+        return _dene(g, anahtar, voice_id, kaynak, tahmini)
+    finally:
+        gecici_klonu_sil(voice_id)
+
+
+def _dene(g, anahtar: str, voice_id: str, kaynak: bytes, tahmini: int) -> int:
     once = kullanilan_kredi(anahtar)
     t0 = time.perf_counter()
     r = requests.post(
-        voice_sts.STS_URL.format(voice_id=g.voice_id),
+        voice_sts.STS_URL.format(voice_id=voice_id),
         params={"output_format": voice_sts.CIKIS_BICIMI},
         headers={"xi-api-key": anahtar, "Accept": "audio/mpeg"},
         data={"model_id": voice_sts.MODEL,
