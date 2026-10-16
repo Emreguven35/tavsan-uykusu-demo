@@ -323,15 +323,20 @@ try:
         storage.depo().yaz(yol, b"ID3eski")
         s.add(VoiceAudio(voice_profile_id=pe.id, content_id=cid, storage_path=yol, bytes=7))
     s.commit()
+    pe_id = pe.id
 finally:
     s.close()
 st = client.get("/api/v1/voice/stories", headers=HE).json()
 _es = {x["id"]: x for x in st["masallar"] + st["ninniler"]}
-check("S20) Eski paket sahibi: 4 dosyası hazır, kilitsiz, bağlantılı, önizleme değil",
+# 2026-10-16: eski TTS ninnileri (STS'siz) listelenmez; dosyalar durur.
+check("S20) Eski paket sahibi (premium): masalı hazır, kilitsiz, tam bağlantı, önizleme değil",
       all(_es[c]["hazir"] and not _es[c]["locked"] and _es[c]["audio_url"]
           and not _es[c]["onizleme"] and _es[c]["ses_kaynagi"] == "anne"
-          for c in ("ninni_dandini", "ninni_ay_isigi", "ninni_uyu_yavrum",
-                    "masal_aysecik_uyku_perisi")), str(_es["ninni_dandini"]))
+          for c in ("masal_aysecik_uyku_perisi",)), str(_es.get("masal_aysecik_uyku_perisi")))
+check("S20b) Eski paketin TTS ninnileri listede yok, dosyaları duruyor",
+      st["ninniler"] == [] and all(storage.depo().var_mi(storage.ses_yolu(UE, pe_id, c))
+                                   for c in ("ninni_dandini", "ninni_ay_isigi", "ninni_uyu_yavrum")),
+      str([x["id"] for x in st["ninniler"]]))
 vs = client.get("/api/v1/voice/voice-status", headers=HE).json()
 check("S21) Eski paket sahibine paket geçiş hakkı verilmez (önizlemesi yok)",
       vs["onizleme"] is False and vs["paket_kaydi_hakki"] is False, str(vs))

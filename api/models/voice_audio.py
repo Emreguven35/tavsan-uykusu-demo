@@ -39,6 +39,11 @@ class VoiceAudio(Base):
     # URL'i saklamak süresi dolmuş bir bağlantıyı kalıcılaştırırdı.
     storage_path: Mapped[str] = mapped_column(String(400), nullable=False)
 
+    # Nasıl üretildi: "sts" (uzmanın referans kaydından speech-to-speech) |
+    # "tts" (metin okuma). NULL = 0031 öncesi satır — o güne dek STS canlıda
+    # hiç açılmadı, yani TTS. Ninni yalnız "sts" ise listelenir (2026-10-16).
+    yontem: Mapped[str | None] = mapped_column(String(8), nullable=True)
+
     duration_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

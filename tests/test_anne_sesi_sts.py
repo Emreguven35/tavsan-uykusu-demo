@@ -12,7 +12,8 @@ Anne Sesi speech-to-speech (ANNE_SESI_STS) — ağ YOK, ElevenLabs MOCK.
      ninni DÜŞMEZ; STS bir daha denenmez; anahtar hiçbir log satırında geçmez.
   G  Geçici hata: yeniden denenir, olmazsa masal TTS, ninni üretilemedi.
   N  Ninni kuralı (2026-10-16): düz okuma yolu yok; kaydı gelen ninni
-     kendiliğinden pakete ve listeye girer; mevcut dosyalar listede kalır.
+     kendiliğinden pakete ve listeye girer; STS üretimi yontem='sts' yazar;
+     eski TTS / paket dışı ninni dosyaları listelenmez (silinmez).
 
 Çalıştırma: python tests/test_anne_sesi_sts.py
 """
@@ -510,9 +511,17 @@ try:
 finally:
     s.close()
 _n = {x.id: x for x in _st.ninniler}
-check("N3) Listede referansı olmayan ninni yok; referanslı + eski hazır dosya var",
-      set(_n) == {"ninni_dandini", "ninni_uyu_yavrum"}
-      and _n["ninni_uyu_yavrum"].hazir and _n["ninni_dandini"].hazir, str(sorted(_n)))
+check("N3) Listede yalnız paketteki STS ninnisi; eski paket dışı dosya listelenmez",
+      set(_n) == {"ninni_dandini"} and _n["ninni_dandini"].hazir, str(sorted(_n)))
+s = SessionLocal()
+try:
+    _y = {a.content_id: a.yontem for a in s.query(VoiceAudio)
+          .filter(VoiceAudio.voice_profile_id == pidn).all()}
+finally:
+    s.close()
+check("N3b) Üretim yöntemi yazıldı: referanslı sts, referanssız masal tts, elle eklenen NULL",
+      _y.get("ninni_dandini") == "sts" and _y.get("masal_kelogan_sihirli_degnek") == "tts"
+      and _y.get("ninni_uyu_yavrum") is None, str(_y))
 check("N4) Masallar listede eksiksiz", len(_st.masallar) == 5, str(len(_st.masallar)))
 os.environ.pop("ANNE_SESI_STS")
 check("N5) Bayrak kapalıyken hiçbir ninni pakete girmez (TTS yolu yok)",

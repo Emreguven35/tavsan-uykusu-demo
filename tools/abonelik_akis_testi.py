@@ -272,7 +272,8 @@ def main(argv=None) -> int:
         s = oturum()
         try:
             x = (s.query(Subscription).filter(Subscription.user_id == uid,
-                                              Subscription.product_id == urun).one_or_none())
+                                              Subscription.product_id
+                                              == premium_svc.urun_kimligi(urun)).one_or_none())
             return None if x is None else {"status": x.status, "will_renew": x.will_renew,
                                            "store": x.store, "platform": x.platform,
                                            "sonraki_urun": x.sonraki_urun,
@@ -370,7 +371,7 @@ def main(argv=None) -> int:
         gonder(olay(uid, "PRODUCT_CHANGE", store, urun, "NORMAL", simdi + timedelta(days=30),
                     new_product_id=yeni_urun))
         karsilastir(baglam, "7 PRODUCT_CHANGE", gozle(h, uid, bid), B("premium"),
-                    {"sonraki_urun": (yeni_urun, (abonelik_satiri(uid, urun) or {}).get("sonraki_urun"))})
+                    {"sonraki_urun": (premium_svc.urun_kimligi(yeni_urun), (abonelik_satiri(uid, urun) or {}).get("sonraki_urun"))})
 
         s = oturum()
         try:

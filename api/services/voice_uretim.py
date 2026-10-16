@@ -154,6 +154,7 @@ def uret(voice_profile_id) -> dict:
         # bayrak kapalı / kayıt yok / izin yok / STS düştüyse masal TTS ile
         # okunur. NİNNİ DÜZ OKUNMAZ: STS olmazsa üretilemedi sayılır.
         veri = _sts_dene(icerik, voice_id, user_id, pid)
+        yontem = "sts" if veri else "tts"
         if not veri and icerik.get("type") == "ninni":
             logger.warning("Ninni STS ile üretilemedi, TTS'e düşülmez: profil=%s "
                            "icerik=%s", pid, cid)
@@ -197,12 +198,13 @@ def uret(voice_profile_id) -> dict:
             # değil, güncelleme — yeni dosya yolu/boyutu satıra yazılır.
             st = upsert.insert(VoiceAudio).values(
                 voice_profile_id=pid, content_id=cid, storage_path=yol,
-                bytes=boyut, duration_sec=_sure_tahmini(boyut))
+                bytes=boyut, duration_sec=_sure_tahmini(boyut), yontem=yontem)
             db.execute(st.on_conflict_do_update(
                 index_elements=["voice_profile_id", "content_id"],
                 set_={"storage_path": st.excluded.storage_path,
                       "bytes": st.excluded.bytes,
-                      "duration_sec": st.excluded.duration_sec}))
+                      "duration_sec": st.excluded.duration_sec,
+                      "yontem": st.excluded.yontem}))
             # İLERLEME SAYILARAK yazılır, artırılarak DEĞİL: iki iş aynı anda
             # `+1` yaparsa biri kaybolur (lost update) ve çubuk eksik kalır.
             p = db.get(VoiceProfile, pid)
@@ -279,6 +281,39 @@ def _sts_dene(icerik: dict, voice_id: str, user_id, pid) -> bytes | None:
     logger.warning("STS üretilemedi, TTS'e düşülüyor: profil=%s icerik=%s",
                    pid, icerik["id"])
     return None
+
+
+def onizleme_kopyasi(audio: VoiceAudio, user_id) -> str | None:
+    """Tam dosyanın ilk VOICE_ONIZLEME_SN saniyelik KESİK kopyasının depo yolu.
+
+    Önizleme amaçlı kaydı olmayan (eski tam paketli) premium olmayan anneye
+    önizleme bu kopyadan verilir — tam dosyanın bağlantısı ASLA verilmez.
+    Kopya ilk istekte bir kez yazılır (aynı profil klasöründe, satırı yok:
+    profil/hesap silinince klasörle birlikte gider). Model çağrısı yok.
+    Okuma/kesme/yazma olmazsa None → çağıran içeriği kilitli bırakır."""
+    sn = voice_paket.onizleme_sn()
+    yol = storage.ses_yolu(user_id, audio.voice_profile_id,
+                           f"{audio.content_id}.onizleme{int(round(sn))}")
+    depo = storage.depo()
+    try:
+        if depo.var_mi(yol):
+            return yol
+        tam = depo.oku(audio.storage_path)
+        if not tam:
+            logger.warning("Önizleme kopyası: kaynak okunamadı (%s)", audio.storage_path)
+            return None
+        kesik = mp3.kes(tam, sn)
+        # Güvence: kopya önizleme süresinden uzunsa (kesilemediyse) verilmez.
+        if not kesik or mp3.sure(kesik) > sn + 1:
+            logger.warning("Önizleme kopyası kesilemedi: %s", audio.storage_path)
+            return None
+        depo.yaz(yol, kesik, "audio/mpeg")
+        logger.info("Önizleme kopyası yazıldı: profil=%s icerik=%s",
+                    audio.voice_profile_id, audio.content_id)
+        return yol
+    except Exception:
+        logger.exception("Önizleme kopyası yazılamadı: %s", yol)
+        return None
 
 
 def _sure_tahmini(boyut: int) -> int:

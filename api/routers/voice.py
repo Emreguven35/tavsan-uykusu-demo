@@ -177,7 +177,9 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
     durum = _klon_durumu(onceki, user=user)
     paket_gecisi = (amac == voice_paket.AMAC_PAKET and not durum["can_clone"]
                     and _paket_kaydi_hakki(onceki, user, premium))
-    if not durum["can_clone"] and not paket_gecisi:
+    onizleme_gecisi = (not durum["can_clone"]
+                       and _masalsiz_eski_paket(db, onceki, premium))
+    if not durum["can_clone"] and not paket_gecisi and not onizleme_gecisi:
         tarih = durum["next_clone_available_at"].strftime("%d.%m.%Y")
         logger.info("Klonlama limiti: user=%s sonraki=%s", user.id, tarih)
         return JSONResponse(
@@ -262,7 +264,9 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
 
     logger.info("Voice clone tamam: user=%s voice_id=%s profil=%s amac=%s%s",
                 user.id, voice_id, profile.id, hedef,
-                " (paket geçişi, bekleme uygulanmadı)" if paket_gecisi else "")
+                " (paket geçişi, bekleme uygulanmadı)" if paket_gecisi else
+                " (masalsız eski paket → önizleme, bekleme uygulanmadı)"
+                if onizleme_gecisi else "")
 
     # ESKİ SESİ ve ESKİ PAKETİ TEMİZLE (Faz 4.3 — tek aktif ses).
     _eski_sesleri_temizle(db, user, yeni_voice_id=voice_id,
@@ -278,6 +282,42 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
 
 def _onizleme_mi(profile: VoiceProfile | None) -> bool:
     return getattr(profile, "amac", None) == voice_paket.AMAC_ONIZLEME
+
+
+# ESKİ TAM PAKET + PREMIUM DEĞİL (2026-10-16). Önizleme sisteminden (0029)
+# önceki kayıtlar amac=NULL tam pakettir. Sahibi premium değilse (beta kapandı,
+# hediye bitti, BETA_HARIC) mobil 30 sn önizleme ekranını açar ve `onizleme`
+# işaretli masal bekler; eskiden hiç gelmiyordu → "Masalın hazırlanıyor"da
+# sonsuz bekleme. Artık: eski paketteki anne sesli masaldan 30 sn'lik KESİK
+# kopya önizleme olarak verilir. Hiç masalı yoksa önizleme amaçlı BİR yeniden
+# kayıt hakkı açılır (yeni kayıt önizleme profili olur, durum kendiliğinden
+# kapanır).
+def _eski_paket_mi(profile: VoiceProfile | None) -> bool:
+    return (profile is not None and not _onizleme_mi(profile)
+            and profile.status in ("ready", "released"))
+
+
+def _eski_paket_onizlemesi(db: Session, profile: VoiceProfile | None,
+                           premium: bool) -> VoiceAudio | None:
+    """Premium olmayanın eski paketinden önizlenecek masal dosyası: ayardaki
+    önizleme masalı, yoksa katalog sırasıyla ilk hazır masal. Uymazsa None."""
+    if premium or not _eski_paket_mi(profile):
+        return None
+    dosyalar = {a.content_id: a for a in db.query(VoiceAudio).filter(
+        VoiceAudio.voice_profile_id == profile.id).all()}
+    masallar = [x["id"] for x in voice_svc.load_stories().get("masallar", [])]
+    for cid in [voice_paket.onizleme_icerik_id(), *masallar]:
+        if cid in dosyalar and cid in masallar:
+            return dosyalar[cid]
+    return None
+
+
+def _masalsiz_eski_paket(db: Session, profile: VoiceProfile | None,
+                         premium: bool) -> bool:
+    """Premium değil, eski paketi var ama önizlenecek masalı yok → bekleme
+    süresine bakılmadan önizleme amaçlı tek yeniden kayıt hakkı."""
+    return (not premium and _eski_paket_mi(profile)
+            and _eski_paket_onizlemesi(db, profile, premium) is None)
 
 
 def _paket_kaydi_hakki(profile: VoiceProfile | None, user: User,
@@ -347,9 +387,18 @@ def voice_status(db: Session = Depends(get_db), user: User = Depends(get_current
       ready/released     → dinlenebilir
       failed             → "olmadı, tekrar dene" (hak zaten iade edildi)"""
     profile = _son_profil(db, user)
+    premium = _premium_mi(db, user)
     # Klonlama hakkı POST /clone ile AYNI fonksiyondan hesaplanıyor: mobilin
     # gösterdiği tarih ile sunucunun uyguladığı sınır ayrışamaz.
     durum = _klon_durumu(profile, user=user)
+    if _masalsiz_eski_paket(db, profile, premium):
+        # Önizlenecek masal yok: mobil kayıt ekranına dönsün ("none", hak açık).
+        # POST /clone aynı koşulla beklemeyi atlar.
+        return VoiceStatusResp(status="none", can_clone=True,
+                               next_clone_available_at=None, retry_after_days=0,
+                               progress=Progress(done=0, total=0),
+                               kayit_hakki={"kalan": CLONE_HAKKI_TOPLAM,
+                                            "toplam": CLONE_HAKKI_TOPLAM})
     if profile is None:
         # "Sesimi sil" sonrası da profil yok — hak yine kayıtlı andan hesaplanır.
         return VoiceStatusResp(status="none", can_clone=durum["can_clone"],
@@ -372,8 +421,9 @@ def voice_status(db: Session = Depends(get_db), user: User = Depends(get_current
         hazir_icerik=hazir,
         error=profile.error,
         released_at=profile.released_at,
-        onizleme=_onizleme_mi(profile),
-        paket_kaydi_hakki=_paket_kaydi_hakki(profile, user, _premium_mi(db, user)))
+        onizleme=(_onizleme_mi(profile)
+                  or _eski_paket_onizlemesi(db, profile, premium) is not None),
+        paket_kaydi_hakki=_paket_kaydi_hakki(profile, user, premium))
 
 
 def _premium_mi(db: Session, user: User) -> bool:
@@ -390,11 +440,12 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
     cat = voice_svc.load_stories()
     profile = _son_profil(db, user)
     hazir_yollar: dict[str, str] = {}
+    yontemler: dict[str, str | None] = {}
     if profile is not None:
-        hazir_yollar = {
-            a.content_id: a.storage_path
-            for a in db.query(VoiceAudio).filter(
-                VoiceAudio.voice_profile_id == profile.id).all()}
+        for a in db.query(VoiceAudio).filter(
+                VoiceAudio.voice_profile_id == profile.id).all():
+            hazir_yollar[a.content_id] = a.storage_path
+            yontemler[a.content_id] = a.yontem
     paket_idler = [x["id"] for x in voice_paket.paket_icerikleri()]
     paket_kume = set(paket_idler)
     from api.services import erisim
@@ -402,6 +453,10 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
     # Önizleme kaydında tek dosya var ve o masalın 30 sn'si: kilitsiz verilir,
     # `onizleme: true` taşır. Diğer içerikler premium değilse kilitli.
     onizleme = _onizleme_mi(profile)
+    # Eski tam paketli, premium olmayan: tek masalın 30 sn'lik KESİK kopyası.
+    eski_on = _eski_paket_onizlemesi(db, profile, premium)
+    eski_on_yol = (voice_uretim.onizleme_kopyasi(eski_on, user.id)
+                   if eski_on is not None else None)
     uretilemeyen = set()
     if profile is not None and (profile.error or "").startswith("Üretilemedi:"):
         uretilemeyen = {p.strip() for p in
@@ -419,7 +474,15 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
                 and genel_ses.genel_surum_var_mi(x["id"])):
             yol, kaynak = genel_ses.genel_yol(x["id"]), "genel"
         on = onizleme and kaynak == "anne"
+        if eski_on is not None and x["id"] == eski_on.content_id:
+            # Kesik kopya yazılamadıysa kilitli kalır: tam dosya VERİLMEZ.
+            on = eski_on_yol is not None
+            if on:
+                yol = eski_on_yol
         kilit = erisim.hikaye_kilitli_mi(x["id"], premium) and not on
+        if kaynak == "anne" and not premium and not on:
+            # Premium olmayana anne sesli TAM dosya bağlantısı asla verilmez.
+            kilit = True
         if yol:
             durum = "hazir"
         elif x["id"] in uretilemeyen:
@@ -437,10 +500,12 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
 
     return StoriesResp(
         masallar=[_item(x) for x in cat.get("masallar", [])],
-        # Ninni yalnız pakette (referans kaydı var) ya da kullanıcının hazır
-        # dosyası varsa listelenir — "hazırlanıyor" diye bekleyen ninni olmaz.
+        # Ninni yalnız PAKETTEYSE ve kullanıcının dosyası STS ile üretildiyse
+        # (ya da henüz dosyası yoksa) listelenir. Eski düz okuma (TTS) ninni
+        # dosyaları listelenmez — dosyalar SİLİNMEZ (2026-10-16).
         ninniler=[_item(x) for x in cat.get("ninniler", [])
-                  if x["id"] in paket_kume or x["id"] in hazir_yollar],
+                  if x["id"] in paket_kume
+                  and (x["id"] not in hazir_yollar or yontemler.get(x["id"]) == "sts")],
         paket=voice_paket.paket_adi(), paket_icerikleri=paket_idler)
 
 

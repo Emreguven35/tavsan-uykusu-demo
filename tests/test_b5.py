@@ -130,8 +130,11 @@ try:
 finally:
     _db.close()
 _dv = {x["id"]: x for x in client.get("/api/v1/voice/stories", headers=HV).json()["ninniler"]}
-check("N6) Kendi sesi olan kullanıcıya KENDİ sürümü", _dv["ninni_dandini"]["ses_kaynagi"] == "anne",
-      str(_dv["ninni_dandini"]))
+# 2026-10-16: ninni yalnız paketteyse ve STS ile üretildiyse listelenir. Eski
+# (yontem NULL = TTS) kendi dandini dosyası listelenmez, genel sürüme de
+# düşülmez; dosya SİLİNMEZ. STS'li durum: tests/test_ses_eski_paket_onizleme N1.
+check("N6) Kendi sesiyle eski TTS ninnisi listelenmez (genele de düşmez), dosya durur",
+      "ninni_dandini" not in _dv and storage.depo().var_mi(yol), str(sorted(_dv)))
 
 # =============================================================================
 # K — Kurucu üye listesi
