@@ -151,8 +151,14 @@ def uret(voice_profile_id) -> dict:
             break
         yol = storage.ses_yolu(user_id, pid, cid)
         # ANNE_SESI_STS açıksa ve uzmanın referans kaydı varsa speech-to-speech;
-        # bayrak kapalı / kayıt yok / izin yok / STS düştüyse aynen TTS.
+        # bayrak kapalı / kayıt yok / izin yok / STS düştüyse masal TTS ile
+        # okunur. NİNNİ DÜZ OKUNMAZ: STS olmazsa üretilemedi sayılır.
         veri = _sts_dene(icerik, voice_id, user_id, pid)
+        if not veri and icerik.get("type") == "ninni":
+            logger.warning("Ninni STS ile üretilemedi, TTS'e düşülmez: profil=%s "
+                           "icerik=%s", pid, cid)
+            basarisiz.append(cid)
+            continue
         for deneme in range(1, DENEME_SAYISI + 1):
             if veri:
                 break
@@ -255,7 +261,7 @@ def _seslendir(voice_id: str, metin: str, user_id) -> bytes | None:
 
 
 def _sts_dene(icerik: dict, voice_id: str, user_id, pid) -> bytes | None:
-    """Referans kayıttan STS. None → TTS'e düşülür. Önizlemede referansın
+    """Referans kayıttan STS. None → masalda TTS'e düşülür, ninnide düşülmez. Önizlemede referansın
     yalnız ilk VOICE_ONIZLEME_SN saniyesi dönüştürülür. Geçici hatada DENEME_SAYISI
     kadar denenir; izin yoksa hiç tekrar edilmez."""
     from api.services import voice_sts

@@ -3,7 +3,7 @@
 `ANNE_SESI_STS` bayrağı açıkken her annenin ninni ve masalları bu kayıtlardan
 speech-to-speech ile (ElevenLabs `eleven_multilingual_sts_v2`) annenin sesine
 dönüştürülür. Ezgi, duygu, duraklama ve tempo kayıttan gelir; ses annenin olur.
-Dosyası olmayan içerik eskisi gibi TTS ile okunur.
+Dosyası olmayan masal eskisi gibi TTS ile okunur; dosyası olmayan ninni hiç sunulmaz.
 
 ## Dosya adları
 
@@ -11,17 +11,20 @@ Uygulamanın okuduğu dosya: `{icerik_id}.mp3` (hazırlama betiğinin çıktıs�
 
 | Dosya | İçerik |
 |---|---|
-| `ninni_dandini.mp3` | Dandini Dastana |
-| `ninni_ay_isigi.mp3` | Ay Işığı Ninnisi |
-| `ninni_uyu_yavrum.mp3` | Uyu Yavrum |
+| `ninni_dandini.mp3` | Dandini Dandini Dastana |
+| `ninni_uyusun_da_buyusun.mp3` | Uyusun da Büyüsün |
+| `ninni_e_bebegim.mp3` | E Bebeğim Ee |
+| `ninni_atem_tutam.mp3` | Atem Tutam Ben Seni |
+| `ninni_camlibelden.mp3` | Çamlıbel'den Çıktım Yayan |
 | `masal_aysecik_uyku_perisi.mp3` | Ayşecik ile Uyku Perisi (önizleme masalı: ilk 30 sn'si kullanılır) |
 | `masal_kelogan_sihirli_degnek.mp3` | Keloğlan ile Sihirli Değnek |
 | `masal_cirkin_ordek_yavrusu.mp3` | Çirkin Ördek Yavrusu |
 | `masal_uc_kucuk_domuzcuk.mp3` | Üç Küçük Domuzcuk |
 | `masal_kirmizi_baslikli_kiz.mp3` | Kırmızı Başlıklı Kız |
 
-Yeni iki ninni önce `data/stories.json` kataloğuna ve `VOICE_PAKET_NINNILER`
-ayarına eklenir; kayıtları da aynı kimlikle buraya konur.
+**Ninni düz okunmaz (2026-10-16):** dosyası burada olmayan ninni pakete
+girmez ve uygulamada listelenmez; dosya konunca kendiliğinden girer
+(`ANNE_SESI_STS` açıkken). Masalın dosyası yoksa masal TTS ile okunur.
 
 ## Hazırlama
 

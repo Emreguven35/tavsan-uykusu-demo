@@ -163,8 +163,10 @@ def masal_metni_hazirla(text: str, paragraf_sn: float = MASAL_PARAGRAF_SN,
     """
     if not text:
         return ""
+    # Her satır sonu paragraf sayılır: 2026-10-16 katalog metinleri paragrafları
+    # tek satır sonuyla ayırıyor (uzmana giden metinle birebir).
     paragraflar = [p for p in
-                   (konusma_metnine_cevir(ham) for ham in re.split(r"\n\s*\n", text))
+                   (konusma_metnine_cevir(ham) for ham in re.split(r"\s*\n\s*", text))
                    if p]
     if not paragraflar:
         return ""

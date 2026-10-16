@@ -5,9 +5,15 @@ KARAR (2026-10-13): paket 5 ninni + 5 masal. Liste AYARDAN gelir:
     VOICE_PAKET_NINNILER  virgülle ayrılmış içerik kimlikleri (en fazla 5)
     VOICE_PAKET_MASALLAR  virgülle ayrılmış içerik kimlikleri (en fazla 5)
 Ayar yoksa aşağıdaki varsayılanlar. Katalogda (data/stories.json) henüz
-BULUNMAYAN kimlik üretilmez — o yer boş kalır (yeni ninni kayıtları gelince
-kataloğa ve listeye eklenir; içerik uydurulmaz). Bugün katalogda 3 ninni var,
-yani ninni tarafında 2 yer boş.
+BULUNMAYAN kimlik üretilmez — o yer boş kalır.
+
+NİNNİ KURALI (2026-10-16): ninninin DÜZ OKUMAYA (TTS) düşen yolu YOK. Ninni
+yalnız uzmanın referans kaydından speech-to-speech ile üretilir; bu yüzden
+pakete yalnız `ninni_uretilebilir` olan ninniler girer (referans kaydı var VE
+ANNE_SESI_STS açık VE anahtarın STS izni var). Kaydı gelen ninni kendiliğinden
+girer (dosya data/anne_sesi_referans/{id}.mp3). /voice/stories de ninniyi
+yalnız pakette ya da kullanıcının hazır dosyası varsa gösterir. Yeni ninniler
+katalogda yalnız başlıkla durur (söz uydurulmaz; metin kullanılmıyor).
 
 Eski `VOICE_PACKAGE=starter|full` seçimi KALKTI. Mevcut paket sahiplerinin
 dosyaları (voice_audios) ve katalog kimlikleri değişmedi; dinledikleri içerik
@@ -31,8 +37,10 @@ PAKET_NINNI_SAYISI = 5
 PAKET_MASAL_SAYISI = 5
 VARSAYILAN_NINNILER = (
     "ninni_dandini",
-    "ninni_ay_isigi",
-    "ninni_uyu_yavrum",
+    "ninni_uyusun_da_buyusun",
+    "ninni_e_bebegim",
+    "ninni_atem_tutam",
+    "ninni_camlibelden",
 )
 VARSAYILAN_MASALLAR = (
     "masal_aysecik_uyku_perisi",
@@ -53,6 +61,7 @@ VARSAYILAN_ONIZLEME = "masal_aysecik_uyku_perisi"
 # fazlası kesilir. Tam masal (~4.000 karakter) seslendirilmez. Süre ayarla
 # değişirse metin de orantılı büyür (onizleme_karakter).
 ONIZLEME_KARAKTER = 700
+PARAGRAF = "\n\n"                     # önizleme = ilk paragraf (boş satıra kadar)
 
 
 def _liste(env: str, varsayilan: tuple, ust: int) -> list[str]:
@@ -65,6 +74,14 @@ def _liste(env: str, varsayilan: tuple, ust: int) -> list[str]:
     if len(idler) > ust:
         logger.warning("%s %d içerik veriyor, ilk %d alındı", env, len(idler), ust)
     return idler[:ust]
+
+
+def ninni_uretilebilir(content_id: str) -> bool:
+    """Ninni speech-to-speech ile üretilebilir mi (referans kaydı + STS açık ve
+    izinli)? Değilse pakete girmez — TTS'e düşmez."""
+    from api.services import voice_sts
+    return (voice_sts.acik_mi() and not voice_sts.izin_yok_mu()
+            and voice_sts.referans_yolu(content_id) is not None)
 
 
 def paket_listesi() -> dict[str, list[str]]:
@@ -84,7 +101,8 @@ def paket_icerikleri() -> list[dict]:
 
     Sıra ÜRETİM sırasıdır: ninniler önce (kısa, anne ilk dakikalarda bir şey
     dinleyebilsin), sonra masallar. Katalogda BULUNMAYAN kimlik atlanır ve
-    uyarı loglanır — yer boş kalır."""
+    uyarı loglanır — yer boş kalır. Referans kaydı olmayan ninni atlanır
+    (ninni_uretilebilir)."""
     cat = voice_svc.load_stories()
     indeks = {x["id"]: x for x in
               list(cat.get("ninniler", [])) + list(cat.get("masallar", []))}
@@ -94,6 +112,8 @@ def paket_icerikleri() -> list[dict]:
         item = indeks.get(cid)
         if item is None:
             logger.warning("Paket içeriği katalogda YOK: %s — yer boş kalır", cid)
+            continue
+        if item.get("type") == "ninni" and not ninni_uretilebilir(cid):
             continue
         out.append(item)
     return out
@@ -136,9 +156,10 @@ def onizleme_karakter() -> int:
 
 
 def onizleme_metni(metin: str, ust: int | None = None) -> str:
-    """Metnin baş kısmı — cümle sınırında, en az bir cümle."""
+    """Metnin İLK PARAGRAFI (boş satıra kadar); sınırı aşarsa cümle sınırında
+    kesilir, en az bir cümle."""
     ust = onizleme_karakter() if ust is None else ust
-    metin = (metin or "").strip()
+    metin = (metin or "").strip().split(PARAGRAF, 1)[0].strip()
     if len(metin) <= ust:
         return metin
     cumleler = re.split(r"(?<=[.!?…])\s+", metin)

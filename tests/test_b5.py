@@ -1,8 +1,8 @@
 """
 B5 — ücretsiz ninni (genel ses), kurucu üye listesi, KVKK. Ağ YOK, LLM YOK.
 
-  N  Genel ninni bir kez üretilir (ikinci çağrı dokunmaz); sesi olmayan
-     kullanıcıya genel sürüm, kendi sesi olana kendi sürümü; is_free
+  N  Genel ninni bir kez üretilir (ikinci çağrı dokunmaz); 2026-10-16'dan beri
+     listede sunulmaz (ninni düz okunmaz), kendi sesi olana kendi sürümü; is_free
   K  Kurucu listesi: test alanı, moderatör, KURUCU_HARIC hariç; maskeli;
      bebek sayısı; hariç tutulan kurucu sayılmaz; /admin/kurucular yalnız admin
   C  Onay: kaydet, salt ekleme (son satır geçerli), eski sürüm → güncelleme
@@ -103,12 +103,11 @@ check("N2) İkinci çağrı yeniden ÜRETMEZ (kredi bir kez)",
 HS, US, _ = hesap("sessiz@gercek.com")
 st = client.get("/api/v1/voice/stories", headers=HS).json()
 _hepsi = {x["id"]: x for x in st["masallar"] + st["ninniler"]}
-_d = _hepsi["ninni_dandini"]
-# 2026-10-13: ücretsiz ninni KALKTI (config.UCRETSIZ_NINNI = None). Genel
-# sürüm hâlâ "hazır" görünür ama premium olmayana kilitli ve bağlantısız.
-check("N3) Sesi olmayan (ücretsiz) kullanıcı: dandini genel sürümle hazır ama KİLİTLİ",
-      _d["hazir"] and _d["ses_kaynagi"] == "genel" and not _d["is_free"]
-      and _d["locked"] is True and _d["audio_url"] is None, str(_d))
+# 2026-10-13: ücretsiz ninni KALKTI (config.UCRETSIZ_NINNI = None).
+# 2026-10-16: ninni düz okunmaz — genel (anlatıcı TTS) Dandini artık listede
+# sunulmaz; kendi sesiyle dosyası olmayan ninni listede görünmez.
+check("N3) Sesi olmayan kullanıcı: genel (anlatıcı) dandini listede YOK",
+      "ninni_dandini" not in _hepsi and st["ninniler"] == [], str(sorted(_hepsi)))
 check("N4) Diğer içerikler de kilitli ve bağlantısız; ücretsiz içerik yok",
       all(x["locked"] and x["audio_url"] is None and not x["is_free"]
           for x in _hepsi.values()), "")

@@ -211,7 +211,8 @@ check("4b) Etiket sayısı paragraf sayısı - 1",
 cat = voice_svc.load_stories()
 _asanlar, _uzun_etiket, _ozet = [], [], []
 for tur in ("masallar", "ninniler"):
-    for s in cat.get(tur, []):
+    # 2026-10-16: yeni ninniler katalogda yalnız başlıkla (söz yok, TTS'e gitmez).
+    for s in [x for x in cat.get(tur, []) if x.get("text")]:
         h = masal_metni_hazirla(s["text"])
         b = breakler(h)
         _duz = len(konusma_metnine_cevir(s["text"]))
@@ -240,17 +241,19 @@ check("4f) Uzun masalda yalnız paragraf duraklaması var",
 # ücretlendirmeye GİRİYOR. İki ayrı ölçüt gerekiyor: uzun metinlerde yüzde
 # (mutlak tutar orada birikiyor), kısa metinlerde mutlak artış (250 karakterlik
 # bir ninnide %50 artış bile ~1,5 kuruş; yüzdeye bakmak yanıltır).
-# Eşikler OPTİMUM değil, REGRESYON FRENİDİR: bugünkü ölçüm masallarda +%7…+%15
-# (+242…+682 karakter), ninnilerde +110…+132 karakter (~1,5 kuruş). Duraklama
+# Eşikler OPTİMUM değil, REGRESYON FRENİDİR. 2026-10-16 metinleri (~2.100
+# karakter, satır başına bir paragraf, kısa diyalog satırları): masallarda
+# +%17…+%49 (+372…+876 karakter; Üç Küçük Domuzcuk cümle duraklaması da
+# alıyor). Toplam karakter eski ~4.000'lik metinlerden yine AZ. Duraklama
 # kuralı ileride gevşetilirse bu iki kontrol önce patlar.
 _uzun_pay = [(sid, ek / duz) for sid, _n, ek, duz in _ozet if duz > 1000]
-_sisen = [(sid, f"+%{100*o:.1f}") for sid, o in _uzun_pay if o >= 0.20]
-check("4g) Uzun metinlerde etiket maliyeti %20'nin altında (bugün en kötü +%15)",
+_sisen = [(sid, f"+%{100*o:.1f}") for sid, o in _uzun_pay if o >= 0.55]
+check("4g) Uzun metinlerde etiket maliyeti %55'in altında (bugün en kötü +%49)",
       not _sisen, str(_sisen))
 
-_mutlak = [(sid, ek) for sid, _n, ek, _d in _ozet if ek > 800]
-check("4h) Hiçbir kayıtta etiket yükü 800 karakteri (~$0,09) geçmiyor "
-      "(bugün en kötü +682)", not _mutlak, str(_mutlak))
+_mutlak = [(sid, ek) for sid, _n, ek, _d in _ozet if ek > 1000]
+check("4h) Hiçbir kayıtta etiket yükü 1000 karakteri (~$0,11) geçmiyor "
+      "(bugün en kötü +876)", not _mutlak, str(_mutlak))
 
 
 # =============================================================================

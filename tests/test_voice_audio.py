@@ -171,8 +171,9 @@ check("7b) /audio hash olmayan ad reddedilir",
 cat = voice_svc.load_stories()
 masallar = cat.get("masallar", [])
 ninniler = cat.get("ninniler", [])
-check("8) 5 masal + 3 ninni",
-      len(masallar) == 5 and len(ninniler) == 3,
+# 2026-10-16: 5 paket ninnisi + eski paketten kalan 2 (yalnız eski dosyalar için).
+check("8) 5 masal + 7 ninni",
+      len(masallar) == 5 and len(ninniler) == 7,
       f"masal={len(masallar)} ninni={len(ninniler)}")
 
 _beklenen_basliklar = {
@@ -183,21 +184,24 @@ check("8b) Başlıklar sözleşmedeki 5 masal",
       {m["title"] for m in masallar} == _beklenen_basliklar,
       str(sorted(m["title"] for m in masallar)))
 
-check("8c) Tüm masallarda duration_hint '5 dk'",
-      all(m.get("duration_hint") == "5 dk" for m in masallar),
+check("8c) Tüm masallarda duration_hint '3–4 dk'",
+      all(m.get("duration_hint") == "3–4 dk" for m in masallar),
       str([m.get("duration_hint") for m in masallar]))
 
+# 2026-10-16 metinleri: yavaş okunca 3–4 dk (~250–450 kelime).
 _kisa = [(m["title"], len(m.get("text", "").split()))
-         for m in masallar if len(m.get("text", "").split()) < 500]
-check("8d) Her masal ≥500 kelime (5 dk TTS)", not _kisa, f"kısa={_kisa}")
+         for m in masallar if not 250 <= len(m.get("text", "").split()) <= 450]
+check("8d) Her masal 250–450 kelime (3–4 dk)", not _kisa, f"aralık dışı={_kisa}")
 
 # TTS'e düz metin gitmeli: markdown/emoji kalıntısı olmamalı
 _kirli = [m["title"] for m in masallar
           if any(t in m.get("text", "") for t in ("**", "##", "- ", "* ", "•"))]
 check("8e) Masal metinleri düz (markdown/madde işareti yok)", not _kirli, f"kirli={_kirli}")
 
-check("8f) Ninniler DEĞİŞMEDİ (3 adet, id'ler aynı)",
-      {n["id"] for n in ninniler} == {"ninni_dandini", "ninni_uyu_yavrum",
+check("8f) Ninni kimlikleri: 5 paket ninnisi + eski 2 (eski dosyalar bozulmasın)",
+      {n["id"] for n in ninniler} == {"ninni_dandini", "ninni_uyusun_da_buyusun",
+                                      "ninni_e_bebegim", "ninni_atem_tutam",
+                                      "ninni_camlibelden", "ninni_uyu_yavrum",
                                       "ninni_ay_isigi"},
       str([n["id"] for n in ninniler]))
 

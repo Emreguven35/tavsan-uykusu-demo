@@ -413,8 +413,10 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
     def _item(x: dict) -> StoryItem:
         yol = hazir_yollar.get(x["id"])
         kaynak = "anne" if yol else None
-        # B5 — kendi sesiyle sürümü yoksa ücretsiz ninninin GENEL sürümü.
-        if not yol and genel_ses.genel_surum_var_mi(x["id"]):
+        # B5 — kendi sesiyle sürümü yoksa GENEL (anlatıcı) sürüm. Ninnide YOK:
+        # ninni düz okunmaz (2026-10-16), genel Dandini anlatıcı TTS'iydi.
+        if (not yol and x.get("type") != "ninni"
+                and genel_ses.genel_surum_var_mi(x["id"])):
             yol, kaynak = genel_ses.genel_yol(x["id"]), "genel"
         on = onizleme and kaynak == "anne"
         kilit = erisim.hikaye_kilitli_mi(x["id"], premium) and not on
@@ -435,7 +437,10 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
 
     return StoriesResp(
         masallar=[_item(x) for x in cat.get("masallar", [])],
-        ninniler=[_item(x) for x in cat.get("ninniler", [])],
+        # Ninni yalnız pakette (referans kaydı var) ya da kullanıcının hazır
+        # dosyası varsa listelenir — "hazırlanıyor" diye bekleyen ninni olmaz.
+        ninniler=[_item(x) for x in cat.get("ninniler", [])
+                  if x["id"] in paket_kume or x["id"] in hazir_yollar],
         paket=voice_paket.paket_adi(), paket_icerikleri=paket_idler)
 
 

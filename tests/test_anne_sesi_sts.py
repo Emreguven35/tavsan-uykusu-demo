@@ -1,15 +1,18 @@
 """
 Anne Sesi speech-to-speech (ANNE_SESI_STS) — ağ YOK, ElevenLabs MOCK.
 
-  K  Bayrak kapalı: referans olsa bile STS çağrılmaz, TTS aynen.
-  A  Bayrak açık: referansı olan içerik STS (doğru model/voice_id/dosya),
-     olmayan TTS; maliyet defterine operation=sts + kredi.
+  K  Bayrak kapalı: STS çağrılmaz; masal TTS, NİNNİ pakete hiç girmez.
+  A  Bayrak açık: referansı olan içerik STS (doğru model/voice_id/dosya);
+     referansı olmayan masal TTS, referansı olmayan ninni pakette YOK;
+     maliyet defterine operation=sts + kredi.
   P  Uzun kayıt güvenli parçalara bölünür, çıktı tek MP3'te birleşir;
-     parçalardan biri düşerse yarım içerik yerine TTS.
+     parçalardan biri düşerse yarım içerik yerine TTS (masal).
   O  Önizleme: referansın yalnız ilk 30 sn'si dönüştürülür.
-  I  İzin yok (401 missing_permissions): açık HATA logu, TTS'e düşüş, STS bir
-     daha denenmez; anahtar hiçbir log satırında geçmez.
-  G  Geçici hata: yeniden denenir, olmazsa TTS.
+  I  İzin yok (401 missing_permissions): açık HATA logu, masal TTS'e düşer,
+     ninni DÜŞMEZ; STS bir daha denenmez; anahtar hiçbir log satırında geçmez.
+  G  Geçici hata: yeniden denenir, olmazsa masal TTS, ninni üretilemedi.
+  N  Ninni kuralı (2026-10-16): düz okuma yolu yok; kaydı gelen ninni
+     kendiliğinden pakete ve listeye girer; mevcut dosyalar listede kalır.
 
 Çalıştırma: python tests/test_anne_sesi_sts.py
 """
@@ -186,9 +189,8 @@ _, pid = profil_ac()
 voice_uretim.uret(pid)
 _s = sesler(pid)
 check("K1) Referans olsa bile STS çağrılmadı", STS == [], str(len(STS)))
-check("K2) Paketteki 3 içerik de TTS ile üretildi",
-      len(TTS) == 3 and set(_s) == {"ninni_dandini", "ninni_ay_isigi",
-                                    "masal_aysecik_uyku_perisi"}, str(list(_s)))
+check("K2) Yalnız masal TTS ile üretildi; ninniler (referanslı olan dahil) pakette yok",
+      len(TTS) == 1 and set(_s) == {"masal_aysecik_uyku_perisi"}, str(list(_s)))
 check("K3) Dosyalar TTS çıktısının birebir aynısı",
       all(v == mp3_uret(20, b"\x11") for v in _s.values()), "")
 
@@ -201,8 +203,8 @@ voice_uretim.uret(pid)
 _s = sesler(pid)
 check("A1) Referansı olan ninni STS ile üretildi",
       b"\x22" * 50 in _s["ninni_dandini"], "")
-check("A2) Referansı OLMAYAN ninni TTS'e düştü",
-      _s["ninni_ay_isigi"] == mp3_uret(20, b"\x11") and len(TTS) == 1, str(len(TTS)))
+check("A2) Referansı OLMAYAN ninni pakete girmedi, TTS hiç çağrılmadı",
+      "ninni_ay_isigi" not in _s and TTS == [], f"{list(_s)} {len(TTS)}")
 _ilk = STS[0]
 check("A3) Doğru uç, voice_id ve model",
       _ilk["url"] == "https://api.elevenlabs.io/v1/speech-to-speech/ANNE_VOICE_1"
@@ -275,8 +277,9 @@ _hatalar = [r for r in LOG.kayitlar if r.levelno >= logging.ERROR
             and "İZNİ YOK" in r.getMessage()]
 check("I1) Açık HATA logu (bir kez)", len(_hatalar) == 1, str(len(_hatalar)))
 check("I2) STS yalnız bir kez denendi, sonra hiç", len(STS) == 1, str(len(STS)))
-check("I3) Tüm içerikler TTS ile üretildi (paket tamam)",
-      len(_s) == 3 and all(v == mp3_uret(20, b"\x11") for v in _s.values()), "")
+check("I3) Masal TTS ile üretildi, ninni TTS'e DÜŞMEDİ",
+      set(_s) == {"masal_aysecik_uyku_perisi"} and len(TTS) == 1
+      and _s["masal_aysecik_uyku_perisi"] == mp3_uret(20, b"\x11"), str(list(_s)))
 check("I4) Anahtar HİÇBİR log satırında yok",
       all(ANAHTAR not in r.getMessage() and ANAHTAR not in str(r.args)
           for r in LOG.kayitlar), "")
@@ -292,9 +295,10 @@ DAVRANIS["mod"] = "hata"
 uidg, pid = profil_ac()
 voice_uretim.uret(pid)
 _s = sesler(pid)
-check("G1) Geçici hata: DENEME_SAYISI kadar denendi, sonra TTS",
+check("G1) Geçici hata: DENEME_SAYISI kadar denendi; ninni TTS'e düşmedi, masal düştü",
       len([x for x in STS if x["sure"] < 130]) == voice_uretim.DENEME_SAYISI
-      and _s["ninni_dandini"] == mp3_uret(20, b"\x11"), str(len(STS)))
+      and "ninni_dandini" not in _s and len(TTS) == 1
+      and _s["masal_aysecik_uyku_perisi"] == mp3_uret(20, b"\x11"), str(len(STS)))
 s = SessionLocal()
 try:
     _g = s.query(ApiUsage).filter(ApiUsage.operation == "sts",
@@ -480,7 +484,42 @@ else:
     shutil.rmtree(_hk, ignore_errors=True)
 
 # =============================================================================
-print("C) Katalog (kısaltılmış masallar, 2026-10-13)")
+print("N) Ninni kuralı (2026-10-16)")
+from api.routers import voice as voice_router                  # noqa: E402
+sifirla()
+os.environ["ANNE_SESI_STS"] = "true"
+os.environ.pop("VOICE_PAKET_NINNILER", None)                       # varsayılan 5 ninni
+_ids = lambda: [x["id"] for x in voice_paket.paket_icerikleri()]  # noqa: E731
+check("N1) Varsayılan paket: yalnız referansı olan ninni (dandini) girdi",
+      [i for i in _ids() if i.startswith("ninni_")] == ["ninni_dandini"], str(_ids()))
+(_REF / "ninni_e_bebegim.mp3").write_bytes(mp3_uret(90))
+check("N2) Kaydı gelen ninni kendiliğinden pakete girdi",
+      [i for i in _ids() if i.startswith("ninni_")] == ["ninni_dandini", "ninni_e_bebegim"],
+      str(_ids()))
+(_REF / "ninni_e_bebegim.mp3").unlink()
+uidn, pidn = profil_ac()
+voice_uretim.uret(pidn)
+s = SessionLocal()
+try:
+    # Eski paketten kalma, artık pakette olmayan ninninin hazır dosyası.
+    s.add(VoiceAudio(voice_profile_id=pidn, content_id="ninni_uyu_yavrum",
+                     storage_path=storage.ses_yolu(uidn, pidn, "ninni_uyu_yavrum"),
+                     bytes=10, duration_sec=60))
+    s.commit()
+    _st = voice_router.stories(db=s, user=s.get(User, uidn))
+finally:
+    s.close()
+_n = {x.id: x for x in _st.ninniler}
+check("N3) Listede referansı olmayan ninni yok; referanslı + eski hazır dosya var",
+      set(_n) == {"ninni_dandini", "ninni_uyu_yavrum"}
+      and _n["ninni_uyu_yavrum"].hazir and _n["ninni_dandini"].hazir, str(sorted(_n)))
+check("N4) Masallar listede eksiksiz", len(_st.masallar) == 5, str(len(_st.masallar)))
+os.environ.pop("ANNE_SESI_STS")
+check("N5) Bayrak kapalıyken hiçbir ninni pakete girmez (TTS yolu yok)",
+      not any(i.startswith("ninni_") for i in _ids()), str(_ids()))
+
+# =============================================================================
+print("C) Katalog (masallar 2026-10-16 metni, ninniler yalnız başlık)")
 import json as _json                                           # noqa: E402
 _kat = _json.loads((ROOT / "data" / "stories.json").read_text(encoding="utf-8"))
 _m = {x["id"]: x["text"] for x in _kat["masallar"]}
@@ -489,14 +528,27 @@ check("C1) 5 masalın her biri en fazla 4:15 (≤ 446 kelime, dakikada 105)",
       str({k: len(t.split()) for k, t in _m.items()}))
 _PAR = "\n\n"                                                  # paragraf ayracı
 _ilk = _m["masal_aysecik_uyku_perisi"].split(_PAR)[0]
-check("C2) Ayşecik ilk paragrafı ~30 sn (45–55 kelime) ve tam cümleyle biter",
-      45 <= len(_ilk.split()) <= 55 and _ilk.rstrip()[-1] in ".!?…\"", _ilk[-60:])
+check("C2) Ayşecik ilk paragrafı ~25–30 sn (35–55 kelime), tam cümleyle biter, "
+      "önizleme metni tam bu paragraf",
+      35 <= len(_ilk.split()) <= 55 and _ilk.rstrip()[-1] in ".!?…\""
+      and voice_paket.onizleme_metni(_m["masal_aysecik_uyku_perisi"]) == _ilk, _ilk[-60:])
 _msj = (ROOT / "docs" / "uzman_mesaj.txt").read_text(encoding="utf-8")
 check("C3) Uzman mesajı katalogla aynı metni taşıyor, önizleme işareti ilk paragraftan sonra",
       all(t.split(_PAR)[-1] in _msj for t in _m.values())
-      and _ilk + _PAR + "— (buraya kadar önizleme) —" in _msj, "")
+      and _ilk + _PAR + "_— (buraya kadar önizleme) —_" in _msj
+      and not any("buraya kadar" in t for t in _m.values()), "")
+_nn = {x["id"]: x for x in _kat["ninniler"]}
+check("C5) Paket ninnileri katalogda, başlıkla; yeniler söz metinsiz; 'Ninni Bebeğim' yok",
+      [_nn[i]["title"] for i in voice_paket.VARSAYILAN_NINNILER]
+      == ["Dandini Dandini Dastana", "Uyusun da Büyüsün", "E Bebeğim Ee",
+          "Atem Tutam Ben Seni", "Çamlıbel'den Çıktım Yayan"]
+      and not any("text" in _nn[i] for i in voice_paket.VARSAYILAN_NINNILER[1:])
+      and not any("Ninni Bebeğim" in x["title"] for x in _kat["ninniler"]), str(list(_nn)))
+check("C6) Süre etiketleri: masallar 3–4 dk, ninniler 2–3 dk",
+      all(x["duration_hint"] == "3–4 dk" for x in _kat["masallar"])
+      and all(x["duration_hint"] == "2–3 dk" for x in _kat["ninniler"]), "")
 check("C4) Mesajda yasak kelime yok, tek WhatsApp mesajına sığıyor",
-      not any(y in _msj for y in ("İlayda", "uzman", "STS", "kredi"))
+      not any(y in _msj for y in ("uzman", "STS", "kredi"))
       and len(_msj) < 65536, str(len(_msj)))
 
 print("=" * 78)

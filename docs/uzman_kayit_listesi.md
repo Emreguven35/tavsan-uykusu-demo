@@ -1,5 +1,11 @@
 # Anne Sesi — uzman kayıt listesi
 
+> **2026-10-16:** Güncel liste ve metinler `docs/uzman_mesaj.txt`'de (katalog
+> `data/stories.json` onunla birebir). Paket ninnileri: Dandini Dandini Dastana,
+> Uyusun da Büyüsün, E Bebeğim Ee, Atem Tutam Ben Seni, Çamlıbel'den Çıktım
+> Yayan (yalnız başlık; kaydı olmayan ninni pakette ve listede görünmez).
+> Aşağıdaki metinler ve kısaltma notları 2026-10-13 sürümüdür.
+
 Uzmanın seslendireceği **5 ninni + 5 masal**. Her kayıt bir kez yapılır; uygulama her annenin sesini bu kayıtlardan üretir (speech-to-speech). Ezgi, duygu, tempo ve duraklamalar kayıttan gelir. Uzmana gönderilecek sade metin: `docs/uzman_mesaj.txt`.
 
 **Teslim:** telefondan m4a, wav ya da mp3; dosya adı içerik kimliği ya da başlık. Dosyalar `data/anne_sesi_referans/` klasörüne konur, `python tools/referans_hazirla.py` çalıştırılır.

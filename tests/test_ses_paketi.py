@@ -52,11 +52,14 @@ os.environ["JWT_SECRET"] = "test-secret-en-az-otuz-iki-karakter-uzunlugunda"
 os.environ["ENVIRONMENT"] = "development"
 os.environ["MAIL_PROVIDER"] = "disabled"
 os.environ["MEDIA_ROOT"] = str(_MEDYA)
-# 2026-10-13: paket listesi ayardan (VOICE_PAKET_*). Bu dosya eski 4'lü
-# paketle (3 ninni + en kısa masal) ölçülüyor; varsayılan 5+5 yapı
-# tests/test_premium_yan_isler.py'de.
-os.environ["VOICE_PAKET_NINNILER"] = "ninni_dandini,ninni_ay_isigi,ninni_uyu_yavrum"
-os.environ["VOICE_PAKET_MASALLAR"] = "masal_aysecik_uyku_perisi"
+# 2026-10-13: paket listesi ayardan (VOICE_PAKET_*). Bu dosya 4'lü paketle
+# ölçülüyor; varsayılan 5+5 yapı tests/test_premium_yan_isler.py'de.
+# 2026-10-16: ninni düz okunmaz (referans kaydı + STS yoksa pakete girmez),
+# bu dosyada STS kapalı — paket 4 MASAL (TTS akışı).
+os.environ.pop("VOICE_PAKET_NINNILER", None)
+os.environ.pop("ANNE_SESI_STS", None)
+os.environ["VOICE_PAKET_MASALLAR"] = ("masal_aysecik_uyku_perisi,masal_kelogan_sihirli_degnek,"
+                                      "masal_cirkin_ordek_yavrusu,masal_uc_kucuk_domuzcuk")
 os.environ["BETA_MODE"] = "true"                 # premium kapısı açık
 os.environ["ELEVENLABS_API_KEY"] = "test-key"
 os.environ["ELEVENLABS_VOICE_ID"] = "ANLATICI"
@@ -171,8 +174,8 @@ def profil_of(tok):
 # =============================================================================
 # P1 — TAM AKIŞ
 # =============================================================================
-check("P0) Paket 4 içerik (3 ninni + 1 masal)",
-      N == 4 and PAKET[-1] == "masal_aysecik_uyku_perisi", str(PAKET))
+check("P0) Paket 4 içerik (4 masal; STS kapalıyken ninni yok)",
+      N == 4 and all(p.startswith("masal_") for p in PAKET), str(PAKET))
 
 t1 = reg("paket1@test.com")
 r1 = klonla(t1)
@@ -230,12 +233,13 @@ check("P1o) Hazır içerikte imzalı audio_url + durum=hazir",
       all("/media/" in (x["audio_url"] or "") and "sig=" in (x["audio_url"] or "")
           and x["durum"] == "hazir" for x in _hazirlar),
       str(_hazirlar[0]) if _hazirlar else "")
-check("P1p) Pakette OLMAYAN masallar 'hazirlaniyor' değil listede duruyor",
-      len(_hepsi) == 8 and any(not x["hazir"] for x in _hepsi), str(len(_hepsi)))
+check("P1p) Pakette OLMAYAN masal listede duruyor; kaydı olmayan ninni listede YOK",
+      len(_hepsi) == 5 and _st["ninniler"] == [] and any(not x["hazir"] for x in _hepsi),
+      str(len(_hepsi)))
 check("P1q) Yanıt paket adını ve içerik listesini taşıyor",
       _st["paket"] == "standart" and set(_st["paket_icerikleri"]) == set(PAKET),
       str(_st.get("paket_icerikleri")))
-check("P1q2) Her içerikte in_package: paketteki 4 True, kalan 4 False",
+check("P1q2) Her içerikte in_package: paketteki 4 True, kalan False",
       {x["id"] for x in _hepsi if x.get("in_package") is True} == set(PAKET)
       and all(x.get("in_package") is False for x in _hepsi if x["id"] not in PAKET),
       str([(x["id"], x.get("in_package")) for x in _hepsi]))

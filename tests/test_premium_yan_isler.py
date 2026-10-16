@@ -188,15 +188,17 @@ check("M4) Zaten kısa dosya aynı süreyle döner",
 # =============================================================================
 print("S) Anne Sesi")
 _liste = voice_paket.paket_listesi()
-check("S1) Paket yapısı 5 ninni + 5 masal yeri (bugün 3 ninni katalogda)",
-      len(_liste["masallar"]) == 5 and len(_liste["ninniler"]) == 3
+check("S1) Paket yapısı 5 ninni + 5 masal (2026-10-16 ninni listesi)",
+      len(_liste["masallar"]) == 5 and len(_liste["ninniler"]) == 5
       and voice_paket.PAKET_NINNI_SAYISI == 5 and voice_paket.PAKET_MASAL_SAYISI == 5,
       str(_liste))
 os.environ["VOICE_PAKET_NINNILER"] = ("ninni_dandini,ninni_ay_isigi,ninni_uyu_yavrum,"
                                       "ninni_yeni_bir,ninni_yeni_iki")
 _ids = [x["id"] for x in voice_paket.paket_icerikleri()]
-check("S2) Liste ayardan; katalogda olmayan ninniler BOŞ kalır (uydurulmaz)",
-      "ninni_yeni_bir" not in _ids and len(_ids) == 8
+check("S2) Liste ayardan; katalogda olmayan ninni üretilmez, referans kaydı "
+      "olmayan ninni pakete girmez (STS kapalı: hiç ninni yok)",
+      "ninni_yeni_bir" not in _ids and len(_ids) == 5
+      and not any(i.startswith("ninni_") for i in _ids)
       and len(voice_paket.paket_listesi()["ninniler"]) == 5, str(_ids))
 os.environ.pop("VOICE_PAKET_NINNILER")
 check("S3) Önizleme metni kısa (tam masal seslendirilmez)",
@@ -265,9 +267,10 @@ _o = _hepsi[_on_id]
 check("S9) /stories: önizleme kilitsiz, onizleme=true, imzalı bağlantılı",
       _o["onizleme"] is True and _o["locked"] is False and "sig=" in (_o["audio_url"] or ""),
       str(_o))
-check("S10) Diğer her içerik kilitli ve bağlantısız; dandini artık ücretsiz DEĞİL",
+check("S10) Diğer her içerik kilitli ve bağlantısız; kaydı olmayan ninni listede yok",
       all(x["locked"] and x["audio_url"] is None and not x["is_free"]
-          for k_, x in _hepsi.items() if k_ != _on_id), str(_hepsi["ninni_dandini"]))
+          for k_, x in _hepsi.items() if k_ != _on_id)
+      and st["ninniler"] == [], str(sorted(_hepsi)))
 vs = client.get("/api/v1/voice/voice-status", headers=HS).json()
 check("S11) voice-status: onizleme=true, ücretsizde paket_kaydi_hakki=false",
       vs["onizleme"] is True and vs["paket_kaydi_hakki"] is False, str(vs))

@@ -56,9 +56,10 @@ def _adaylar(db):
 
 
 def _paket_karakteri() -> int:
-    """Paketin TTS'e gidecek karakter sayısı (duraklama etiketleri dahil)."""
-    return sum(len(masal_metni_hazirla(x["text"]))
-               for x in voice_paket.paket_icerikleri())
+    """Paketin TTS'e gidecek karakter sayısı (duraklama etiketleri dahil).
+    Ninni TTS'e gitmez (yalnız referans kaydından STS)."""
+    return sum(len(masal_metni_hazirla(x.get("text") or ""))
+               for x in voice_paket.paket_icerikleri() if x.get("type") != "ninni")
 
 
 def main():
