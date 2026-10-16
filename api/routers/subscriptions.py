@@ -38,12 +38,10 @@ def _mock_kayit(db: Session, user: User, req: SubscriptionVerifyReq) -> Subscrip
     """Production DIŞINDA sahte makbuz: süreli test kaydı (SANDBOX)."""
     deneme = "trial" in req.receipt_data.lower()
     simdi = datetime.now(timezone.utc)
-    sub = (db.query(Subscription)
-           .filter(Subscription.user_id == user.id,
-                   Subscription.product_id == req.product_id).one_or_none())
+    urun = premium_svc.urun_kimligi(req.product_id)
+    sub = premium_svc.abonelik_bul(db, user.id, urun)
     if sub is None:
-        sub = Subscription(user_id=user.id, platform=req.platform,
-                           product_id=req.product_id)
+        sub = Subscription(user_id=user.id, platform=req.platform, product_id=urun)
         db.add(sub)
     sub.status, sub.will_renew, sub.environment = "active", True, "SANDBOX"
     sub.period_type = "TRIAL" if deneme else "NORMAL"
@@ -78,9 +76,7 @@ def verify(req: SubscriptionVerifyReq, db: Session = Depends(get_db),
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail=str(e))
     premium_svc.musteriden_guncelle(db, user, veri)
-    sub = (db.query(Subscription)
-           .filter(Subscription.user_id == user.id,
-                   Subscription.product_id == req.product_id).one_or_none())
+    sub = premium_svc.abonelik_bul(db, user.id, req.product_id)
     if sub is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Mağazada bu ürün için satın alma bulunamadı.")

@@ -10,6 +10,8 @@
   M  Manuel hak: yalnız admin (moderatör); e-postayla; ikinci hak UZATIR
   B  BETA_MODE her şeyi açar
   L  BETA_MODE kapalı + premium yok: doğru uçlar kilitli, ücretsizler açık
+  U  Ürün kimliği tek biçim (urun:plan → urun; webhook/senkron/verify, çift satır
+     birleştirme, migration 0030); SUBSCRIPTION_PAUSED; SUBSCRIPTION_EXTENDED; TRANSFER
 
 Çalıştırma: python tests/test_odeme.py
 """
@@ -360,6 +362,149 @@ kp = kilit_durumu(HN, client.post("/api/v1/babies", headers=HN, json={
 check("L9) Manuel premium'da hiçbir şey kilitli değil",
       kp["plan_kilit"][0] is False and not any(kp["video"].values())
       and not any(kp["ses"].values()) and not any(kp["hikaye"].values()), str(kp))
+
+# =============================================================================
+# U — ürün kimliği tek biçim, PAUSED, EXTENDED, TRANSFER (2026-10-16)
+# =============================================================================
+PLAY = "tavsan_premium_aylik"
+
+
+def satirlar(uid):
+    db = SessionLocal()
+    try:
+        return [(x.product_id, x.status, x.will_renew, x.expires_at)
+                for x in db.query(Subscription).filter(Subscription.user_id == uid).all()]
+    finally:
+        db.close()
+
+
+def rc_abone(anahtar, gun=30):
+    return lambda uid: {"subscriber": {
+        "subscriptions": {anahtar: {
+            "expires_date": (SIMDI + timedelta(days=gun)).isoformat().replace("+00:00", "Z"),
+            "purchase_date": SIMDI.isoformat().replace("+00:00", "Z"),
+            "period_type": "normal", "store": "play_store", "is_sandbox": True,
+            "unsubscribe_detected_at": None, "billing_issues_detected_at": None}},
+        "non_subscriptions": {}}}
+
+
+def transfer(kimden, kime):
+    return gonder({"api_version": "1.0", "event": {
+        "id": str(uuid.uuid4()), "type": "TRANSFER", "app_user_id": str(kime),
+        "transferred_from": [str(kimden)], "transferred_to": [str(kime)],
+        "store": "APP_STORE", "environment": "SANDBOX"}})
+
+
+HU, UU = hesap("urun@gercek.com")
+gonder(olay("INITIAL_PURCHASE", UU, urun=f"{PLAY}:aylik", store="PLAY_STORE",
+            expiration_at_ms=MS(SIMDI + timedelta(days=30))))
+gonder(olay("RENEWAL", UU, urun=PLAY, store="PLAY_STORE",
+            expiration_at_ms=MS(SIMDI + timedelta(days=60))))
+_s = satirlar(UU)
+check("U1) Webhook: urun:plan ve urun aynı satır, kimlik normalize",
+      len(_s) == 1 and _s[0][0] == PLAY and durum(HU)["product_id"] == PLAY, str(_s))
+
+premium_svc.musteri_cek = rc_abone(f"{PLAY}:aylik", gun=90)
+r = client.get("/api/v1/subscriptions/refresh", headers=HU)
+_s = satirlar(UU)
+check("U2) Senkron: urun:plan anahtarı aynı satırı günceller, ikinci satır yok",
+      r.status_code == 200 and r.json()["guncellenen_urunler"] == [PLAY]
+      and len(_s) == 1 and _s[0][0] == PLAY, f"{r.text[:150]} {_s}")
+r = client.post("/api/v1/subscriptions/verify", headers=HU,
+                json={"platform": "android", "product_id": f"{PLAY}:aylik",
+                      "receipt_data": "gercek-makbuz"})
+check("U3) Verify: urun:plan ile sorulan kayıt bulunur (404 değil), tek satır",
+      r.status_code == 200 and r.json()["product_id"] == PLAY and len(satirlar(UU)) == 1,
+      f"{r.status_code} {r.text[:150]}")
+HV, UV = hesap("verify-mock@gercek.com")
+client.post("/api/v1/subscriptions/verify", headers=HV,
+            json={"platform": "android", "product_id": f"{PLAY}:aylik", "receipt_data": "mock_1"})
+client.post("/api/v1/subscriptions/verify", headers=HV,
+            json={"platform": "android", "product_id": PLAY, "receipt_data": "mock_2"})
+_s = satirlar(UV)
+check("U4) Verify (test makbuzu): iki biçim tek satır", len(_s) == 1 and _s[0][0] == PLAY, str(_s))
+
+# Eskiden oluşmuş çift satır: ilk dokunuşta birleşir (bitişi geç olan kalır).
+HC, UC = hesap("cift@gercek.com")
+_db = SessionLocal()
+try:
+    _db.add(Subscription(user_id=UC, platform="android", product_id=f"{PLAY}:aylik",
+                         status="active", expires_at=SIMDI + timedelta(days=40)))
+    _db.add(Subscription(user_id=UC, platform="android", product_id=PLAY,
+                         status="expired", expires_at=SIMDI - timedelta(days=5)))
+    _db.commit()
+finally:
+    _db.close()
+gonder(olay("CANCELLATION", UC, urun=PLAY, store="PLAY_STORE"))
+_s = satirlar(UC)
+check("U5) Çift satır webhook'ta birleşti: tek satır, geç biten korundu, iptal işlendi",
+      len(_s) == 1 and _s[0][0] == PLAY and _s[0][1] == "active" and _s[0][2] is False,
+      str(_s))
+
+# Migration 0030: mevcut çift satırları birleştirir ve kimliği normalize eder.
+import importlib.util                                         # noqa: E402
+from alembic.migration import MigrationContext                # noqa: E402
+from alembic.operations import Operations                     # noqa: E402
+HG, UG = hesap("migration@gercek.com")
+_db = SessionLocal()
+try:
+    _db.add(Subscription(user_id=UG, platform="android", product_id=f"{PLAY}:aylik",
+                         status="active", expires_at=SIMDI + timedelta(days=20)))
+    _db.add(Subscription(user_id=UG, platform="android", product_id=PLAY,
+                         status="expired", expires_at=SIMDI - timedelta(days=3)))
+    _db.add(Subscription(user_id=UG, platform="ios", product_id="tu_yillik:p1y",
+                         status="active", expires_at=SIMDI + timedelta(days=200)))
+    _db.commit()
+finally:
+    _db.close()
+_spec = importlib.util.spec_from_file_location(
+    "m0030", ROOT / "alembic/versions/20261016_0030_urun_kimligi.py")
+_m = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_m)
+with engine.begin() as _bag:
+    with Operations.context(MigrationContext.configure(_bag)):
+        _m.upgrade()
+_s = sorted(satirlar(UG))
+check("U6) Migration 0030: çiftler birleşti (geç biten kaldı), kimlikler normalize",
+      [(x[0], x[1]) for x in _s] == [(PLAY, "active"), ("tu_yillik", "active")]
+      and len(satirlar(UU)) == 1, str(_s))
+
+# SUBSCRIPTION_PAUSED / SUBSCRIPTION_EXTENDED
+HP, UP = hesap("duraklat@gercek.com")
+gonder(olay("INITIAL_PURCHASE", UP, expiration_at_ms=MS(SIMDI + timedelta(days=30))))
+gonder(olay("SUBSCRIPTION_PAUSED", UP, expiration_at_ms=MS(SIMDI + timedelta(days=30))))
+d = durum(HP)
+check("U7) SUBSCRIPTION_PAUSED → will_renew=false, erişim bitişe kadar sürüyor",
+      d["premium"] is True and d["will_renew"] is False, str(d))
+_yeni = SIMDI + timedelta(days=44)
+gonder(olay("SUBSCRIPTION_EXTENDED", UP, expiration_at_ms=MS(_yeni)))
+d = durum(HP)
+check("U8) SUBSCRIPTION_EXTENDED → bitiş olaydaki yeni expiration",
+      d["premium"] and d["expires_at"].startswith(_yeni.date().isoformat()), str(d))
+
+# TRANSFER
+HTA, UTA = hesap("transfer-eski@gercek.com")
+HTB, UTB = hesap("transfer-yeni@gercek.com")
+gonder(olay("INITIAL_PURCHASE", UTA, expiration_at_ms=MS(SIMDI + timedelta(days=30))))
+gonder(olay("INITIAL_PURCHASE", UTB, expiration_at_ms=MS(SIMDI - timedelta(days=1))))
+_db = SessionLocal()
+try:
+    premium_svc.hak_ver(_db, _db.get(User, UTA), 10, None, "elle hediye")
+finally:
+    _db.close()
+r = transfer(UTA, UTB)
+_da, _dy = durum(HTA), durum(HTB)
+check("U9) TRANSFER: abonelik yeni kullanıcıya geçti (tek satır), eskide mağaza kaydı yok",
+      r.json().get("durum") == "islendi" and _dy["source"] == "store" and _dy["premium"]
+      and len(satirlar(UTB)) == 1 and satirlar(UTA) == [], f"{r.text[:150]} {_dy}")
+check("U10) TRANSFER: eski kullanıcının elle verilen hakkı duruyor (source=manual)",
+      _da["premium"] and _da["source"] == "manual", str(_da))
+HTC, UTC_ = hesap("transfer-yalniz@gercek.com")
+gonder(olay("INITIAL_PURCHASE", UTC_, expiration_at_ms=MS(SIMDI + timedelta(days=30))))
+transfer(UTC_, "$RCAnonymousID:abc")
+check("U11) TRANSFER bizde olmayan kullanıcıya → eskinin erişimi kalktı",
+      durum(HTC)["premium"] is False and satirlar(UTC_)[0][1] == "expired",
+      str(satirlar(UTC_)))
 
 # =============================================================================
 # B — BETA_MODE her şeyi açar

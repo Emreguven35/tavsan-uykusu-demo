@@ -161,9 +161,11 @@ _text = _p["text"]
 check("6) Konu doğru",
       _p["subject"] == "Tavşan Uykusu — Şifre Sıfırlama", _p["subject"])
 _LINK = ("https://emreguven35.github.io/tavsan-uykusu-legal/sifre-sifirla.html"
-         "?token=TOKEN_ABC123")
-check("6b) https sıfırlama sayfası bağlantısı içerir (özel şema değil)",
-      _LINK in _text and "tavsan-uykusu://" not in _text, _text[:300])
+         "#token=TOKEN_ABC123")
+check("6b) https sıfırlama sayfası bağlantısı içerir (özel şema değil, token # ile "
+      "— sunucuya/loglara gitmez)",
+      _LINK in _text and "tavsan-uykusu://" not in _text and "?token=" not in _text,
+      _text[:300])
 _YONERGE = ("Uygulamada açılan 'Yeni şifreni belirle' ekranına bu kodu yapıştır "
             "ya da aşağıdaki bağlantıya dokun.")
 check("6c) Yönerge (yapıştır ya da dokun) ve ardından düz metin token",
