@@ -45,9 +45,15 @@ OP_PLAN_ADAPT = "plan_adapt"
 OP_MODERATION = "moderation"
 OP_TTS = "tts"
 OP_VOICE_CLONE = "voice_clone"
+# Anne Sesi speech-to-speech (ANNE_SESI_STS). `characters` alanına KREDİ yazılır
+# (ElevenLabs STS'yi ses dakikası başına ücretlendirir: dakikada 1.000 kredi).
+OP_STS = "sts"
+# Kredinin USD karşılığı: multilingual TTS'te 1 karakter = 1 kredi, aynı birim.
+STS_KREDI_USD = ELEVENLABS_FIYATLARI["eleven_multilingual_v2"]
 
 GECERLI_OPERASYONLAR = {
     OP_CHAT, OP_PLAN_GENERATE, OP_PLAN_ADAPT, OP_MODERATION, OP_TTS, OP_VOICE_CLONE,
+    OP_STS,
 }
 
 
@@ -118,6 +124,8 @@ def maliyet_hesapla(service: str, model: str | None, *, input_tokens: int = 0,
     if service == SERVIS_ELEVENLABS:
         if operation == OP_VOICE_CLONE:
             return VOICE_CLONE_USD
+        if operation == OP_STS:
+            return characters * STS_KREDI_USD          # characters = kredi
         return elevenlabs_maliyet(model, characters)
     logger.warning("Bilinmeyen servis %r — maliyet 0 yazıldı.", service)
     return 0.0

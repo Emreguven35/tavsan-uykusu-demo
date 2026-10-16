@@ -219,6 +219,12 @@ class Settings:
         # Mobil derin bağlantı şeması (parola sıfırlama e-postasındaki link).
         self.app_deep_link_scheme = (os.getenv("APP_DEEP_LINK_SCHEME")
                                      or "tavsan-uykusu").strip()
+        # E-postadaki buton bu https sayfasına gider; sayfa uygulamayı derin
+        # bağlantıyla açmayı dener, açılmazsa kodu kopyalatır. Gmail gibi
+        # istemciler özel şemalı bağlantıları çoğu zaman tıklanabilir yapmıyor.
+        self.password_reset_url = (os.getenv("PASSWORD_RESET_URL")
+                                   or "https://emreguven35.github.io/tavsan-uykusu-legal/"
+                                      "sifre-sifirla.html").strip()
 
         # --- Public taban URL (Faz 6.7) --------------------------------------
         # Ses dosyası bağlantıları MUTLAK döner (https://.../audio/<hash>.mp3) —

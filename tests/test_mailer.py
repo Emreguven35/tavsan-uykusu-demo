@@ -160,8 +160,12 @@ _p = CALLS[0]["json"]
 _text = _p["text"]
 check("6) Konu doğru",
       _p["subject"] == "Tavşan Uykusu — Şifre Sıfırlama", _p["subject"])
-check("6b) Derin bağlantı içerir (tavsan-uykusu://reset-password?token=)",
-      "tavsan-uykusu://reset-password?token=TOKEN_ABC123" in _text, _text[:200])
+_LINK = ("https://emreguven35.github.io/tavsan-uykusu-legal/sifre-sifirla.html"
+         "#token=TOKEN_ABC123")
+check("6b) https sıfırlama sayfası bağlantısı içerir (özel şema değil, token # ile "
+      "— sunucuya/loglara gitmez)",
+      _LINK in _text and "tavsan-uykusu://" not in _text and "?token=" not in _text,
+      _text[:300])
 _YONERGE = ("Uygulamada açılan 'Yeni şifreni belirle' ekranına bu kodu yapıştır "
             "ya da aşağıdaki bağlantıya dokun.")
 check("6c) Yönerge (yapıştır ya da dokun) ve ardından düz metin token",
@@ -169,7 +173,7 @@ check("6c) Yönerge (yapıştır ya da dokun) ve ardından düz metin token",
       and "elle gir" not in _text, _text[:300])
 check("6d) HTML: yönerge, kod ve bağlantı butonu",
       _YONERGE in _p["html"] and "<code>TOKEN_ABC123</code>" in _p["html"]
-      and '<a href="tavsan-uykusu://reset-password?token=TOKEN_ABC123">' in _p["html"],
+      and f'<a href="{_LINK}">' in _p["html"] and "tavsan-uykusu://" not in _p["html"],
       _p["html"][:300])
 
 # =============================================================================

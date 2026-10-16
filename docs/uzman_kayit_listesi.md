@@ -1,0 +1,290 @@
+# Anne Sesi — uzman kayıt listesi
+
+Uzmanın seslendireceği **5 ninni + 5 masal**. Her kayıt bir kez yapılır; uygulama her annenin sesini bu kayıtlardan üretir (speech-to-speech). Ezgi, duygu, tempo ve duraklamalar kayıttan gelir. Uzmana gönderilecek sade metin: `docs/uzman_mesaj.txt`.
+
+**Teslim:** telefondan m4a, wav ya da mp3; dosya adı içerik kimliği ya da başlık. Dosyalar `data/anne_sesi_referans/` klasörüne konur, `python tools/referans_hazirla.py` çalıştırılır.
+
+**Hedef süreler:** ninni 1:30–2:30 · masal en fazla 4:15 (2026-10-13'te metinler kısaltıldı; tahmin ~105 kelime/dk). Ücret ses dakikası başına.
+
+**Kısaltma (2026-10-13, katalogda uygulandı):** yalnız yan sahneler çıktı, akış ve son korundu. Ayşecik: göl durağı · Keloğlan: yol tasviri, ev işleri, ekmek yapımı ayrıntısı · Çirkin Ördek: tarla fareleri ve balıkçıl · Üç Küçük Domuzcuk: "yarın bank yapalım", şarkı/sepet ayrıntıları · Kırmızı Başlıklı Kız: çiçek sayma, sincap, kapıda bekleme. Kayıt yapılmamış ya da TTS'e düşen içerik de aynı kısaltılmış metni okur.
+
+| # | İçerik kimliği (dosya adı) | Başlık | Hedef süre | Metin |
+|---|---|---|---|---|
+| 1 | `ninni_dandini` | Dandini Dastana | 1:30–2:30 | 35 kelime |
+| 2 | `ninni_ay_isigi` | Ay Işığı Ninnisi | 1:30–2:30 | 39 kelime |
+| 3 | `ninni_uyu_yavrum` | Uyu Yavrum | 1:30–2:30 | 37 kelime |
+| 4 | uzman seçecek | uzman seçecek | 1:30–2:30 | — |
+| 5 | uzman seçecek | uzman seçecek | 1:30–2:30 | — |
+| 6 | `masal_aysecik_uyku_perisi` | Ayşecik ile Uyku Perisi | en fazla 4:15 | 439 kelime (~4:10) |
+| 7 | `masal_kelogan_sihirli_degnek` | Keloğlan ile Sihirli Değnek | en fazla 4:15 | 445 kelime (~4:14) |
+| 8 | `masal_cirkin_ordek_yavrusu` | Çirkin Ördek Yavrusu | en fazla 4:15 | 442 kelime (~4:12) |
+| 9 | `masal_uc_kucuk_domuzcuk` | Üç Küçük Domuzcuk | en fazla 4:15 | 439 kelime (~4:10) |
+| 10 | `masal_kirmizi_baslikli_kiz` | Kırmızı Başlıklı Kız | en fazla 4:15 | 445 kelime (~4:14) |
+
+## Ninniler
+
+Sözler kısa (~35–40 kelime, bir kez ~1 dk); ezgiyle iki kez söylenmesi hedef süreyi doldurur.
+
+### 1. Dandini Dastana
+
+- **İçerik kimliği:** `ninni_dandini`
+- **Hedef süre:** 1:30–2:30
+
+> Dandini dandini dastana, danalar girmiş bostana.  
+> Kov bostancı danayı, yemesin lahanayı.  
+> Uyusun da büyüsün ninni, tıpkı bir melek gibi ninni.  
+> Yumuşacık yastığında, annesinin kokusuyla.  
+> Uyu yavrum uyu, gözlerini kapa.  
+> Ninni yavrum ninni, tatlı tatlı uyu.  
+
+### 2. Ay Işığı Ninnisi
+
+- **İçerik kimliği:** `ninni_ay_isigi`
+- **Hedef süre:** 1:30–2:30
+
+> Ay ışığı pencerede, gümüş gibi süzülür.  
+> Küçük bebek yatağında, mışıl mışıl uyusun.  
+> Rüzgar bile durmuş, kuşlar susmuş dinliyor.  
+> Ninni diyor yaprak yaprak, uyu güzel bebeğim.  
+> Gözlerini kapat yavaşça, dünya seninle sakin.  
+> Ninni ninni ay ışığı, uyu tatlı yavrum uyu.  
+
+### 3. Uyu Yavrum
+
+- **İçerik kimliği:** `ninni_uyu_yavrum`
+- **Hedef süre:** 1:30–2:30
+
+> Uyu yavrum uyu, gecenin sessizliğinde.  
+> Ay ışığı üstünde, yıldızlar seni izler.  
+> Uyu yavrum uyu, hiçbir şeyden korkma.  
+> Annen burada, elini tutuyor.  
+> Rüyalarında uç, bulutlara değ.  
+> Sabah güneşle uyan, ama şimdi uyu.  
+> Ninni ninni ninni, tatlı yavrum ninni.  
+
+### 4. Uzman seçecek
+
+- **İçerik kimliği:** uzman seçince belirlenir (ör. `ninni_<kisa_ad>`); kataloğa ve `VOICE_PAKET_NINNILER` ayarına eklenir, dosya adı bu kimlikle aynı olmalı.
+- **Söz:** uzman seçecek (tam metni de istenir) · **Hedef süre:** 1:30–2:30
+
+### 5. Uzman seçecek
+
+- **İçerik kimliği:** uzman seçince belirlenir (ör. `ninni_<kisa_ad>`); kataloğa ve `VOICE_PAKET_NINNILER` ayarına eklenir, dosya adı bu kimlikle aynı olmalı.
+- **Söz:** uzman seçecek (tam metni de istenir) · **Hedef süre:** 1:30–2:30
+
+## Masallar
+
+### 6. Ayşecik ile Uyku Perisi
+
+- **İçerik kimliği:** `masal_aysecik_uyku_perisi`
+- **Hedef süre:** en fazla 4:15 · 439 kelime (~4:10)
+- **Önizleme:** ilk paragraf (51 kelime, ~30 sn) ücretsiz önizleme olarak dinletilir; tam bir cümleyle biter. Sınır metinde işaretli.
+
+O gece Ayşecik yatağında bir sağa, bir sola döndü. Yorganı ılıktı, yastığı yumuşaktı, ama uyku bir türlü gelmiyordu. Pencerenin dışında ay, gümüş bir tabak gibi duruyordu. Ayşecik gözlerini kapattı, içinden saydı, sonra yine açtı. "Uyku nerede acaba?" diye fısıldadı. Tam o anda cama küçücük bir ışık dokundu, üç kez usulca titredi.
+
+*— (buraya kadar önizleme) —*
+
+Pencerenin önünde, avuç kadar bir peri duruyordu. Kanatları buğulu cam gibi saydamdı, saçları papatya tüyü gibi hafifti. "Ben Uyku Perisi'yim," dedi yavaşça. "Uykun yolu şaşırmış olabilir. Gel, birlikte arayalım." Ayşecik gülümsedi ve elini uzattı. Peri, avucuna ılık bir nefes gibi kondu. Perde şişti, ay biraz daha yakınlaştı.
+
+İlk durak bahçeydi. Papatyalar gündüzden yorulmuştu, taçlarını birer birer topluyorlardı. Uyku Perisi kanadını salladı ve üzerlerine ince bir toz serpti. "Şimdi izle," dedi. Ve orada, bahçedeki bütün papatyalar usulca uykuya daldı. Ayşecik onları sayarken kendi göz kapakları da birazcık ağırlaştı. "Devam edelim mi?" diye sordu peri. Ayşecik başını salladı, çünkü konuşmak bile tatlı bir tembellik gibiydi.
+
+İkinci durak derenin kenarıydı. Su, taşların üstünden geçerken kendi ninnisini söylüyordu. Kıyıda çakıl taşları sıra sıra dizilmişti, hepsi ıslak ve serin. Peri parmağını suya değdirdi, dere bir an duraksadı. Ve orada, derenin bütün küçük dalgaları usulca uykuya daldı. Su artık akmıyordu, sadece nefes alıyordu. Ayşecik derin bir esneme çekti, ağzını eliyle kapattı.
+
+Üçüncü durak ormanın kenarındaki mis kokulu çayırdı. Bir tavşan yavrusu, annesinin yanına sokulmuş, kulaklarını sırtına yatırmıştı. Yaprakların arasından ay ışığı damla damla süzülüyordu. Peri çok yavaş bir şarkı mırıldandı, sözleri belli değildi. Ve orada, ormandaki bütün küçük kulaklar usulca uykuya daldı. Rüzgâr bile ayaklarının ucuna basarak yürüdü. Ayşecik'in başı, perinin omzu kadar yumuşak bir buluta yaslandı.
+
+Dördüncü durak bulutların arasıydı. Bulutlar, yeni yıkanmış yorganlar gibi kabarıktı. Aralarında dolaşan rüzgâr, artık koşmuyor, sürünüyordu. Uyku Perisi kanatlarını iki kez yavaşça kapadı. Ve orada, gökyüzündeki bütün rüzgârlar usulca uykuya daldı. Yıldızlar da birer birer gözlerini kırpıştırdı. Ayşecik kollarını kendine çekti, ılık ve güvende hissetti.
+
+"Sanırım uykunu bulduk," dedi peri gülümseyerek. "Nerede?" diye sordu Ayşecik. Peri, kızın kalbinin üstünü çok hafif işaret etti. "Buradaydı. Sadece biraz beklemek istedi." Sonra ikisi geri döndüler; yol dönüşte daha da yavaştı. Bulutlar, çayır, dere ve bahçe hepsi yerlerinde uyuyordu. Pencere, onları bekleyen bir dost gibi aralıktı.
+
+Ayşecik yatağına uzandı. Yorganı çenesine kadar çekti. Yastık, başını avucuna alır gibi kabardı. Uyku Perisi pencere pervazına oturdu ve iki kez esnedi. "Ben de biraz dinleneyim," dedi.
+
+Ve orada, evin içindeki bütün sesler usulca uykuya daldı. Terlikler kapının yanında uyudu. Oyuncak ayı raftan onu izledi, sonra o da uyudu. Ayşecik'in nefesi yavaşladı. Bir kez daha esnedi. Göz kapakları ağırlaştı.
+
+Ay pencereden içeri süzüldü. Işık yorganın üstüne yayıldı. Her şey ılıktı. Her şey sessizdi.
+
+Uyku Perisi eğildi ve çok hafif fısıldadı: iyi geceler Ayşecik, iyi geceler.
+
+### 7. Keloğlan ile Sihirli Değnek
+
+- **İçerik kimliği:** `masal_kelogan_sihirli_degnek`
+- **Hedef süre:** en fazla 4:15 · 445 kelime (~4:14)
+
+Dağların arkasında, ıhlamur kokulu küçük bir köy vardı. O köyün en ucundaki toprak evde Keloğlan annesiyle yaşardı. Keloğlan sabah erken kalkmayı hiç sevmezdi. Ama annesi seslendiğinde hemen doğrulur, keçesini omzuna atardı. Çünkü Keloğlan rahatına düşkündü, tembel değildi.
+
+O sabah annesi, "Oğlum, kuyudan iki testi su getirir misin?" dedi. Keloğlan güldü, "Getiririm anne, hem de şarkı söyleyerek." Testileri aldı, yola çıktı.
+
+Kuyunun yanında, yaşlı bir dut ağacının kökünde parlak bir şey gördü. Bir değnekti bu. Keloğlan değneği aldı, tozunu üfledi. Üzerindeki gümüş halkalar tıngırdadı, ince bir çıngırak sesi çıktı.
+
+"Merhaba," dedi değnek yumuşak bir sesle. "Ben dileklerin değneğiyim. Beni yere üç kez vur, ne istersen söyle."
+
+Keloğlan şaşırdı ama korkmadı. Değneği usulca yere vurdu, bir, iki, üç. "Şu testiler kendiliğinden dolsun," dedi. O anda testilerin içinde şırıl şırıl bir ses duyuldu. Keloğlan kahkaha attı, testileri kaldırdı, eve doğru yürüdü.
+
+Annesi suyu görünce sevindi. "Ne çabuk döndün," dedi. Keloğlan omuz silkti, "Yolda hızlı yürüdüm anne." Değneği kuşağına sakladı. Bütün gün küçük dilekler diledi. Odunlar kendi kendine ocağın yanına dizildi.
+
+Akşam olunca Keloğlan minderine oturdu. Karnı tok, elleri bomboştu. Annesi ocağın yanında oturuyor, ateşe bakıyordu.
+
+"Anne," dedi Keloğlan, "bugün hiç yorulmadım. Ama içim biraz boş."
+
+Annesi güldü. "Eskiden odun taşırken bana masal anlatırdın. Bugün anlatmadın."
+
+Keloğlan düşündü. Doğruydu. Odunları değnek taşımıştı, masalı kimse anlatmamıştı.
+
+Ertesi sabah Keloğlan değneği yine çıkardı. "Bir dileğim var," dedi. "Ama bu kez benim için değil." "Söyle bakalım," dedi değnek.
+
+"Köyün çeşmesi yıllardır damla damla akıyor. Suyu bol olsun. Herkes kovasını kolayca doldursun."
+
+Değnek bir hoş titredi. "Bu güzel bir dilek," dedi. Keloğlan onu üç kez yere vurdu. Uzaktan, çeşmenin oradan, gür bir su sesi duyuldu. Komşular koştu, çocuklar avuçlarını suya tuttu.
+
+O gün Keloğlan eve dönerken düşündü. Değnek her şeyi yapabiliyordu. Ama en çok sevdiği şeyi yapamıyordu. Annesiyle yan yana oturup hamur yoğurmayı yapamıyordu. Onu ancak Keloğlan'ın kendi elleri yapabilirdi.
+
+Eve gelince annesine, "Anne, bu akşam ekmek yapalım mı?" dedi. Annesi gülümsedi. "Yapalım oğlum."
+
+Un elendi, hamur teknesi ortaya kondu. Keloğlan kollarını sıvadı, hamuru yoğurdu. Beklerken annesi eski bir türkü söyledi, Keloğlan da mırıldandı. Ekmek pişince evin içi mis gibi koktu.
+
+Keloğlan sıcak ekmeği böldü, yarısını annesine verdi. "Bu, değneğin yapabileceği hiçbir şeye benzemiyor," dedi. Annesi onun kel başını usulca öptü.
+
+Gece olduğunda Keloğlan değneği aldı, avluya çıktı. "Sana teşekkür ederim," dedi değneğe. "Şimdi başka bir çocuk seni bulsun. Belki o da güzel bir dilek diler."
+
+Keloğlan onu dut ağacının kökündeki eski yerine bıraktı. Toprağı avucuyla düzeltti, üstüne birkaç yaprak koydu.
+
+Eve döndüğünde annesi yatağını çoktan sermişti. Keloğlan yorganın altına girdi. Uzaktan çeşmenin sesi geliyordu, ince ve düzenli, bir ninni gibi.
+
+"İyi geceler anne," dedi. "İyi geceler oğlum," dedi annesi.
+
+Ocaktaki köz sessizce kızardı. Keloğlan gözlerini kapattı ve mutlu mutlu, derin derin uyudu.
+
+### 8. Çirkin Ördek Yavrusu
+
+- **İçerik kimliği:** `masal_cirkin_ordek_yavrusu`
+- **Hedef süre:** en fazla 4:15 · 442 kelime (~4:12)
+
+Yaz sonuydu, göl kenarındaki sazlıklar akşam rüzgârında usulca sallanıyordu. Orada, geniş yaprakların altında bir ördek annesi yumurtalarını bekliyordu. Bir sabah kabuklar tık tık sesler çıkardı. Küçük sarı yavrular birer birer dünyaya geldi.
+
+En büyük yumurta ise biraz daha bekledi. Sonunda o da açıldı. İçinden gri tüylü, uzun boyunlu bir yavru çıktı. Anne ördek ona baktı ve gülümsedi. "Sen sabırlı olanmışsın," dedi yumuşak bir sesle.
+
+Yavru gölde yüzmeyi hemen öğrendi. Ama aynada gibi baktığı su yüzeyinde kendini görünce şaşırdı. Kardeşleri küçük ve yuvarlaktı, o ise uzun ve gri. Kimse gülmedi, kimse kırıcı olmadı. Yalnızca o, içinden "Ben buraya tam oturmuyorum," diye düşündü. Bu düşünce üzgün değil, biraz merakla karışıktı.
+
+Bir sabah gölün öbür kıyısını görmek istedi. Anneye sokuldu. "Biraz gezip geleceğim," dedi. Anne ördek onun tüylerini gagasıyla düzeltti. "Yolun açık olsun. Göl her zaman burada," diye yanıtladı.
+
+Yavru sazlıkların arasından süzüldü. Sonra bir dere buldu, dereyi izledi. Yol kenarında yaşlı bir kaplumbağa güneşleniyordu. "Nereye böyle acele?" diye sordu kaplumbağa. "Kendime benzeyen birini arıyorum," dedi yavru. Kaplumbağa başını yavaşça sağa yatırdı. "Ben de uzun süre kabuğumu ağır sandım. Sonra anladım, o benim evim. Acele etme, her şey zamanında anlaşılır." Yavru bu sözü kanadının altına sakladı.
+
+Günler kısaldı, hava usulca soğudu. Yavru küçük bir kamış gölcüğü buldu. Kıyısında, saz kümelerinin arasında kendine sıcak bir yer yaptı. Kar geldiğinde ortalık bembeyaz oldu. Dünya sanki uykuya geçmişti.
+
+Kış ona korkutucu gelmedi. Sadece çok sakin geldi. Kar taneleri hiç acele etmeden iniyordu. Yavru tüylerini kabarttı, gagasını kanadının altına soktu. Bir tarla kuşu ara sıra gelip haber getirdi. "Bahar hazırlanıyor," dedi, "sadece yavaş giyiniyor."
+
+Sonra bir gün buzlar çatırdayarak eridi. Hava ılık ve tatlı kokuyordu. Yavru gölün ortasına doğru yüzdü. Kanatlarını açtı ve şaşırdı: kanatları çok genişti, hiç böyle olmamışlardı.
+
+Tam o anda gökten üç beyaz kuş süzüldü. Uzun boyunlu, sessiz, çok zarif. Yavru onları izledi, kalbi yumuşacık çarptı. Onlara doğru yüzdü ve durgun suya baktı.
+
+Suda gri bir yavru yoktu. Suda beyaz tüylü, uzun boyunlu, sakin bir kuğu vardı. Kendi yansımasına uzun uzun baktı. Sonra usulca gülümsedi.
+
+"Sen bizdensin," dedi kuğulardan biri. "Nerelerdeydin?" Kuğu cevap verdi: "Kendimi arıyordum. Meğer büyümeyi bekliyordum."
+
+O gün öğrendi ki hiç kimse ona yanlış bakmamıştı. Sadece o, kendi zamanının biraz daha uzun olduğunu bilmiyordu. Herkesin büyüme zamanı farklıdır ve hiçbir zaman geç değildir.
+
+Öğleden sonra ördek gölüne uçtu. Anne ördek onu hemen tanıdı. "Ben senin sabırlı olanını biliyordum," dedi. Kardeşleri etrafında halka oldu, hiç şaşırmadılar. Birlikte akşam güneşinde yüzdüler.
+
+Gece indiğinde kuğu sazlıkların arasında yerini buldu. Kanatlarını göğsüne yaydı, uzun boynunu usulca kıvırdı. Ay gölün üstünde gümüş bir yol çizdi.
+
+Gözleri ağırlaştı. İçinde yalnızca yumuşak bir şükran kaldı. Uykuya dalarken düşündü: her şey tam zamanında oldu. Ve göl, onu bütün gece sevgiyle taşıdı.
+
+### 9. Üç Küçük Domuzcuk
+
+- **İçerik kimliği:** `masal_uc_kucuk_domuzcuk`
+- **Hedef süre:** en fazla 4:15 · 439 kelime (~4:10)
+
+Yeşil bir tepenin arkasında, dere kenarında üç küçük domuzcuk yaşarmış. En büyüğünün adı Pamuk, ortancanın adı Fındık, en küçüğünün adı Zeytin'miş. O sabah annelerinin verdiği el arabasını doldurmuş, kendilerine birer ev kurmaya karar vermişler.
+
+Zeytin, tarlanın kenarındaki altın renkli samanları görmüş. "Ben evimi bunlardan yapacağım," demiş. "Hem kokusu güzel, hem çabuk biter." Gerçekten de akşama kalmadan küçük bir saman evi hazır olmuş.
+
+Fındık, ormanın kıyısındaki çöp ve dalları toplamış, üst üste dizmiş. "Benim evim daha sağlam," demiş gülerek.
+
+Pamuk ise deredeki çamurdan tuğla yapmaya başlamış. İş yavaş gidiyormuş. Kardeşleri onunla şakalaşmış: "Sen daha temeli kuruyorsun, biz çoktan bittik." Pamuk aldırmamış.
+
+Günler geçmiş, mevsim dönmüş. Bir akşam hava serinlemiş, tepelerin üstüne sis çökmüş. Zeytin, saman evinin içinde büzülmüş; samanların arasından serinlik sızıyormuş. Fındık da battaniyesini kulaklarına kadar çekmiş, ama dalların arasından geçen hava sırtını üşütüyormuş.
+
+Tam o sırada dışarıda ağır ve yorgun adımlar duyulmuş. Gelen, gri tüylü bir kurtmuş. Bütün gün ormanda yol aramış, ısınacak bir yer bulamamış. Küçük saman evin ışığını görünce sevinmiş ve kapıyı usulca tıklatmış.
+
+"Kim o?" diye sormuş Zeytin.
+
+"Ben bir yolcuyum," demiş kurt. Sesi çok kısıktı, çünkü hem üşümüş hem susamış. "Isınabileceğim bir köşe arıyorum. İçeri girmesem de olur, kapının önünde otururum."
+
+Zeytin kapıyı azıcık açmış. Kurdun titreyen bıyıklarını, üşümüş pençelerini görünce yüreği yumuşamış. "Gel," demiş, "ama seni uyarayım, benim evim de üşüyor."
+
+Kurt içeri girmiş, etrafına bakınmış. "Sen bu evi çok güzel yapmışsın," demiş nazikçe. "Ama saman havayı tutamıyor. Sabaha kadar burnun buz gibi olur."
+
+Sonra üçü birlikte Fındık'ın çöp evine gitmişler. Orada da rüzgâr dalların arasından geçiyormuş. "Ben yıllardır ormanda dolaşırım," demiş kurt. "Hangi duvarın sıcak tuttuğunu bilirim. İsterseniz size yardım edeyim."
+
+Böylece dördü, Pamuk'un yarım kalmış tuğla evine gitmişler. Kurt kollarını sıvamış, tuğlaları taşımış, çamuru karıştırmış. Pamuk sıraları dizmiş, Fındık araları harçla doldurmuş, Zeytin de küçük eliyle yüzeyi düzeltmiş. "Ocağı şu köşeye kurun," demiş kurt, "taşlar ısıyı sabaha kadar saklar."
+
+Ay tepenin üstüne çıkarken duvarlar yükselmiş. Çatıyı kalın tahtalarla kapatmışlar. Zeytin, kendi saman evinden getirdiği samanı çatının altına döşemiş. "Bak," demiş, "benim evim de bu evin içinde yaşıyor."
+
+İşleri bitince ocağı yakmışlar. Odanın içi bal rengi bir ışıkla dolmuş. Pamuk, tencerede sıcak elma çorbası hazırlamış. Kurda en büyük kâseyi vermişler. Kurt, "Ben bugün yol aradım," demiş yavaşça, "ama arkadaş bulmuşum."
+
+Dördü ocağın önüne oturmuşlar. Zeytin, kurdun sıcacık tüylü koluna yaslanmış. Pamuk ateşe son odunu atmış, sonra o da yerine kıvrılmış. Dışarıda rüzgâr geziniyor, ama içeriye giremiyormuş; tuğlalar sıkı sıkı kenetlenmişmiş.
+
+Ateş kısılmış, ışık turuncudan mora dönmüş. Dört dost, taşların sakladığı sıcaklıkla, derin ve huzurlu bir uykuya dalmışlar. Dere de tepenin altından usulca akmaya devam etmiş. Ve o küçük tuğla ev, o geceden sonra tepenin en sıcak, en sessiz, en güvenli yeri olmuş.
+
+### 10. Kırmızı Başlıklı Kız
+
+- **İçerik kimliği:** `masal_kirmizi_baslikli_kiz`
+- **Hedef süre:** en fazla 4:15 · 445 kelime (~4:14)
+
+Ormanın kenarındaki küçük evde, kırmızı başlıklı bir kız yaşardı. Başlığını annesi dikmişti, kenarlarına da minik beyaz düğmeler eklemişti. Kız o başlığı çok severdi.
+
+O sabah annesi mutfakta bir tencere çorba pişirdi. Anne çorbayı kapaklı bir sefertasına doldurdu.
+
+"Büyükannen dün üşütmüş," dedi anne yumuşak bir sesle. "Bu çorbayı ona götürür müsün?"
+
+Kırmızı Başlıklı Kız hemen sepetini aldı. Sefertasını, bir dilim ekmeği ve iki tane kuru inciri içine yerleştirdi. Başlığını taktı, kapıda annesine el salladı.
+
+Orman yolunda kız, patikanın kenarında büyük bir ayak izi gördü. İz yumuşak toprakta belli belirsiz duruyordu. Kız eğilip baktı, merakla gülümsedi. "Buradan biri geçmiş," diye düşündü. "Acaba kim?"
+
+Büyükannenin evi dere kenarındaydı. Kız kapıya varınca hafifçe vurdu, sonra tokmağı çevirdi. İçeri girdiğinde durdu ve şaşkınlıkla etrafına bakındı.
+
+Salıncaklı koltukta, kocaman gri bir kurt oturuyordu. Başını yana yatırmış, derin derin uyuyordu. Üzerinde yeşil bir ormancı yeleği vardı. Ayaklarının dibinde çamurlu botları, yanında da bir demet mor yayla çiçeği duruyordu.
+
+Kırmızı Başlıklı Kız korkmadı. Sadece şaşırdı, sonra usulca güldü. Çünkü kurt uyurken burnunu kırıştırıyordu, tıpkı bir yavru köpek gibi.
+
+Tam o anda büyükanne yatak odasından çıktı. Boynuna yün atkısını dolamıştı. Torununu görünce gözleri parladı.
+
+"Geldin demek," dedi büyükanne. "Misafirimizi de görmüşsün."
+
+"Kim bu?" diye fısıldadı kız.
+
+"Ormanın bekçisi," dedi büyükanne. "Bu sabah erken geldi. Bana çiçek getirdi, sobamın odununu taşıdı. Sonra koltuğa oturdu ve uyuyakaldı. Anlaşılan çok yorgunmuş."
+
+Kurt tam o sırada kirpiklerini araladı. Karşısında kırmızı başlıklı bir kız görünce utandı. Kulakları arkaya yattı, pençelerini yeleğinin kenarına sakladı.
+
+"Affedersiniz," dedi kısık bir sesle. "Uyumak istemezdim. Ben sadece... biraz oturayım demiştim."
+
+"Merhaba," dedi kız. "Ben çorba getirdim. Sıcacık."
+
+Kurt boğazını temizledi. "Ben ormanda tek başıma yaşıyorum," dedi. "Fidan dikiyorum, dereyi temiz tutuyorum. Ama bazen konuşacak kimse olmuyor. Bugün cesaretimi topladım ve kapıyı çaldım."
+
+Kırmızı Başlıklı Kız sepetini masaya koydu. "İyi yapmışsın," dedi. "Üç kişiye yeter bu çorba."
+
+Büyükanne üç tabak çıkardı. Kız sefertasını açtı, buhar tavana doğru yükseldi. Çorbanın kokusu odayı doldurdu. Kurt tabağını iki eliyle tuttu, çok dikkatli üfledi. Sonra bir kaşık aldı ve gözlerini kapattı.
+
+"Hayatımda içtiğim en güzel çorba," dedi.
+
+Büyükanne güldü. Kız da güldü. Kurt da utangaç utangaç güldü.
+
+Yemekten sonra sohbet ettiler. Kurt, ormanın en yaşlı çınarını, kovuğunda uyuyan üç baykuş yavrusunu anlattı. Büyükanne örgüsünü aldı, şişleri usul usul oynattı.
+
+Güneş pencereden içeri iyice eğildiğinde kurt ayağa kalktı. Botlarını giydi, çantasını omuzladı.
+
+"Gitmem gerek," dedi. "Akşam olmadan fidanları sulamalıyım."
+
+Kapıya kadar birlikte yürüdüler. Büyükanne ona bir kavanoz kekik reçeli verdi.
+
+"Yine gel," dedi. "Çarşamba günleri buradayım."
+
+Kurt başını salladı. "Gelirim," dedi. "Söz."
+
+Sonra patikaya çıktı, ağaçların arasında yavaşça kayboldu.
+
+O akşam Kırmızı Başlıklı Kız eve dönerken hiç acele etmedi. Ormanın bir yerinde, iyi kalpli bir ormancı fidanlarını suluyordu. Her şey yolundaydı.
+
+Ve dünyanın en sakin akşamı, ağaçların üstüne usulca örtüldü.
+

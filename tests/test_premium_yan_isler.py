@@ -200,7 +200,7 @@ check("S2) Liste ayardan; katalogda olmayan ninniler BOŞ kalır (uydurulmaz)",
       and len(voice_paket.paket_listesi()["ninniler"]) == 5, str(_ids))
 os.environ.pop("VOICE_PAKET_NINNILER")
 check("S3) Önizleme metni kısa (tam masal seslendirilmez)",
-      len(voice_paket.onizleme_icerigi()["text"]) <= voice_paket.ONIZLEME_KARAKTER, "")
+      len(voice_paket.onizleme_icerigi()["text"]) <= voice_paket.onizleme_karakter(), "")
 
 voice_svc.clone_voice = lambda *a, **k: {"ok": True, "voice_id": f"V{_uuid.uuid4().hex[:6]}"}
 voice_svc.delete_voice = lambda v: {"ok": True, "error": None, "status": 200}

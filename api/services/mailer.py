@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlencode
 
 import requests
 
@@ -113,12 +114,17 @@ KOD_YONERGESI = ("Uygulamada açılan 'Yeni şifreni belirle' ekranına bu kodu 
 def send_password_reset(to: str, raw_token: str) -> dict:
     """Parola sıfırlama e-postası.
 
-    6 haneli kod DEĞİL, derin bağlantı gönderilir:
-        tavsan-uykusu://reset-password?token=...
-    Ayrıca düz metin token da yazılır — derin bağlantı açılmazsa kullanıcı
-    mobildeki "Yeni şifreni belirle" ekranına yapıştırır (alternatif yol)."""
+    6 haneli kod DEĞİL, https bağlantısı gönderilir (PASSWORD_RESET_URL):
+        https://.../sifre-sifirla.html#token=...
+    Token adres parçasında (#): tarayıcı onu sunucuya göndermez, GitHub Pages
+    loglarına düşmez; sayfa yerelde okur.
+    Sayfa uygulamayı tavsan-uykusu://reset-password?token=... ile açmayı dener,
+    açılmazsa kodu kopyalatır. Gmail gibi istemciler özel şemalı bağlantıları
+    çoğu zaman tıklanabilir yapmadığı için buton doğrudan derin bağlantı değil.
+    Ayrıca düz metin token da yazılır — kullanıcı mobildeki "Yeni şifreni
+    belirle" ekranına yapıştırır (alternatif yol)."""
     settings = get_settings()
-    link = f"{settings.app_deep_link_scheme}://reset-password?token={raw_token}"
+    link = f"{settings.password_reset_url}#{urlencode({'token': raw_token})}"
     subject = "Tavşan Uykusu — Şifre Sıfırlama"
     # 2026-10-13: kod uzun bir metin — elle yazılmaz, YAPIŞTIRILIR.
     text = (

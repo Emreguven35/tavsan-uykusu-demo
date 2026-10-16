@@ -25,6 +25,16 @@ REVENUECAT: webhook `app_user_id` = bizim users.id. Olay idempotent işlenir
     BILLING_ISSUE → billing_issue (grace süresi varsa o ana kadar erişim)
     EXPIRATION    → expired
     PRODUCT_CHANGE→ sonraki_urun (erişim değişmez; yeni ürün RENEWAL ile gelir)
+    SUBSCRIPTION_PAUSED   → will_renew=False (erişim expires_at'e kadar SÜRER)
+    SUBSCRIPTION_EXTENDED → bitiş olaydaki yeni expiration'a uzar
+    TRANSFER      → kayıtlar transferred_from'dan transferred_to'ya taşınır; eski
+                    kullanıcının mağaza erişimi kalkar (premium_haklari'na dokunulmaz)
+
+ÜRÜN KİMLİĞİ (2026-10-16): Google Play abonelikleri RevenueCat'te
+"urun:temel_plan" biçiminde gelebiliyor (tavsan_premium_aylik:aylik). Webhook,
+senkron (refresh) ve /verify kimliği `urun_kimligi` ile ":" öncesine indirir;
+aynı abonelik için iki satır oluşmaz, eskiden oluşmuşsa ilk dokunuşta birleşir
+(ve 0030 migration'ı mevcut satırları birleştirir).
 """
 from __future__ import annotations
 
@@ -45,7 +55,7 @@ TR = timezone(timedelta(hours=3))
 ERISIMLI_DURUMLAR = ("active", "billing_issue")
 ISLENEN_OLAYLAR = ("INITIAL_PURCHASE", "RENEWAL", "CANCELLATION", "EXPIRATION",
                    "BILLING_ISSUE", "PRODUCT_CHANGE", "NON_RENEWING_PURCHASE",
-                   "UNCANCELLATION")
+                   "UNCANCELLATION", "SUBSCRIPTION_PAUSED", "SUBSCRIPTION_EXTENDED")
 MAGAZA_PLATFORM = {"APP_STORE": "ios", "MAC_APP_STORE": "ios",
                    "PLAY_STORE": "android", "AMAZON": "android"}
 
@@ -299,11 +309,45 @@ def kullanici_bul(db: Session, olay: dict) -> User | None:
     return None
 
 
+def urun_kimligi(v) -> str:
+    """tavsan_premium_aylik:aylik → tavsan_premium_aylik (Play temel planı atılır)."""
+    return str(v or "").strip().split(":")[0].strip()
+
+
+_EN_ESKI = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _birlestir(db: Session, satirlar: list[Subscription]) -> Subscription:
+    """Aynı aboneliğin birden çok satırı → bitişi en geç olan kalır (eşitse en
+    son güncellenen), diğerleri silinir."""
+    kalan = max(satirlar, key=lambda x: (_utc(x.expires_at) or _EN_ESKI,
+                                         _utc(x.updated_at) or _EN_ESKI))
+    for x in satirlar:
+        if x is not kalan:
+            db.delete(x)
+    db.flush()
+    return kalan
+
+
+def abonelik_bul(db: Session, user_id, urun: str) -> Subscription | None:
+    """Kullanıcının bu ürüne ait TEK satırı (kimlik normalize edilerek). Eski
+    biçimden kalma ikinci satır varsa burada birleştirilir."""
+    urun = urun_kimligi(urun)
+    satirlar = [x for x in db.query(Subscription)
+                .filter(Subscription.user_id == user_id).all()
+                if urun_kimligi(x.product_id) == urun]
+    if not satirlar:
+        return None
+    s = _birlestir(db, satirlar) if len(satirlar) > 1 else satirlar[0]
+    if s.product_id != urun:
+        s.product_id = urun
+    return s
+
+
 def _abonelik_satiri(db: Session, user: User, urun: str, store: str | None
                      ) -> Subscription:
-    s = (db.query(Subscription)
-         .filter(Subscription.user_id == user.id, Subscription.product_id == urun)
-         .one_or_none())
+    urun = urun_kimligi(urun)
+    s = abonelik_bul(db, user.id, urun)
     if s is None:
         s = Subscription(user_id=user.id, product_id=urun,
                          platform=MAGAZA_PLATFORM.get(store or "", "ios"),
@@ -329,12 +373,15 @@ def olay_isle(db: Session, govde: dict) -> tuple[str, str]:
     if db.get(RevenueCatOlayi, olay_id) is not None:
         return "tekrar", "bu olay daha önce işlendi"
 
-    user = kullanici_bul(db, olay)
-    sonuc = ("atlandi", f"{tur} işlenmiyor")
-    if user is None:
-        sonuc = ("kullanici_yok", f"app_user_id eşleşmedi: {olay.get('app_user_id')}")
-    elif tur in ISLENEN_OLAYLAR:
-        sonuc = _uygula(db, user, tur, olay)
+    if tur == "TRANSFER":
+        user, sonuc = _transfer(db, olay)
+    else:
+        user = kullanici_bul(db, olay)
+        sonuc = ("atlandi", f"{tur} işlenmiyor")
+        if user is None:
+            sonuc = ("kullanici_yok", f"app_user_id eşleşmedi: {olay.get('app_user_id')}")
+        elif tur in ISLENEN_OLAYLAR:
+            sonuc = _uygula(db, user, tur, olay)
 
     db.add(RevenueCatOlayi(id=olay_id, type=tur,
                            app_user_id=str(olay.get("app_user_id") or "")[:200] or None,
@@ -346,8 +393,51 @@ def olay_isle(db: Session, govde: dict) -> tuple[str, str]:
     return sonuc
 
 
+def _kullanicilar(db: Session, kimlikler) -> list[User]:
+    out = []
+    for aday in kimlikler or []:
+        try:
+            u = db.get(User, uuid.UUID(str(aday)))
+        except (TypeError, ValueError):
+            continue
+        if u is not None and u not in out:
+            out.append(u)
+    return out
+
+
+def _transfer(db: Session, olay: dict) -> tuple[User | None, tuple[str, str]]:
+    """TRANSFER: satın alma başka bir uygulama hesabına geçti (aynı mağaza
+    hesabıyla başka kullanıcıda "geri yükle"). Mağaza kayıtları eski kullanıcıdan
+    yenisine taşınır; yeni kullanıcı bizde yoksa eski kayıtlar sona erdirilir.
+    Elle verilen premium_haklari'na DOKUNULMAZ."""
+    hedefler = _kullanicilar(db, olay.get("transferred_to"))
+    hedef = hedefler[0] if hedefler else None
+    kaynaklar = [u for u in _kullanicilar(db, olay.get("transferred_from"))
+                 if hedef is None or u.id != hedef.id]
+    if not kaynaklar:
+        if hedef is None:
+            return None, ("kullanici_yok", "TRANSFER: iki taraf da eşleşmedi")
+        return hedef, ("atlandi", "TRANSFER: eski kullanıcı bizde yok")
+    tasinan = 0
+    for k in kaynaklar:
+        for s in db.query(Subscription).filter(Subscription.user_id == k.id).all():
+            if hedef is None:
+                s.status, s.will_renew = "expired", False
+                continue
+            s.user_id = hedef.id
+            db.flush()
+            s = abonelik_bul(db, hedef.id, s.product_id)
+            if s is not None and s.status in ERISIMLI_DURUMLAR:
+                deneme_kaydet(hedef, s)
+            tasinan += 1
+    db.flush()
+    if hedef is None:
+        return kaynaklar[0], ("islendi", "TRANSFER: hedef yok, eski kayıtlar sona erdi")
+    return hedef, ("islendi", f"TRANSFER: {tasinan} kayıt taşındı")
+
+
 def _uygula(db: Session, user: User, tur: str, olay: dict) -> tuple[str, str]:
-    urun = str(olay.get("product_id") or "").strip()
+    urun = urun_kimligi(olay.get("product_id"))
     if not urun:
         return "atlandi", "product_id yok"
     ent = olay.get("entitlement_ids") or ([olay["entitlement_id"]]
@@ -384,8 +474,15 @@ def _uygula(db: Session, user: User, tur: str, olay: dict) -> tuple[str, str]:
     elif tur == "EXPIRATION":
         s.status, s.will_renew = "expired", False
         s.expires_at = bitis or s.expires_at or _simdi()
+    elif tur == "SUBSCRIPTION_PAUSED":
+        s.will_renew = False
+    elif tur == "SUBSCRIPTION_EXTENDED":
+        if bitis is not None:
+            s.expires_at = bitis
+            if s.status == "expired" and bitis > _simdi():
+                s.status = "active"
     elif tur == "PRODUCT_CHANGE":
-        s.sonraki_urun = olay.get("new_product_id")
+        s.sonraki_urun = urun_kimligi(olay.get("new_product_id")) or None
     # DENEME (2026-10-13): TRIAL dönemli satın alma kullanıcının deneme alanlarını
     # yazar. Denemeden ücretliye geçiş RENEWAL + period_type NORMAL ile gelir;
     # period_type yukarıda güncellendiği için kademe kendiliğinden premium olur.
@@ -429,7 +526,10 @@ def musteriden_guncelle(db: Session, user: User, veri: dict) -> list[str]:
     abone = (veri or {}).get("subscriber") or {}
     simdi = _simdi()
     dokunulan = []
-    for urun, a in (abone.get("subscriptions") or {}).items():
+    # Aynı ürünün iki biçimi (urun / urun:plan) gelirse bitişi geç olan son yazılsın.
+    for ham, a in sorted((abone.get("subscriptions") or {}).items(),
+                         key=lambda x: str((x[1] or {}).get("expires_date") or "")):
+        urun = urun_kimligi(ham)
         s = _abonelik_satiri(db, user, urun, a.get("store"))
         s.expires_at = _iso(a.get("expires_date"))
         s.purchased_at = _iso(a.get("purchase_date")) or s.purchased_at
@@ -445,8 +545,10 @@ def musteriden_guncelle(db: Session, user: User, veri: dict) -> list[str]:
             s.status = "active"
         if s.status != "expired":
             deneme_kaydet(user, s)
-        dokunulan.append(urun)
-    for urun, alimlar in (abone.get("non_subscriptions") or {}).items():
+        if urun not in dokunulan:
+            dokunulan.append(urun)
+    for ham, alimlar in (abone.get("non_subscriptions") or {}).items():
+        urun = urun_kimligi(ham)
         if not alimlar:
             continue
         son = max(alimlar, key=lambda x: x.get("purchase_date") or "")

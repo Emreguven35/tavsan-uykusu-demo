@@ -150,8 +150,12 @@ def uret(voice_profile_id) -> dict:
             logger.info("Üretim durdu: profil=%s silinmiş", pid)
             break
         yol = storage.ses_yolu(user_id, pid, cid)
-        veri = None
+        # ANNE_SESI_STS açıksa ve uzmanın referans kaydı varsa speech-to-speech;
+        # bayrak kapalı / kayıt yok / izin yok / STS düştüyse aynen TTS.
+        veri = _sts_dene(icerik, voice_id, user_id, pid)
         for deneme in range(1, DENEME_SAYISI + 1):
+            if veri:
+                break
             veri = _seslendir(voice_id, icerik["text"], user_id)
             if veri:
                 break
@@ -162,7 +166,7 @@ def uret(voice_profile_id) -> dict:
             continue
         if icerik.get("onizleme"):
             # Önizleme sunucuda kesilir: istemci tam dosyayı hiç almaz.
-            veri = mp3.kes(veri, voice_paket.ONIZLEME_SN)
+            veri = mp3.kes(veri, voice_paket.onizleme_sn())
         try:
             boyut = depo.yaz(yol, veri, "audio/mpeg")
         except Exception:
@@ -250,6 +254,27 @@ def _seslendir(voice_id: str, metin: str, user_id) -> bytes | None:
                           usage_op=usage_svc.OP_TTS, user_id=user_id)
 
 
+def _sts_dene(icerik: dict, voice_id: str, user_id, pid) -> bytes | None:
+    """Referans kayıttan STS. None → TTS'e düşülür. Önizlemede referansın
+    yalnız ilk VOICE_ONIZLEME_SN saniyesi dönüştürülür. Geçici hatada DENEME_SAYISI
+    kadar denenir; izin yoksa hiç tekrar edilmez."""
+    from api.services import voice_sts
+    if not voice_sts.acik_mi():
+        return None
+    sinir = voice_paket.onizleme_sn() if icerik.get("onizleme") else None
+    for deneme in range(1, DENEME_SAYISI + 1):
+        if voice_sts.izin_yok_mu() or voice_sts.referans_yolu(icerik["id"]) is None:
+            return None
+        veri = voice_sts.seslendir(icerik, voice_id, user_id, en_fazla_sn=sinir)
+        if veri:
+            return veri
+        logger.warning("STS başarısız (deneme %d/%d): profil=%s icerik=%s",
+                       deneme, DENEME_SAYISI, pid, icerik["id"])
+    logger.warning("STS üretilemedi, TTS'e düşülüyor: profil=%s icerik=%s",
+                   pid, icerik["id"])
+    return None
+
+
 def _sure_tahmini(boyut: int) -> int:
     """MP3 süresi (sn) — ElevenLabs 128 kbps CBR döndürüyor.
 
@@ -264,7 +289,10 @@ def _tamamla(pid, voice_id: str, uretilen: int, toplam: int,
     yeterli = toplam > 0 and (uretilen / toplam) > KISMI_BASARI_ORANI
 
     # Ses HER İKİ durumda da silinir: başarısız üretimde slotu tutmanın anlamı
-    # yok, başarılıda zaten model bu.
+    # yok, başarılıda zaten model bu. ÖNİZLEME de dahil (2026-10-13 klon yeri
+    # tasarrufu): premium olmayan annenin klonu önizleme MP3'ü depoya ve
+    # voice_audios'a yazıldıktan SONRA silinir, MP3 kalır. Premium'a geçip
+    # amac=paket ile kaydedince yeni klon açılır (routers/voice.clone).
     silindi = _sesi_birak(voice_id)
 
     db = SessionLocal()

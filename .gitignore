@@ -60,3 +60,7 @@ data/media/
 # Lokal SQLite fallback DB'leri (DATABASE_URL yokken oluşur; production Postgres)
 tavsan_local.db
 _regresyon_chat.db
+
+# Anne Sesi: uzmanın telefondan gelen HAM kayıtları (tools/referans_hazirla.py
+# ham/ altına taşır). Repoya yalnız hazırlanmış {icerik_id}.mp3 girer.
+data/anne_sesi_referans/ham/
