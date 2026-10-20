@@ -183,6 +183,59 @@ def onizleme_icerigi() -> dict | None:
     return kopya
 
 
+# VİTRİN (2026-10-20): premium olmayanın önizleme ekranında premium içeriğin
+# İSİMLERİ kilitli liste olarak gösterilir (sayı yok; "ve daha fazlası…").
+# Bölüm yalnız satın alınca GERÇEKTEN üretilecek içeriklerden kurulur, yani
+# paketten (paket_icerikleri): ninni bölümü STS açık + referans kaydı yoksa
+# hiç dönmez. Mobilin kaç isim basacağı ayardan:
+#   VOICE_VITRIN_MASAL_ADET (varsayılan 3), VOICE_VITRIN_NINNI_ADET (varsayılan 2)
+VITRIN_MASAL_ADET = 3
+VITRIN_NINNI_ADET = 2
+VITRIN_ADET_ARALIK = (1, 20)
+_VITRIN_BOLUMLERI = (("masal", "Masallar", "VOICE_VITRIN_MASAL_ADET", VITRIN_MASAL_ADET),
+                     ("ninni", "Ninniler", "VOICE_VITRIN_NINNI_ADET", VITRIN_NINNI_ADET))
+
+
+def vitrin_adet(env: str, varsayilan: int) -> int:
+    """Bölümde gösterilecek isim sayısı. Geçersiz/aralık dışı → varsayılan."""
+    ham = (os.getenv(env) or "").strip()
+    if not ham:
+        return varsayilan
+    try:
+        n = int(ham)
+    except ValueError:
+        n = -1
+    if not VITRIN_ADET_ARALIK[0] <= n <= VITRIN_ADET_ARALIK[1]:
+        logger.warning("%s=%r geçersiz (%s–%s) — %s kullanıldı",
+                       env, ham, *VITRIN_ADET_ARALIK, varsayilan)
+        return varsayilan
+    return n
+
+
+def vitrin() -> list[dict]:
+    """Önizleme ekranı vitrini: [{bolum_adi, ogeler, gosterilecek_adet}].
+
+    Başlık ve süre etiketi katalogdan. Önizleme masalı masallarda İLK sırada,
+    onizleme=True, kilitli=False; diğerleri kilitli. Dosya bağlantısı vitrinde
+    HİÇ yoktur (önizlemenin bağlantısı mevcut `masallar` listesinde). Ögesi
+    olmayan bölüm dönmez."""
+    icerikler = paket_icerikleri()
+    on_id = onizleme_icerik_id()
+    on_item = voice_svc.find_story(on_id)
+    if on_item is not None and on_item.get("type") == "masal":
+        icerikler = [on_item] + [x for x in icerikler if x["id"] != on_id]
+    bolumler = []
+    for tur, ad, env, varsayilan in _VITRIN_BOLUMLERI:
+        ogeler = [{"id": x["id"], "baslik": x.get("title", ""),
+                   "sure_etiketi": x.get("duration_hint"), "tur": tur,
+                   "kilitli": x["id"] != on_id, "onizleme": x["id"] == on_id}
+                  for x in icerikler if x.get("type") == tur]
+        if ogeler:
+            bolumler.append({"bolum_adi": ad, "ogeler": ogeler,
+                             "gosterilecek_adet": vitrin_adet(env, varsayilan)})
+    return bolumler
+
+
 def uretim_icerikleri(amac: str | None) -> list[dict]:
     """Profilin amacına göre üretilecek içerikler. Önizleme → tek kısa masal;
     paket ya da eski profiller (amac NULL) → paket."""

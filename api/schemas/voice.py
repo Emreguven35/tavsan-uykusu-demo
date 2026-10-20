@@ -96,6 +96,22 @@ class StoryItem(BaseModel):
     ses_kaynagi: str | None = None
 
 
+class VitrinOge(BaseModel):
+    id: str
+    baslik: str
+    sure_etiketi: str | None = None  # katalogdaki duration_hint ("3–4 dk")
+    tur: str                         # masal | ninni
+    kilitli: bool = True
+    onizleme: bool = False
+
+
+class VitrinBolum(BaseModel):
+    bolum_adi: str                   # "Masallar" | "Ninniler"
+    ogeler: list[VitrinOge]
+    # Mobil ilk bu kadarını basar, ardından "ve daha fazlası…" (sayı yok).
+    gosterilecek_adet: int
+
+
 class StoriesResp(BaseModel):
     masallar: list[StoryItem]
     ninniler: list[StoryItem]
@@ -103,6 +119,9 @@ class StoriesResp(BaseModel):
     # tamamını gösterebilsin; bu alan hangilerinin üretileceğini söyler.
     paket: str = "standart"
     paket_icerikleri: list[str] = []
+    # 2026-10-20 — premium olmayanın önizleme ekranı (voice_paket.vitrin).
+    # Premium'da None. Bağlantı taşımaz.
+    vitrin: list[VitrinBolum] | None = None
 
 
 class VoiceGenerateReq(BaseModel):

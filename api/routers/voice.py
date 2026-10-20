@@ -506,7 +506,8 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
         ninniler=[_item(x) for x in cat.get("ninniler", [])
                   if x["id"] in paket_kume
                   and (x["id"] not in hazir_yollar or yontemler.get(x["id"]) == "sts")],
-        paket=voice_paket.paket_adi(), paket_icerikleri=paket_idler)
+        paket=voice_paket.paket_adi(), paket_icerikleri=paket_idler,
+        vitrin=None if premium else voice_paket.vitrin())
 
 
 @router.post("/generate", response_model=VoiceGenerateResp,
