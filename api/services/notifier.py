@@ -709,6 +709,9 @@ _scheduler = None
 def _job() -> None:
     """Zamanlayıcı işi — kendi DB oturumunu açar ve HER durumda kapatır."""
     from api.db import SessionLocal
+    from api.db.session import db_erisilebilir_mi
+    if not db_erisilebilir_mi("bildirim"):
+        return                   # kesinti: tur atlanır, uyarı yalnız bir kez
     db = SessionLocal()
     try:
         stats = run_reminder_cycle(db)

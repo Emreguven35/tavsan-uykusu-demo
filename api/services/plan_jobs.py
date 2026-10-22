@@ -391,12 +391,14 @@ def bakim(simdi: datetime | None = None) -> dict:
     """(1) BAYAT_IS_DK'yı aşan processing işleri DB'de failed yaz; (2) yetim
     işleri atomik sahiplenip yeniden koş (en fazla MAX_DENEME kez)."""
     from sqlalchemy import update
-    from api.db.session import SessionLocal
+    from api.db.session import SessionLocal, db_erisilebilir_mi
     from api.models import PlanUretimIsi
 
     simdi = simdi or datetime.now(timezone.utc)
     sinir = simdi - timedelta(minutes=BAYAT_IS_DK)
     sonuc = {"bayat": 0, "devralinan": 0, "vazgecilen": 0}
+    if not db_erisilebilir_mi("plan_bakim"):
+        return {**sonuc, "atlandi": True}       # kesinti: bir sonraki tur dener
     db = SessionLocal()
     try:
         bayatlar = (db.query(PlanUretimIsi)
@@ -457,7 +459,7 @@ def bakim_baslat() -> None:
         global _bakim_zamanlayici
         try:
             s_ = bakim()
-            if any(s_.values()):
+            if any(v for k, v in s_.items() if k != "atlandi"):
                 logger.info("Plan işi bakımı: %s", s_)
         except Exception:
             logger.exception("Plan işi bakımı başarısız")
