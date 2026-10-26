@@ -40,13 +40,25 @@ from engine import sayi_rol, yontem
 BLOK_BAYRAK = "SOR_KURAL_BLOGU"
 DOGRULAMA_BAYRAK = "SOR_SAYI_DOGRULAMA"
 
+GECMIS_KURALI = (
+    "Önceki cevaplarındaki saatler eski veriye dayanabilir; her zaman BUGÜNÜN GÜNCEL "
+    "planındaki saatleri kullan, çelişirse plan doğrudur.")
+
 SISTEM_KURALI = (
     "EK KURAL (süre ve sayı): Cevaptaki HER süre ve sayı (dakika, saniye, tekrar, "
     "bekleme) YALNIZ BEBEK VERİSİ'ndeki 'BUGÜNÜN KURALLARI' bloğundan alınır. Blokta "
     "karşılığı olmayan bir süre için sayı uydurma; 'bu süre için planınıza bakın' de. "
     "Saat olarak yalnız plan saatlerini ve 'Şu an'ı kullan. Başka plan tiplerinin "
     "tablolarını (ör. 'dış X + iç Y') ve yatır-çık dizisini 13. günden önce kullanma. "
-    "Anneye HER ZAMAN 'siz' diye hitap et; 'sen' kullanma.")
+    "Anneye HER ZAMAN 'siz' diye hitap et; 'sen' kullanma. " + GECMIS_KURALI)
+
+# Kural bloğu kurulamayan durumda (eğitim tamamlandı, başlamadı, deneme sınırı)
+# bugünün planı varsa yalnız SAAT korkuluğu (2026-10-26 prod şikâyeti: korkuluksuz
+# model plandaki 19:43 yerine "19:00–19:15'e çekin" dedi).
+SAAT_KURALI = (
+    "EK KURAL (saatler): Saat olarak YALNIZ BEBEK VERİSİ'ndeki bugünün plan saatlerini, "
+    "'Şu an'ı ve 'PLAN SAATLERİ' satırındaki saatleri kullan; gece yatışını ya da bir uykuyu "
+    "plandan farklı bir saate çekmeyi önerme. " + GECMIS_KURALI)
 
 _TOL = 1e-6
 _MOTIVASYON_SAYILI = re.compile(r"ağlayan (?:bir )?(?:çocuk|bebek)|hafta sonra", re.IGNORECASE)
@@ -277,6 +289,17 @@ def _sayi(v: float) -> str:
 # =============================================================================
 # Kurallar (blok + izin listesi aynı veriden)
 # =============================================================================
+def uzatma_asamasi(d: dict) -> tuple[dict, int]:
+    """Uzamış programın (gun_durumu durum="uzatma") merdiven aşaması ve kural
+    günü: annenin seçtiği aşamanın SON günü; seçim yoksa son aşama (yatır-çık)
+    ve programın son günü. Gerçek gün numarası bekleme formülünü şişirir
+    (41. günde ilk gece beklemesi 205 dk) — karar: kullanıcı, 2026-10-26."""
+    asamalar = yontem.deger("merdiven.asamalar")
+    asama = next((a for a in asamalar if a["kod"] == d.get("uzatma_beyan")), asamalar[-1])
+    toplam = int(d.get("toplam") or asamalar[-1]["gun"][1])
+    return asama, min(int(asama["gun"][1]), toplam)
+
+
 def kurallar(d: dict, baby: Any, soru: str | None = None,
              asama_siniri: int | None = None) -> dict | None:
     """`d`: sor_baglam.gun_durumu() çıktısı. Eğitim sürmüyorsa (yenidoğan,
@@ -285,7 +308,7 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
     `asama_siniri` (premium abonelik, 2026-10-13): deneme/ücretsizde programın
     gösterilen son günü (3). Bugün bu günü aşıyorsa blok YOK; takvimde sınırı
     aşan günlerin aşama adı söylenmez (gelecek aşama sızmasın). None → sınırsız."""
-    if d.get("durum") != "egitim":
+    if d.get("durum") not in ("egitim", "uzatma"):
         return None
     # Gece kuralları GECESİ SAYILAN günden (02:30 → önceki gün), gündüz kuralları
     # (kısa gündüz uykusu) uygulamanın gösterdiği günden: 02:30'da sabahki
@@ -295,9 +318,21 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
     g_gunduz = max(1, int(d["app_gun"] or 1))
     if asama_siniri is not None and max(g, g_gunduz) > asama_siniri:
         return None
+    # UZATMA (gün sayısı aşıldı, tamamlanmadı): sayılar aşamanın son gününden
+    # (sor_baglam.gun_durumu → kural_gunu); metin gerçek günü söyler.
+    uzatma = d.get("durum") == "uzatma"
+    gercek_gece = g
+    if uzatma:
+        uz_asama, g = uzatma_asamasi(d)
+        g_gunduz = g
     gece = bool(d["gece"] or d["sabah_once"])
     asamalar = yontem.deger("merdiven.asamalar")
-    asama = next((a for a in asamalar if a["gun"][0] <= g <= a["gun"][1]), asamalar[-1])
+    asama = (uz_asama if uzatma else
+             next((a for a in asamalar if a["gun"][0] <= g <= a["gun"][1]), asamalar[-1]))
+    uzatma_notu = (f"{int(d.get('toplam') or asamalar[-1]['gun'][1])} günlük program uzatıldı; "
+                   f"{asama['ad']} aşamasının son günü olan {g}. günün değerleri" if uzatma else "")
+    gece_etiket = (f"eğitimin {gercek_gece}. gecesi; {uzatma_notu}" if uzatma
+                   else f"eğitimin {g}. gecesi")
 
     akis = yontem.deger("gece_uyanma.akis")
     deneme = yontem.deger("seans.deneme_dk")
@@ -393,7 +428,8 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
 
     def _gun_asama(n: int) -> str:
         if n > toplam:
-            return "program tamamlanmış olur"
+            return (f"eğitimin {n}. günü (program uzatıldı, aşama {asama['ad']})" if uzatma
+                    else "program tamamlanmış olur")
         if asama_siniri is not None and n > asama_siniri:
             return f"eğitimin {n}. günü"
         a = next((x for x in asamalar if x["gun"][0] <= n <= x["gun"][1]), asamalar[-1])
@@ -402,7 +438,7 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
     app_gun = max(1, int(d["app_gun"] or 1))
     if d["sabah_once"]:
         takvim = (f"- Takvim (gün adlarını kendin hesaplama, YALNIZ buradan al): şu an "
-                  f"{_t(bugun_t)} gecesi, eğitimin {g}. gününün gecesi; sabah uyanınca "
+                  f"{_t(bugun_t)} gecesi, eğitimin {gercek_gece}. gününün gecesi; sabah uyanınca "
                   f"{_t(bugun_t)}: {_gun_asama(app_gun)}; yarın {_t(yarin_t)}: "
                   f"{_gun_asama(app_gun + 1)}.")
     else:
@@ -464,12 +500,15 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
     kucak_kural = yontem.deger("kucak_araligi_sn.kural") if yeni else {}
     db = yontem.deger("hazirlik.beyaz_gurultu_db") if yeni else {}
     sonrasi_gece = sonrasi["gece"] if destek_gecesi else gece_diger
-    gdh = int(app_gun if not d["sabah_once"] else g)
+    gdh = int(g if uzatma else app_gun if not d["sabah_once"] else g)
 
     satirlar = [
         f"BUGÜNÜN KURALLARI (süre ve sayıları YALNIZ buradan al; burada olmayan süre için "
         f"'planınıza bakın' de):",
-        f"- Aşama: {asama['ad']} (eğitimin {g}. günü{', gece' if gece else ''}).",
+        (f"- Aşama: {asama['ad']} (eğitimin {app_gun}. günü{', gece' if gece else ''}; "
+         f"{uzatma_notu}). Program TAMAMLANMADI; 'program tamamlandı' deme."
+         if uzatma else
+         f"- Aşama: {asama['ad']} (eğitimin {g}. günü{', gece' if gece else ''})."),
         takvim,
         *(["- Soru YATIŞLA ilgili görünüyor: YATIŞ akışını kullan; gece uyanması akışı yalnız "
            "bebek uyuduktan sonra uyanırsa."] if yatis else []),
@@ -489,13 +528,13 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
         (f"- {tekrar} denemeden sonra da uyumayan GECE için tablodaki kural: {sonrasi['gece']}. "
          f"Bunu aynen söyle: yumuşatma ('başarısızlık değil', 'ilk günler esnek' gibi deme), "
          f"anneyi suçlama, tabloda olmayan bir sonuç (ör. ertesi günün nasıl değişeceği) ekleme."
-         + (f" Bu kural YALNIZ destek gecesinde (eğitimin {g}. gecesi bu gece)." if yeni else "")
+         + (f" Bu kural YALNIZ destek gecesinde ({gece_etiket})." if yeni else "")
          if destek_gecesi else
-         f"- Bu gece eğitimin {g}. gecesi: destek vererek uyutma YOK. {tekrar} denemeden sonra da "
+         f"- Bu gece {gece_etiket}: destek vererek uyutma YOK. {tekrar} denemeden sonra da "
          f"uyumazsa {gece_diger}. Destekle uyutma yalnız destek gecesinde (ilk gece); anneye "
          f"'destek verip uyutun' DEME. Yumuşatma ve suçlama yok."),
         (f"- GECE UYANMASI (bebek uyuduktan sonra gece uyanırsa; yatışta değil): önce dışarıda "
-         f"{gece_ilk} dk bekle (eğitimin {g}. gecesi: 1. gece "
+         f"{gece_ilk} dk bekle ({gece_etiket}: 1. gece "
          f"{yontem_kart.gece_ilk_bekleme_dk(1)} dk, her gece +{artis_std} dk); aynı gece her yeni "
          f"uyanmada bir öncekinden +{gece_ici} dk (ör. {gece_ilk} → {gece_ilk + gece_ici} → "
          f"{gece_ilk + 2 * gece_ici}). Sonra içeri gir ve {akis['3_deneme_dk']} dk dene; uyumazsa odada "
@@ -517,7 +556,7 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
         *([f"- Kararı bekleyen konular ({'; '.join(bekleyen)}): sayı da YÖN de söyleme. 'Aynı "
            f"gece her uyanmada bekleme artar / azalır / aynı kalır' DEME; yalnız 'bunun için "
            f"planınıza bakın' de."] if bekleyen else []),
-        f"- Kısa gündüz uykusu ({g_gunduz}. günün gündüz uykuları; uyku"
+        f"- Kısa gündüz uykusu ({(uzatma_notu + '; ') if uzatma else f'{g_gunduz}. günün '}gündüz uykuları; uyku"
         f"{f' {kisa_esik} dk' if kisa_esik else ''} altında kalırsa): {kg_metin}. Bebek {geri_dalis} dk ve üzeri geri uyursa uzatma biter.",
         (f"- Kucak: histerik ağlamada her gün serbest. Histerik değilse önerilmez"
          + (f"; ilk günlerde anne dayanamazsa kucağa alabilir, ama eğitimin uzayacağını söyle"
@@ -561,7 +600,7 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
         # Sayımlar ("2 gün", "3 kez"): gün sayısı programdan/bugünden türeyenler;
         # "kez" 1..tekrar (ve BEBEK VERİSİ'ndeki gece uyanma sayısı); hafta yok.
         "gun": ({1, 3, toplam, g, g_gunduz, max(0, toplam - g),
-                 max(0, toplam - g_gunduz), app_gun, app_gun + 1}
+                 max(0, toplam - g_gunduz), app_gun, app_gun + 1, gercek_gece}
                 | ({yc_21["gun"]} if yatir_cik_var else set())),
         "kez": set(range(1, int(tekrar) + 1)) | ({int(baby.night_wakes)} if getattr(
             baby, "night_wakes", None) else set()),
@@ -569,25 +608,7 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
     }
 
     # --- Saatler ve türeyen dakikalar ----------------------------------------
-    from api.services import plan_adapter
-    sched = plan_adapter.normalize_schedule((d.get("content") or {}).get("schedule"))
-    saatler: set[str] = {_ss(d["dk"]), "06:00"}
-    bloklar: list[int] = []
-    for b in sched:
-        for alan in ("time", "end"):
-            if b.get(alan):
-                saatler.add(str(b[alan]).replace(".", ":").zfill(5))
-        if b.get("start_minute") is not None:
-            bloklar.append(int(b["start_minute"]))
-            if b.get("end_minute") is not None:
-                bloklar.append(int(b["end_minute"]))
-    for m in [int(b["start_minute"]) for b in sched if b.get("start_minute") is not None]:
-        for once in {rutin["en_az"], rutin["en_fazla"], yontem.deger("bildirim.uyku_once_dk"),
-                     yontem.deger("bildirim.gece_rutin_once_dk")}:
-            saatler.add(_ss(m - int(once)))
-    kest = (bant or {}).get("kestirme_protokolu") or {}
-    for s in kest.get("saat_penceresi") or []:
-        saatler.add(str(s))
+    saatler, sched, bloklar = _plan_saatleri(d, bant)
     turev: set[float] = set()
     for m in bloklar:
         fark = abs(m - d["dk"])
@@ -667,13 +688,15 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
         "yumusatma": r"başarısız sayılır",
         "asama": re.escape(asama["ad"].lower()),
         "motivasyon": r"ağlama[^.]*(?:azal|sabit kalma)",
+        **_saat_izi(sched),
     }
     if not kg_dis:
         izler["dis"] = izler["ic"] = r"gündüz[^.]*plan\w* bak|plan\w* bak[^.]*gündüz"
     takvim_d = {"bugun": bugun_t.weekday(), "yarin": yarin_t.weekday(),
                 "dun": dun_t.weekday(), "sabah_once": bool(d["sabah_once"]),
-                "app_gun": app_gun, "gece_gun": g}
+                "app_gun": app_gun, "gece_gun": gercek_gece}
     karsilik["gun_no"] = takvim_karsilik
+    karsilik["saat"] = _yatis_karsiligi(sched)
     return {"gun": g, "gun_gunduz": g_gunduz, "gece": gece, "asama": asama, "blok": "\n".join(satirlar),
             "izinli": izinli, "serbest": serbest, "turev": turev, "taban": float(taban),
             "takvim": takvim_d, "izler": izler, "kisa_esik": kisa_esik,
@@ -688,6 +711,39 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
                                 if (bant or {}).get(a) and len((bant or {}).get(a)) == 2
                                 and all((bant or {}).get(a))},
             "saatler": saatler, "karsilik": karsilik}
+
+
+def _plan_saatleri(d: dict, bant: dict | None) -> tuple[set[str], list[dict], list[int]]:
+    """İzinli saatler: şu an, 06:00, çizelge saatleri, rutin/bildirim öncesi
+    saatler, kestirme penceresi ve son gündüz uykusunun bitişinden uyanıklık
+    penceresinin alt/üst ucu (yatışın erken/geç sınırı, ör. 17:13 → 19:13–20:13).
+    Dönen: (saatler, normalize çizelge, blok dakikaları)."""
+    from api.services import plan_adapter
+    rutin = yontem.deger("seans.rutin_suresi_dk")
+    sched = plan_adapter.normalize_schedule((d.get("content") or {}).get("schedule"))
+    saatler: set[str] = {_ss(d["dk"]), "06:00"}
+    bloklar: list[int] = []
+    for b in sched:
+        for alan in ("time", "end"):
+            if b.get(alan):
+                saatler.add(str(b[alan]).replace(".", ":").zfill(5))
+        if b.get("start_minute") is not None:
+            bloklar.append(int(b["start_minute"]))
+            if b.get("end_minute") is not None:
+                bloklar.append(int(b["end_minute"]))
+    for m in [int(b["start_minute"]) for b in sched if b.get("start_minute") is not None]:
+        for once in {rutin["en_az"], rutin["en_fazla"], yontem.deger("bildirim.uyku_once_dk"),
+                     yontem.deger("bildirim.gece_rutin_once_dk")}:
+            saatler.add(_ss(m - int(once)))
+    kest = (bant or {}).get("kestirme_protokolu") or {}
+    for s in kest.get("saat_penceresi") or []:
+        saatler.add(str(s))
+    pen = (bant or {}).get("uyaniklik_penceresi_dk") or []
+    son_uyku = max((int(b["end_minute"]) for b in sched if b.get("type") == "nap"
+                    and b.get("end_minute") is not None), default=None)
+    if son_uyku is not None and len(pen) == 2 and all(pen):
+        saatler.update(_ss(son_uyku + int(v)) for v in pen)
+    return saatler, sched, bloklar
 
 
 # =============================================================================
@@ -759,6 +815,36 @@ def _uygun(rol: str, dk: float, kural: dict, cumle: str = "") -> bool:
 
 
 _KARISAN = {"seans": ("mola", "ic"), "mola": ("seans",)}
+_YATIS_CUMLE = re.compile(r"yatış|yatır|gece uyku", re.IGNORECASE)
+
+
+def _yatis_karsiligi(sched: list[dict]) -> str | None:
+    bed = next((b for b in sched if b.get("key") == "bedtime" and b.get("time")), None)
+    return f"Bugünkü plana göre gece yatışı {bed['time']}." if bed else None
+
+
+def saat_korkulugu(d: dict, baby: Any) -> dict | None:
+    """Kural bloğu YOKKEN (eğitim dışı / deneme sınırı) bugünün planı varsa yalnız
+    saat korkuluğu: kısa blok + doğrulamada yalnız saat denetimi (süre/sayıya
+    dokunmaz). Bugün için hesaplanmış saatli plan yoksa None."""
+    from api.services import sor_baglam
+    if not sor_baglam.bugunun_plani_mi(d):
+        return None
+    bant = sor_baglam.yas_bandi(baby, d["gun"]) if baby is not None else None
+    saatler, sched, _ = _plan_saatleri(d, bant)
+    yatis = _yatis_karsiligi(sched)
+    blok = ("PLAN SAATLERİ: saat olarak YALNIZ bugünün plan saatlerini ve 'Şu an'ı kullan"
+            + (f"; {yatis[:-1].lower()}" if yatis else "")
+            + "; yatışı ya da bir uykuyu plandan farklı bir saate çekmeyi önerme.")
+    return {"yalniz_saat": True, "gece": bool(d["gece"] or d["sabah_once"]),
+            "saatler": saatler, "karsilik": {"saat": yatis}, "izler": _saat_izi(sched),
+            "blok": blok}
+
+
+def _saat_izi(sched: list[dict]) -> dict:
+    """Yatış karşılığı cevapta zaten var mı: plan yatış saati geçiyorsa eklenmez."""
+    bed = next((b for b in sched if b.get("key") == "bedtime" and b.get("time")), None)
+    return {"saat": re.escape(str(bed["time"]))} if bed else {}
 
 
 def _cumleler(satir: str) -> list[str]:
@@ -902,6 +988,8 @@ def cumle_ihlalleri(cumle: str, kural: dict, onceki: str = "") -> list[tuple[str
     n = _TIRE_EN_FAZLA.sub("; ", n)
     saatli = _saat_sureleri(n)
     n = _SAAT_SURE.sub(" § ", n)                      # dakika kısmı ayrıca okunmasın
+    if kural.get("yalniz_saat"):
+        return _saat_ihlalleri(n, kural)              # saat korkuluğu: süre/sayı denetimi yok
     sayilar = sayi_rol.satir_sayilari(n)
     sayimlar = [(_SAYIM_ROL[m.group(2).lower()], float(m.group(1).replace(",", ".")))
                 for m in _SAYIM.finditer(n)]
@@ -915,11 +1003,17 @@ def cumle_ihlalleri(cumle: str, kural: dict, onceki: str = "") -> list[tuple[str
     for v in saatli:
         if not _saat_sure_uygun(v, n, kural):
             ihlal.append(("saat_sure", v))
+    ihlal += _saat_ihlalleri(n, kural)
+    return ihlal + _metin_ihlalleri(cumle, kural, onceki)
+
+
+def _saat_ihlalleri(n: str, kural: dict) -> list[tuple[str, float]]:
+    out = []
     for m in _SAAT.finditer(n):
         saat = f"{int(m.group(1)):02d}:{m.group(2)}"
         if int(m.group(1)) < 24 and saat not in kural["saatler"]:
-            ihlal.append(("saat", float(int(m.group(1)) * 60 + int(m.group(2)))))
-    return ihlal + _metin_ihlalleri(cumle, kural, onceki)
+            out.append(("saat", float(int(m.group(1)) * 60 + int(m.group(2)))))
+    return out
 
 
 def dogrula(metin: str, kural: dict) -> list[dict]:
@@ -1055,6 +1149,8 @@ def duzelt_ayrinti(metin: str, kural: dict) -> tuple[str, int, int]:
             elif not kural["gece"] and rol == "gece_uyanma" and not _GECE.search(c):
                 rol = "dis"                            # gündüz "uyanırsa … bekle" → kısa gündüz
             k = kural["karsilik"].get(rol)
+            if rol == "saat" and not _YATIS_CUMLE.search(c):
+                k = None                               # yatış dışı yanlış saat: cümle çıkar
             if k and k not in kullanilan and not _karsilik_var(rol, k, gecerli, kural):
                 kullanilan.add(k)
                 gecerli += " " + k

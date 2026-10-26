@@ -367,7 +367,9 @@ check("Z) Başlangıç bugün, 02:30 → 'eğitim bu sabah başlıyor'", "bu sab
 
 bebek_guncelle(BID, training_started_at=G0 - timedelta(days=13))   # bugün Gün 14
 s = satir(BID, datetime(2026, 10, 11, 14, 0, tzinfo=TR))
-check("Z) Gün 14 → '13 günlük program tamamlandı'", "13 günlük program tamamlandı" in s, s)
+# 2026-10-26: gün sayısı aşıldı ama completed boş → tamamlandı DEĞİL, uzatma
+check("Z) Gün 14, completed boş → 'program UZATILDI', 'tamamlandı' yok",
+      "Eğitimin 14. günü" in s and "UZATILDI" in s and "13 günlük program tamamlandı" not in s, s)
 s = satir(BID, datetime(2026, 10, 11, 2, 30, tzinfo=TR))
 check("Z) Gün 14 gecesi 02:30 (13. günün gecesi) → tamamlandı DEĞİL",
       "13. gününün gecesi" in s, s)

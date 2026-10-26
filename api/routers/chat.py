@@ -70,6 +70,21 @@ def gecmis_hazirla(history: list, gercek_ad: str | None, takma: str | None,
     return out
 
 
+def _son_cevap_ani(db: Session, user: User, req: ChatReq) -> datetime | None:
+    """Sohbet sürüyorsa (geçmiş modele gidiyorsa) Sor'un bu kullanıcıya son
+    cevabının anı — plan ondan sonra yeniden hesaplandıysa bağlam bunu söyler."""
+    if not _bayrak(GECMIS_BAYRAK) or not req.history:
+        return None
+    son = (db.query(ChatMessage.created_at)
+           .filter(ChatMessage.user_id == user.id, ChatMessage.role == "assistant")
+           .order_by(ChatMessage.created_at.desc()).first())
+    if son is None:
+        return None
+    an = son[0] if son[0].tzinfo else son[0].replace(tzinfo=timezone.utc)
+    from api.zaman import simdi_utc
+    return an if an >= simdi_utc() - timedelta(hours=GECMIS_MAX_SAAT) else None
+
+
 @router.post("", response_model=ChatResp)
 def chat(req: ChatReq, db: Session = Depends(get_db),
          user: User = Depends(get_current_user)):
@@ -145,7 +160,8 @@ def _cevapla(req: ChatReq, db: Session, user: User, kademe: str, kapanis: bool,
         # LLM yazdığı için gerçek ad geçebilir → takma adla gizlenir.
         if ctx and sor_baglam.acik_mi():
             try:
-                ek = sor_baglam.zaman_satirlari(db, baby, asama_siniri=asama_siniri)
+                ek = sor_baglam.zaman_satirlari(db, baby, asama_siniri=asama_siniri,
+                                                son_cevap_at=_son_cevap_ani(db, user, req))
                 if ek:
                     ctx = ctx + "\n" + takma_ad.adi_gizle(ek, gercek_ad, takma)
             except Exception:
@@ -155,11 +171,15 @@ def _cevapla(req: ChatReq, db: Session, user: User, kademe: str, kapanis: bool,
 
         # SOR_KURAL_BLOGU / SOR_SAYI_DOGRULAMA: bugünün kuralları (yöntem
         # tablosundan) — blok bağlama, aynı değerler doğrulamaya. Blokta ad yok.
+        # Kural bloğu kurulamıyorsa (eğitim dışı, deneme sınırı) bugünün planı
+        # varsa yalnız SAAT korkuluğu (2026-10-26): plan saati her durumda bağlar.
         if ctx and (sor_kural.blok_acik_mi() or sor_kural.dogrulama_acik_mi()):
             try:
-                kural = sor_kural.kurallar(sor_baglam.gun_durumu(db, baby), baby,
-                                           soru=req.message,    # yalnız yatış tespiti
-                                           asama_siniri=asama_siniri)
+                _gd = sor_baglam.gun_durumu(db, baby)
+                kural = (sor_kural.kurallar(_gd, baby,
+                                            soru=req.message,    # yalnız yatış tespiti
+                                            asama_siniri=asama_siniri)
+                         or sor_kural.saat_korkulugu(_gd, baby))
                 if kural and sor_kural.blok_acik_mi():
                     ctx = ctx + "\n" + kural["blok"]
             except Exception:
@@ -185,7 +205,9 @@ def _cevapla(req: ChatReq, db: Session, user: User, kademe: str, kapanis: bool,
         ek_param["sistem_eki"] = sor_baglam.SISTEM_EKI
     if kural and sor_kural.blok_acik_mi():
         ek_param["sistem_eki"] = "\n".join(
-            x for x in (ek_param.get("sistem_eki"), sor_kural.SISTEM_KURALI) if x)
+            x for x in (ek_param.get("sistem_eki"),
+                        sor_kural.SAAT_KURALI if kural.get("yalniz_saat")
+                        else sor_kural.SISTEM_KURALI) if x)
 
     _t0 = time.perf_counter()
     soru = takma_ad.adi_gizle(req.message, gercek_ad, takma)

@@ -48,6 +48,7 @@ GUNLER = ("Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", 
 SATIR_MAX = 220
 BEKLEME_SATIR_MAX = 3
 GECE_SATIR_MAX = 2
+PLAN_NOTU_MAX = 3
 
 # Sistem talimatı eki — bayrak açıkken SYSTEM_PROMPT'un ARDINDAN ayrı blok
 # olarak gider (önbelleğe alınan ilk blok değişmez).
@@ -70,7 +71,10 @@ geçiyorsa cevaba MUTLAKA şu anlamda bir cümle ekle: belirti sürerse ya da si
 endişelendiriyorsa çocuk doktoruna danışın.
 E5. Uyku kaydı eksikse bunu cevabın konusu yapma; planın saatlerine göre tam cevap ver. \
 Kayıt girmenin programı kişiselleştireceğini bir sohbette en fazla bir kez, tek cümleyle \
-hatırlatabilirsin. "Kayıt girilmediği için göremiyorum / bilemiyorum" gibi cümle kurma."""
+hatırlatabilirsin. "Kayıt girilmediği için göremiyorum / bilemiyorum" gibi cümle kurma.
+E6. Önceki cevaplarındaki saatler eski veriye dayanabilir (plan her yeni kayıtla yeniden \
+hesaplanır). Her zaman BEBEK VERİSİ'ndeki BUGÜNÜN GÜNCEL plan saatlerini kullan; önceki bir \
+cevabınla çelişirse plan doğrudur — eski saati tekrarlama, gerekirse güncellendiğini söyle."""
 
 
 def acik_mi() -> bool:
@@ -225,7 +229,10 @@ def gun_durumu(db: Session, baby: Baby, simdi: datetime | None = None) -> dict:
 
     Dönen: {simdi, gun, dk, gece, plan, content, tip, durum, app_gun, etkin_gun,
             sabah_once, toplam, uyanis, kaynak}
-      durum: "yenidogan" | "baslamadi" | "tamamlandi" | "egitim"
+      durum: "yenidogan" | "baslamadi" | "tamamlandi" | "uzatma" | "egitim"
+        tamamlandi YALNIZ training_completed_at doluysa; gün sayısı aşıldı ama
+        tamamlanmadıysa "uzatma" (+ uzatma_beyan: annenin aşaması, merdiven kodu
+        ya da None; aşama/kural günü için sor_kural.uzatma_asamasi).
       etkin_gun: gecesi sayılan gün (gece yarısından sabah uyanışına kadar önceki gün)."""
     from api.services import plan_service
     from api.zaman import simdi_tr
@@ -261,9 +268,29 @@ def gun_durumu(db: Session, baby: Baby, simdi: datetime | None = None) -> dict:
     etkin_gun = app_gun - 1 if sabah_once else app_gun     # gecesi sayılan gün
     d.update(app_gun=app_gun, etkin_gun=etkin_gun, sabah_once=sabah_once,
              toplam=toplam, uyanis=uyanis, kaynak=kaynak)
-    if baby.training_completed_at is not None or etkin_gun > toplam:
+    if baby.training_completed_at is not None:
         return dict(d, durum="tamamlandi")
+    if etkin_gun > toplam:
+        # 2026-10-26 (prod şikâyeti): gün sayısını aşan ama tamamlanmamış eğitim
+        # "tamamlandı" sayılıyordu → Sor "yatır-çık aşamasındasınız" diyor, kural
+        # bloğu ve sayı doğrulaması hiç çalışmıyordu. Program UZADI: kurallar
+        # annenin seçtiği aşamanın SON gününden (seçim yoksa programın son
+        # günü) kurulur — gerçek gün numarası bekleme formülünü şişirir
+        # (41. günde 205 dk). Karar: kullanıcı, 2026-10-26. Aşama ve kural günü
+        # yöntem tablosundan sor_kural.uzatma_asamasi ile (tabloyu yalnız bayraklı
+        # modüller okur — gece kartı da bu fonksiyonu çağırıyor).
+        return dict(d, durum="uzatma",
+                    uzatma_beyan=_BEYAN_MERDIVEN.get(
+                        (getattr(baby, "mevcut_asama", None) or "").strip()))
     return dict(d, durum="egitim")
+
+
+# babies.mevcut_asama (eğitim videolarının kodları) → yöntem tablosu merdiveni.
+_BEYAN_MERDIVEN = {"besik_yani": "besik_yani", "oda_ortasi": "oda_ortasi", "kapi": "kapi",
+                   "esik": "kapi_esigi", "bitis": "yatir_cik"}
+# Kural bayrakları kapalıyken (tablo okunmaz) bağlamdaki aşama adı.
+_BEYAN_AD = {"besik_yani": "Beşik yanı", "oda_ortasi": "Oda ortası", "kapi": "Kapı",
+             "kapi_esigi": "Kapı eşiği", "yatir_cik": "Yatır-çık"}
 
 
 def gece_sayilan_gun(d: dict) -> int:
@@ -275,14 +302,102 @@ def gece_sayilan_gun(d: dict) -> int:
     return max(1, int(g or 1))
 
 
+def yas_bandi(baby: Baby, gun: date) -> dict | None:
+    """Bebeğin o günkü (düzeltilmiş yaşa göre) yaş bandı; çözülemezse None."""
+    if baby is None or baby.birth_date is None:
+        return None
+    try:
+        from engine import yas_bantlari
+        from engine.parameter_engine import hesapla_yas_ay
+        ay = hesapla_yas_ay(baby.birth_date.isoformat(),
+                            getattr(baby, "dogum_haftasi", None) or 40,
+                            bugun=gun)["duzeltilmis_ay"]
+        return yas_bantlari.yas_bandi_getir(float(ay))
+    except Exception:
+        logger.warning("Yaş bandı çözülemedi (baby=%s)", baby.id, exc_info=True)
+        return None
+
+
+def bugunun_plani_mi(d: dict) -> bool:
+    """Bugün için hesaplanmış, saatli bir plan var mı (saat korkuluğu şartı)."""
+    plan = d.get("plan")
+    return (plan is not None and plan.plan_date == d["gun"]
+            and any(b.get("time") for b in plan_adapter.normalize_schedule(
+                (d.get("content") or {}).get("schedule"))))
+
+
+def _plan_notlari(content: dict) -> list[str]:
+    """Planın kendi uyarıları + gece yatışı/kestirme bloklarının notu.
+
+    adaptation.reasons BİLEREK alınmaz: oradaki genel kestirme değerlendirmesi
+    ("ilave kestirme yaptırılmalı") yer kalmayan günde uyarıyla çelişir
+    (prod 2026-10-26: plan "kestirmeye yer yok" derken Sor 17:30 kestirme önerdi)."""
+    out: list[str] = []
+    for u in (content.get("adaptation") or {}).get("uyarilar") or []:
+        s = _temiz(str(u))
+        if s and s not in out:
+            out.append(s)
+    for b in plan_adapter.normalize_schedule(content.get("schedule")):
+        if b.get("key") in ("bedtime", plan_adapter.SEKERLEME_KEY) and b.get("note"):
+            s = _temiz(str(b["note"]))
+            if s and s not in out:
+                out.append(s)
+    return out[:PLAN_NOTU_MAX]
+
+
+def _plan_ek_satirlari(d: dict, baby: Baby,
+                       son_cevap_at: datetime | None = None) -> list[str]:
+    """Uyanıklık penceresi, planın notu ve (sohbet sürüyorsa) planın son
+    cevaptan sonra yeniden hesaplandığı bilgisi — yalnız bugünün planı varken."""
+    if not bugunun_plani_mi(d):
+        return []
+    content = d.get("content") or {}
+    out: list[str] = []
+    bant = yas_bandi(baby, d["gun"])
+    pen = (bant or {}).get("uyaniklik_penceresi_dk") or []
+    if len(pen) == 2 and all(pen):
+        ad = (content.get("adaptation") or {})
+        plan_ww = ad.get("uyaniklik_penceresi_dk")
+        out.append(f"Uyanıklık penceresi ({bant.get('ad') or 'yaş bandı'}): {int(pen[0])}–"
+                   f"{int(pen[1])} dk" + (f"; plan {int(plan_ww)} dk ile hesaplıyor"
+                                         if plan_ww else "")
+                   + ". Bebek bir uykudan uyandıktan sonra en az alt sınır kadar uyanık kalır.")
+    notlar = _plan_notlari(content)
+    if notlar:
+        out.append("Planın notu: " + " / ".join(notlar) + ".")
+    hesap = _an((content.get("adaptation") or {}).get("hesaplandi_at"))
+    if son_cevap_at is not None and hesap is not None:
+        son = son_cevap_at if son_cevap_at.tzinfo else son_cevap_at.replace(tzinfo=timezone.utc)
+        if hesap > son:
+            yerel = hesap.astimezone(timezone(timedelta(minutes=plan_adapter.TZ_OFFSET_MIN)))
+            out.append(f"Plan güncellendi: bugünün planı son cevabınızdan SONRA "
+                       f"({yerel:%H:%M}) yeni kayıtlarla yeniden hesaplandı; önceki "
+                       f"cevaplardaki saatler artık geçersiz olabilir, yalnız yukarıdaki "
+                       f"güncel plan saatlerini kullanın.")
+    return out
+
+
+def _an(deger) -> datetime | None:
+    if not deger:
+        return None
+    try:
+        an = datetime.fromisoformat(str(deger))
+    except ValueError:
+        return None
+    return an if an.tzinfo else an.replace(tzinfo=timezone.utc)
+
+
 def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None,
-                    asama_siniri: int | None = None) -> str | None:
+                    asama_siniri: int | None = None,
+                    son_cevap_at: datetime | None = None) -> str | None:
     """Sor bağlamına eklenecek satırlar (düz metin). Kurulamazsa None.
 
     `simdi`: Türkiye saatli an (testler); verilmezse api.zaman.simdi_tr().
     `asama_siniri` (premium abonelik): deneme/ücretsizde plan içeriği uygulamadaki
     kilitle AYNI biçimde kısılır (services.erisim) — plan satırı, gösterilmeyen
-    günün bölümünü ya da metnini Sor'a taşımaz. None → sınırsız."""
+    günün bölümünü ya da metnini Sor'a taşımaz. None → sınırsız.
+    `son_cevap_at`: Sor'un bu kullanıcıya son cevabı (sohbet sürüyorsa). Plan ondan
+    sonra yeniden hesaplandıysa bağlam bunu söyler (geçmiş zehirlenmesi)."""
     from api.services import plan_service
 
     d = gun_durumu(db, baby, simdi)
@@ -301,6 +416,7 @@ def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None,
     if d["durum"] == "yenidogan":
         satirlar.append("Eğitim günü: Yenidoğan dönemi (eğitim programı yok).")
         return " ".join(satirlar)
+    ek = _plan_ek_satirlari(d, baby, son_cevap_at)
     if d["durum"] == "baslamadi":
         tahmini = (content.get("egitim_baslangic") or {}).get("tahmini_tarih")
         if tip == plan_service.TYPE_BEKLEME and baby.birth_date is not None:
@@ -312,13 +428,13 @@ def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None,
             tip != plan_service.TYPE_BEKLEME and baby.training_started_at) else tahmini
         satirlar.append(f"Eğitim günü: Eğitim henüz başlamadı (başlangıç: "
                         f"{bas or 'belirlenmedi'}).")
-        return " ".join(satirlar)
+        return " ".join(satirlar + ek)
 
     app_gun, etkin_gun, toplam = d["app_gun"], d["etkin_gun"], d["toplam"]
     uyanis, kaynak, sabah_once = d["uyanis"], d["kaynak"], d["sabah_once"]
     if d["durum"] == "tamamlandi":
         satirlar.append(f"Eğitim günü: {toplam} günlük program tamamlandı.")
-        return " ".join(satirlar)
+        return " ".join(satirlar + ek)
 
     uyanis_notu = (f"kayıttaki sabah uyanışı {_ss(uyanis)}" if kaynak == "kayıt"
                    else f"planlanan sabah uyanışı {_ss(uyanis)}")
@@ -332,13 +448,29 @@ def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None,
                 f"{app_gun}. gün başlıyor ({uyanis_notu}). Uygulama ekranında "
                 f"bugün 'Gün {app_gun}' görünür — gece yarısından sabah "
                 f"uyanışına kadar olan saatler önceki günün gecesidir.")
+    elif d["durum"] == "uzatma":
+        satirlar.append(f"Eğitim günü: Eğitimin {app_gun}. günü"
+                        f"{', akşam/gece' if gece else ' (gündüz)'}.")
     elif gece:
         satirlar.append(f"Eğitim günü: Eğitimin {app_gun}. günü, akşam/gece "
                         f"(bu gece {app_gun}. günün gecesi).")
     else:
         satirlar.append(f"Eğitim günü: Eğitimin {app_gun}. günü (gündüz).")
 
-    adim = _plan_adim_satiri(content, max(1, etkin_gun), gece or sabah_once)
+    kural_gunu = None
+    if d["durum"] == "uzatma":
+        from api.services import sor_kural
+        if sor_kural.blok_acik_mi() or sor_kural.dogrulama_acik_mi():
+            a, kural_gunu = sor_kural.uzatma_asamasi(d)
+            ad, kural = a["ad"], f" Bu aşamanın kuralları ({kural_gunu}. günün değerleri) geçerli;"
+        else:
+            ad, kural = _BEYAN_AD.get(d["uzatma_beyan"] or "yatir_cik"), ""
+        satirlar.append(
+            f"Program durumu: {toplam} günlük program UZATILDI, henüz tamamlanmadı; "
+            f"aşama: {ad} ({'annenin seçtiği aşama' if d['uzatma_beyan'] else 'programın son aşaması'})."
+            f"{kural} 'program tamamlandı' ya da başka bir aşamadaymış gibi konuşma.")
+    adim = _plan_adim_satiri(content, kural_gunu or max(1, etkin_gun),
+                             gece or sabah_once)
     if adim:
         satirlar.append(adim)
     # build_baby_context "Bugünün planı"nı yalnız bugün tarihli plan satırından
@@ -354,7 +486,7 @@ def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None,
     if not _son_kayit_var_mi(db, baby, gun):
         satirlar.append("Kayıt notu: son günlerde uyku kaydı yok; cevabı planın "
                         "saatlerine göre TAM ver, kayıt eksikliğini cevabın konusu yapma.")
-    return " ".join(satirlar)
+    return " ".join(satirlar + ek)
 
 
 def _son_kayit_var_mi(db: Session, baby: Baby, gun: date) -> bool:
