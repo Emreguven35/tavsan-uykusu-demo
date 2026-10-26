@@ -253,6 +253,39 @@ check("7c) Kendine referanslı yapı sonsuz döngüye girmiyor",
       obs.maskele(_dongusel) is not None, "")
 
 
+# =============================================================================
+# 8) SQL PARAMETRELERİ + SPAN VERİSİ (2026-10-26)
+# =============================================================================
+# Kısa UPDATE'te parametreler 200 karakter kırpmasının İÇİNE düşüyordu.
+_sql_hata = ("(psycopg.errors.StringDataRightTruncation) value too long\n"
+             "[SQL: UPDATE babies SET name=%(name)s]\n"
+             f"[parameters: {{'name': '{BEBEK_ADI}', 'content': '{ANNE_MESAJI}'}}]")
+c = obs.maskele({"exception": {"values": [{"type": "DataError", "value": _sql_hata}]}})
+_deger = c["exception"]["values"][0]["value"]
+check("8a) exception.value: [parameters: sonrası kesildi (ad ve mesaj yok)",
+      BEBEK_ADI not in _deger and ANNE_MESAJI not in _deger, _deger)
+check("8b) exception.value: hata tipi ve SQL kalıbı kaldı (teşhis için)",
+      "value too long" in _deger and "UPDATE babies" in _deger
+      and "[parameters:" in _deger, _deger)
+c = obs.maskele({"type": "transaction", "spans": [
+    {"op": "db", "description": "UPDATE babies SET name=%(name)s",
+     "data": {"db.params": {"name": BEBEK_ADI}}},
+    {"op": "http.client", "description": "POST https://exp.host/--/api/v2/push/send",
+     "data": {"body": f"{BEBEK_ADI} 5 ayını doldurdu"}},
+    "garip-span",
+]})
+_metin = govde(c)
+check("8c) spans: data alanları silindi (ad yok)",
+      BEBEK_ADI not in _metin and all("data" not in s for s in c["spans"]
+                                      if isinstance(s, dict)), _metin[:200])
+check("8d) spans: açıklama (SQL kalıbı) korundu",
+      c["spans"][0]["description"] == "UPDATE babies SET name=%(name)s", _metin[:200])
+check("8e) Motor hide_parameters=True ile kuruluyor",
+      "hide_parameters=True" in Path("api/db/session.py").read_text(encoding="utf-8"), "")
+from api.db import engine as _engine                              # noqa: E402
+check("8f) Motor nesnesinde parametreler gizli", _engine.hide_parameters is True, "")
+
+
 # --- Özet --------------------------------------------------------------------
 print("=" * 74)
 print("SENTRY KVKK MASKELEME TEST SONUÇLARI")
