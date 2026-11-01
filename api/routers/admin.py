@@ -9,6 +9,8 @@ uydurmak yerine mevcut olanı yeniden kullanmak, yetkinin tek yerden yönetilmes
 sağlar (scripts/grant_moderator.py).
 
 KVKK: rapor toplamlar üretir; hiçbir uçta mesaj/masal/bebek içeriği dönmez.
+İSTİSNA — GET /ai-bildirimleri (2026-11-01): annenin bildirdiği Sor cevapları
+incelenmek üzere soru/cevap metniyle döner; bebek adı maskeli, e-posta yok.
 """
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -21,7 +23,7 @@ from api.config import GUNLUK_MALIYET_ESIGI_USD
 from api.zaman import tr_gunu
 from api.db import get_db
 from api.deps import get_current_user, require_admin
-from api.models import ApiUsage, ChatMessage, CommunityProfile, User
+from api.models import AiCevapBildirimi, ApiUsage, Baby, ChatMessage, CommunityProfile, User
 from api.schemas.subscription import AdminPremiumReq, AdminPremiumResp
 from api.schemas.admin import (
     CacheOzet, CevapCacheOzet, GunItem, KirilimItem, PromptCacheOzet, UsageResp,
@@ -200,3 +202,33 @@ def kurucular(db: Session = Depends(get_db), admin: User = Depends(require_admin
     return {"lansman_tarihi": (premium_svc.lansman_ani().isoformat()
                                if premium_svc.lansman_ani() else None),
             "sayi": len(liste), "kurucular": liste}
+
+
+AI_BILDIRIM_LISTE = 100
+
+
+def _ad_maskesi(ad: str | None) -> str | None:
+    ad = (ad or "").strip()
+    return f"{ad[0]}***" if ad else None
+
+
+@router.get("/ai-bildirimleri")
+def ai_bildirimleri(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    """Son AI_BILDIRIM_LISTE Sor cevabı bildirimi (yeniden eskiye). Soru/cevap
+    kopyasındaki bebek adı "[bebek]" ile değişir; ad yalnız baş harfle döner."""
+    from api.services import takma_ad
+    satirlar = (db.query(AiCevapBildirimi, Baby.name)
+                .outerjoin(Baby, Baby.id == AiCevapBildirimi.baby_id)
+                .order_by(AiCevapBildirimi.created_at.desc())
+                .limit(AI_BILDIRIM_LISTE).all())
+
+    def gizle(metin, ad):
+        return takma_ad.adi_gizle(metin, ad, "[bebek]") if ad else metin
+
+    return [{
+        "id": str(b.id), "user_id": str(b.user_id), "mesaj_id": str(b.mesaj_id),
+        "baby_id": str(b.baby_id) if b.baby_id else None, "bebek": _ad_maskesi(ad),
+        "sebep": b.sebep, "not": gizle(b.not_, ad), "durum": b.durum,
+        "soru_metni": gizle(b.soru_metni, ad), "cevap_metni": gizle(b.cevap_metni, ad),
+        "created_at": b.created_at.isoformat() if b.created_at else None,
+    } for b, ad in satirlar]

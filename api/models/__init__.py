@@ -33,6 +33,7 @@ from api.models.onay_kaniti import OnayKaniti
 from api.models.community_v2 import Bookmark, ToplulukBildirimi
 from api.models.sor_sayac import SorSayac
 from api.models.egitim_degerlendirme import EgitimDegerlendirme
+from api.models.ai_cevap_bildirimi import AiCevapBildirimi
 
 __all__ = [
     "User", "Baby", "BebekOlcumu", "SleepLog", "SilinenSleepLog", "SleepPlan",
@@ -58,4 +59,6 @@ __all__ = [
     "SorSayac",
     # 13. gün eğitim değerlendirmesi
     "EgitimDegerlendirme",
+    # Sor cevabını bildirme
+    "AiCevapBildirimi",
 ]

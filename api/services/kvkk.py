@@ -103,8 +103,11 @@ def _deger(v: Any) -> Any:
 
 
 def _satir(obj, haric: tuple[str, ...] = ()) -> dict:
-    return {k.name: _deger(getattr(obj, k.name))
-            for k in obj.__table__.columns if k.name not in haric}
+    """Satır → {sütun adı: değer}. Değer ORM özelliğinden okunur: özellik adı sütun
+    adından farklı olabilir (ai_cevap_bildirimleri."not" → not_)."""
+    from sqlalchemy import inspect as sa_inspect
+    return {a.columns[0].name: _deger(getattr(obj, a.key))
+            for a in sa_inspect(obj).mapper.column_attrs if a.columns[0].name not in haric}
 
 
 def export_bekleme(user: User) -> int:
@@ -143,7 +146,7 @@ def _kilitli_planlar(db: Session, user: User, planlar: list) -> list[dict]:
 
 def disa_aktar(db: Session, user: User) -> dict:
     from api.models import Bookmark, ToplulukBildirimi
-    from api.models import (Baby, BebekOlcumu, Block, ChatMessage,
+    from api.models import (AiCevapBildirimi, Baby, BebekOlcumu, Block, ChatMessage,
                             CommunityProfile, EgitimDegerlendirme, Like, PlanFeedback, PremiumHak,
                             PushToken, Reply, Report, SentNotification,
                             SilinenSleepLog, SleepLog, SleepPlan, Subscription,
@@ -170,6 +173,8 @@ def disa_aktar(db: Session, user: User) -> dict:
         "plan_geri_bildirimleri": hepsi(PlanFeedback, PlanFeedback.user_id == user.id),
         "egitim_degerlendirmeleri": hepsi(EgitimDegerlendirme,
                                           EgitimDegerlendirme.user_id == user.id),
+        "ai_cevap_bildirimleri": hepsi(AiCevapBildirimi,
+                                       AiCevapBildirimi.user_id == user.id),
         "sohbet": hepsi(ChatMessage, ChatMessage.user_id == user.id),
         "topluluk": {
             "profil": hepsi(CommunityProfile, CommunityProfile.user_id == user.id),

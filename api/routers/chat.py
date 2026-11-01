@@ -11,6 +11,7 @@ yalnız uzunluk + cache durumu.
 """
 import logging
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
@@ -269,11 +270,18 @@ def _cevapla(req: ChatReq, db: Session, user: User, kademe: str, kapanis: bool,
     # yapılır (k3/k4). Cevap satırına da yazılır ki tek satırdan da okunabilsin.
     layer = r.get("retrieval_layer")
     top_score = r.get("top_score")
-    db.add(ChatMessage(user_id=user.id, role="user", content=req.message,
-                       cached=False, retrieval_layer=layer, top_score=top_score))
-    db.add(ChatMessage(user_id=user.id, role="assistant",
-                       content=r["cevap"], cached=r["cache_hit"],
-                       retrieval_layer=layer, top_score=top_score))
+    # mesaj_id (2026-11-01, Sor cevabını bildirme): asistan satırının id'si yanıtta
+    # döner — önbellekten gelen cevap da kullanıcıya ait bir satırdır. Soru satırı
+    # ve bebek cevaba bağlanır (bildirim o anki soru/cevabı kopyalar).
+    soru_satiri = ChatMessage(id=uuid.uuid4(), user_id=user.id, role="user",
+                              content=req.message, cached=False, retrieval_layer=layer,
+                              top_score=top_score, baby_id=req.baby_id)
+    cevap_satiri = ChatMessage(id=uuid.uuid4(), user_id=user.id, role="assistant",
+                               content=r["cevap"], cached=r["cache_hit"],
+                               retrieval_layer=layer, top_score=top_score,
+                               baby_id=req.baby_id, soru_id=soru_satiri.id)
+    db.add(soru_satiri)
+    db.add(cevap_satiri)
     db.commit()
 
     # KVKK: bebek verisi İÇERİĞİ loglanmaz — yalnız bağlamın eklenip eklenmediği.
@@ -287,5 +295,5 @@ def _cevapla(req: ChatReq, db: Session, user: User, kademe: str, kapanis: bool,
     if r["kaynaklar"]:
         sources = [ChatSource(**s) for s in r["kaynaklar"]]
     return ChatResp(answer=r["cevap"], cached=r["cache_hit"], sources=sources,
-                    retrieval_layer=layer,
+                    retrieval_layer=layer, mesaj_id=cevap_satiri.id,
                     ucretsiz_kalan=None if limit is None else sor_hakki.kalan(db, user, kademe))

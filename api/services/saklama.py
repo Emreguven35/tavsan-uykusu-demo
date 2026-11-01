@@ -7,7 +7,8 @@ Topluluk) bu kurallara GİRMEZ; hesap açık kaldığı sürece durur.
 Hesap silmede (hesap_silme_oncesi, `db.delete(user)`'dan ÖNCE çağrılır):
   • consents → onay_kanitlari'na taşınır (kimliksiz, e-posta özetiyle; 10 yıl),
   • plan_uretim_isleri: kullanıcının bütün işleri silinir,
-  • revenuecat_olaylari: kullanıcının satırları silinir.
+  • revenuecat_olaylari: kullanıcının satırları silinir,
+  • ai_cevap_bildirimleri: kullanıcının Sor cevabı bildirimleri silinir.
 
 Her gece (gece_temizligi, 03:30 UTC, çok worker'da yalnız biri):
   • plan_uretim_isleri: sahibi (hesap ya da bebek) silinmiş işler; 30 günden eski
@@ -48,7 +49,8 @@ KILIT_ID = 7_351_204          # pg advisory lock (denetim'inkinden ayrı)
 def hesap_silme_oncesi(db, user) -> dict:
     """Onayları ispat tablosuna taşı, kullanıcının iç kayıtlarını sil. Commit
     ETMEZ — hesap silmeyle aynı işlemde yazılır (biri olmazsa hiçbiri olmasın)."""
-    from api.models import Consent, OnayKaniti, PlanUretimIsi, RevenueCatOlayi
+    from api.models import (AiCevapBildirimi, Consent, OnayKaniti, PlanUretimIsi,
+                            RevenueCatOlayi)
     from api.services.kvkk import eposta_ozeti
 
     simdi = datetime.now(timezone.utc)
@@ -65,7 +67,11 @@ def hesap_silme_oncesi(db, user) -> dict:
           .filter((RevenueCatOlayi.user_id == user.id)
                   | (RevenueCatOlayi.app_user_id == str(user.id)))
           .delete(synchronize_session=False))
-    sonuc = {"onay_tasindi": len(onaylar), "is_silindi": isler, "rc_silindi": rc}
+    # Sor cevabı bildirimleri (soru/cevap kopyası taşır) — FK cascade'e bırakılmaz.
+    bildirim = (db.query(AiCevapBildirimi).filter(AiCevapBildirimi.user_id == user.id)
+                .delete(synchronize_session=False))
+    sonuc = {"onay_tasindi": len(onaylar), "is_silindi": isler, "rc_silindi": rc,
+             "ai_bildirim_silindi": bildirim}
     logger.info("Hesap silme iç kayıtları: user=%s %s", user.id, sonuc)
     return sonuc
 

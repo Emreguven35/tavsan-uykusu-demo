@@ -1,6 +1,7 @@
 """Chat (RAG) şemaları — mobil sözleşmesi."""
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field
 
@@ -50,3 +51,16 @@ class ChatResp(BaseModel):
     retrieval_layer: str | None = None
     # B4 — premium değilse bugün kalan ücretsiz soru hakkı; premium'da None.
     ucretsiz_kalan: int | None = None
+    # Sor cevabını bildirme (2026-11-01): DB'deki asistan satırının id'si —
+    # POST /sor/mesajlar/{mesaj_id}/bildir bunu alır. Eski mobil alanı okumaz.
+    mesaj_id: uuid.UUID | None = None
+
+
+class AiBildirimReq(BaseModel):
+    """POST /sor/mesajlar/{mesaj_id}/bildir gövdesi."""
+    sebep: Literal["yanlis_bilgi", "programla_uyusmuyor", "guvenli_degil", "uygunsuz",
+                   "diger"]
+    # Python'da `not` anahtar kelime → alias.
+    not_: str | None = Field(default=None, max_length=500, alias="not")
+
+    model_config = {"populate_by_name": True}

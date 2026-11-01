@@ -44,6 +44,12 @@ class ChatMessage(Base):
     # O sorgudaki en yüksek retrieval skoru (eşikten bağımsız ham değer).
     top_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Sor cevabını bildirme (2026-11-01, migration 0033): cevabın hangi bebeğin
+    # bağlamıyla verildiği ve hangi soru satırına ait olduğu. Eski satırlarda NULL.
+    baby_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("babies.id", ondelete="SET NULL"), nullable=True)
+    soru_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True)
+
     created_at: Mapped["object"] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
