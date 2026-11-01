@@ -26,7 +26,8 @@ from api.schemas.plan import (
     PlanAdaptResp, PlanGenerateReq, PlanJobResp, PlanJobStatusResp, PlanResp,
     RegresyonCevapReq, RegresyonCevapResp,
 )
-from api.services import hazirlik, plan_adapter, plan_jobs, plan_service, yontem_kart
+from api.services import (egitim_degerlendirme, hazirlik, plan_adapter, plan_jobs,
+                          plan_service, yontem_kart)
 from api.zaman import bugun_tr, tr_gunu
 
 logger = logging.getLogger("tavsan.plans")
@@ -90,6 +91,14 @@ def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
         except Exception:
             logger.exception("Gece kartı v2 kurulamadı (plan=%s) — saklanan kart "
                              "dönüyor", plan.id)
+    # 13. gün değerlendirmesi — egitim_durumu + egitim_gunu_gercek; egitim_gunu
+    # tamamlanmamış eğitimde program uzunluğunda sabit (eski mobil sürümler).
+    try:
+        resp.content = egitim_degerlendirme.plan_icerigine_isle(
+            resp.content, db, db.get(Baby, plan.baby_id), referans or plan.plan_date)
+    except Exception:
+        logger.exception("Eğitim durumu eklenemedi (plan=%s) — saklanan içerik "
+                         "dönüyor", plan.id)
     egitim_gunu = None
     if kademe == "deneme":
         bebek = db.get(Baby, plan.baby_id)

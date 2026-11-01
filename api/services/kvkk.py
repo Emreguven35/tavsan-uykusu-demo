@@ -144,7 +144,7 @@ def _kilitli_planlar(db: Session, user: User, planlar: list) -> list[dict]:
 def disa_aktar(db: Session, user: User) -> dict:
     from api.models import Bookmark, ToplulukBildirimi
     from api.models import (Baby, BebekOlcumu, Block, ChatMessage,
-                            CommunityProfile, Like, PlanFeedback, PremiumHak,
+                            CommunityProfile, EgitimDegerlendirme, Like, PlanFeedback, PremiumHak,
                             PushToken, Reply, Report, SentNotification,
                             SilinenSleepLog, SleepLog, SleepPlan, Subscription,
                             Thread, VideoProgress,
@@ -168,6 +168,8 @@ def disa_aktar(db: Session, user: User) -> dict:
         "planlar": _kilitli_planlar(
             db, user, db.query(SleepPlan).filter(SleepPlan.user_id == user.id).all()),
         "plan_geri_bildirimleri": hepsi(PlanFeedback, PlanFeedback.user_id == user.id),
+        "egitim_degerlendirmeleri": hepsi(EgitimDegerlendirme,
+                                          EgitimDegerlendirme.user_id == user.id),
         "sohbet": hepsi(ChatMessage, ChatMessage.user_id == user.id),
         "topluluk": {
             "profil": hepsi(CommunityProfile, CommunityProfile.user_id == user.id),

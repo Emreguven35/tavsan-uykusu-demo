@@ -117,3 +117,17 @@ class BabyResp(BaseModel):
     son_olcum: SonOlcum | None = None
 
     model_config = {"from_attributes": True}
+
+
+class EgitimDegerlendirmeReq(BaseModel):
+    """POST /babies/{id}/egitim-degerlendirme — 13. gün değerlendirmesi.
+    uzun_aglama (son 3 günde bir uykuda 30 dk üzeri ağlama) yalnız
+    yatir_cik=false iken zorunlu; yatir_cik=true iken null olmalı (değilse 422)."""
+    kendi_donuyor: bool
+    yatir_cik: bool
+    uzun_aglama: bool | None = None
+
+
+class EgitimDegerlendirmeResp(BaseModel):
+    sonuc: Literal["mezun", "devam", "yeniden_basla"]
+    yeniden_degerlendirme_tarihi: date | None = None

@@ -253,6 +253,10 @@ def gun_durumu(db: Session, baby: Baby, simdi: datetime | None = None) -> dict:
 
     # Gün numarası: UYGULAMANIN gösterdiği (TR takvim günü)
     app_gun = plan_adapter.egitim_gunu(baby.training_started_at, gun)
+    if app_gun < 1:
+        # İleri tarihli başlangıç (13. gün değerlendirmesinde "yeniden başla":
+        # eğitim YARIN 1. günden) — "Eğitimin 0. günü" denmesin.
+        return dict(d, durum="baslamadi")
     toplam = None
     try:
         toplam = int((content.get("plan_secimi") or {}).get("gunler") or 0) or None
@@ -428,12 +432,15 @@ def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None,
             tip != plan_service.TYPE_BEKLEME and baby.training_started_at) else tahmini
         satirlar.append(f"Eğitim günü: Eğitim henüz başlamadı (başlangıç: "
                         f"{bas or 'belirlenmedi'}).")
+        if tip != plan_service.TYPE_BEKLEME:
+            satirlar += _degerlendirme_satirlari(db, baby, gun)
         return " ".join(satirlar + ek)
 
     app_gun, etkin_gun, toplam = d["app_gun"], d["etkin_gun"], d["toplam"]
     uyanis, kaynak, sabah_once = d["uyanis"], d["kaynak"], d["sabah_once"]
     if d["durum"] == "tamamlandi":
         satirlar.append(f"Eğitim günü: {toplam} günlük program tamamlandı.")
+        satirlar += _degerlendirme_satirlari(db, baby, gun)
         return " ".join(satirlar + ek)
 
     uyanis_notu = (f"kayıttaki sabah uyanışı {_ss(uyanis)}" if kaynak == "kayıt"
@@ -446,16 +453,19 @@ def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None,
             satirlar.append(
                 f"Eğitim günü: Eğitimin {etkin_gun}. gününün gecesi; sabah "
                 f"{app_gun}. gün başlıyor ({uyanis_notu}). Uygulama ekranında "
-                f"bugün 'Gün {app_gun}' görünür — gece yarısından sabah "
+                f"bugün 'Gün {min(app_gun, toplam)}' görünür — gece yarısından sabah "
                 f"uyanışına kadar olan saatler önceki günün gecesidir.")
     elif d["durum"] == "uzatma":
         satirlar.append(f"Eğitim günü: Eğitimin {app_gun}. günü"
-                        f"{', akşam/gece' if gece else ' (gündüz)'}.")
+                        f"{', akşam/gece' if gece else ' (gündüz)'}; uygulama ekranında "
+                        f"'Gün {toplam}' görünür.")
     elif gece:
         satirlar.append(f"Eğitim günü: Eğitimin {app_gun}. günü, akşam/gece "
                         f"(bu gece {app_gun}. günün gecesi).")
     else:
         satirlar.append(f"Eğitim günü: Eğitimin {app_gun}. günü (gündüz).")
+
+    satirlar += _degerlendirme_satirlari(db, baby, gun, app_gun)
 
     kural_gunu = None
     if d["durum"] == "uzatma":
@@ -487,6 +497,18 @@ def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None,
         satirlar.append("Kayıt notu: son günlerde uyku kaydı yok; cevabı planın "
                         "saatlerine göre TAM ver, kayıt eksikliğini cevabın konusu yapma.")
     return " ".join(satirlar + ek)
+
+
+def _degerlendirme_satirlari(db: Session, baby: Baby, gun: date,
+                             app_gun: int | None = None) -> list[str]:
+    """13. gün değerlendirmesi ve deneme numarası (services.egitim_degerlendirme).
+    Süslemedir: hesaplanamazsa bağlam satırsız devam eder."""
+    from api.services import egitim_degerlendirme
+    try:
+        return egitim_degerlendirme.baglam_satirlari(db, baby, gun, app_gun)
+    except Exception:
+        logger.exception("Değerlendirme satırı kurulamadı (baby=%s)", baby.id)
+        return []
 
 
 def _son_kayit_var_mi(db: Session, baby: Baby, gun: date) -> bool:

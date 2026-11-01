@@ -7,6 +7,9 @@ Boy/kilo (2026-10, ilk açılış akışı): POST ve PATCH /babies isteğe bağl
 `boy_cm`/`kilo_kg` alır ve bebek_olcumleri'ne bir ölçüm yazar; yanıtlar
 `son_olcum` taşır. Ölçüm geçmişi: POST/GET /babies/{id}/olcumler. Bu değerler
 HİÇBİR HESABA girmez (plan motoru, eğitim planı, sohbet, denetim).
+
+13. gün değerlendirmesi (2026-11-01): POST /babies/{id}/egitim-degerlendirme
+(karar tablosu: services/egitim_degerlendirme.py).
 """
 import logging
 import uuid
@@ -20,9 +23,9 @@ from sqlalchemy.orm import Session
 from api.db import get_db
 from api.deps import get_current_user, get_owned_baby
 from api.models import Baby, BebekOlcumu, User
-from api.schemas.baby import (BabyCreate, BabyResp, BabyUpdate, OlcumIn, OlcumResp,
-                              SonOlcum)
-from api.services import plan_service
+from api.schemas.baby import (BabyCreate, BabyResp, BabyUpdate, EgitimDegerlendirmeReq,
+                              EgitimDegerlendirmeResp, OlcumIn, OlcumResp, SonOlcum)
+from api.services import egitim_degerlendirme, plan_service
 from api.zaman import bugun_tr
 
 logger = logging.getLogger("tavsan.babies")
@@ -234,3 +237,31 @@ def olcumleri_listele(baby_id: uuid.UUID, db: Session = Depends(get_db),
             .order_by(BebekOlcumu.olcum_tarihi.desc(), BebekOlcumu.created_at.desc(),
                       BebekOlcumu.id.desc())
             .all())
+
+
+@router.post("/{baby_id}/egitim-degerlendirme", response_model=EgitimDegerlendirmeResp)
+def egitim_degerlendir(baby_id: uuid.UUID, req: EgitimDegerlendirmeReq,
+                       db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    """13. gün değerlendirmesi. Karar ve uygulanışı services/egitim_degerlendirme.
+
+    422: uzun_aglama kuralı (yatır-çık yoksa zorunlu, varsa null).
+    409 DEGERLENDIRME_ZAMANI_DEGIL: eğitim planı yok, eğitim sürüyor (gün < 13)
+    ya da tamamlanmış — yanıtta güncel egitim_durumu."""
+    baby = get_owned_baby(baby_id, db, user)
+    hata = egitim_degerlendirme.cevap_hatasi(req.yatir_cik, req.uzun_aglama)
+    if hata:
+        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            content={"detail": hata, "alan": "uzun_aglama"})
+    try:
+        satir = egitim_degerlendirme.degerlendir(db, user, baby, req.kendi_donuyor,
+                                                 req.yatir_cik, req.uzun_aglama)
+    except egitim_degerlendirme.DegerlendirmeZamaniDegil as e:
+        return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={
+            "detail": "Eğitim şu an değerlendirilemez.",
+            "hata": "DEGERLENDIRME_ZAMANI_DEGIL", "egitim_durumu": e.egitim_durumu})
+    db.commit()
+    logger.info("Eğitim değerlendirmesi: baby=%s deneme=%s gün=%s sonuc=%s",
+                baby.id, satir.deneme_no, satir.egitim_gunu, satir.sonuc)
+    return EgitimDegerlendirmeResp(
+        sonuc=satir.sonuc, yeniden_degerlendirme_tarihi=satir.yeniden_degerlendirme_tarihi)

@@ -115,8 +115,13 @@ _db_bebek(EGITIM, training_started_at=date(2026, 9, 14))
 r = bugun(EGITIM)
 ok, d = dolu(r, "egitim_plani")
 check("A1) Eğitimdeki bebek (gün 17): 200 + dolu egitim_plani", ok, d)
-check("A2) Eğitim günü 17", ((r.json().get("content") or {}).get("adaptation") or {})
-      .get("egitim_gunu") == 17, str((r.json().get("content") or {}).get("adaptation", {}).get("egitim_gunu")))
+# 13. gün değerlendirmesi (2026-11-01): tamamlanmamış eğitimde egitim_gunu program
+# uzunluğunda sabit (eski mobil sürümler), gerçek gün egitim_gunu_gercek.
+_ad = (r.json().get("content") or {}).get("adaptation") or {}
+check("A2) Eğitim günü 17: egitim_gunu 13 (sabit), gerçek 17, değerlendirme bekliyor",
+      (_ad.get("egitim_gunu"), _ad.get("egitim_gunu_gercek"), _ad.get("egitim_durumu"))
+      == (13, 17, "degerlendirme_bekliyor"),
+      str((_ad.get("egitim_gunu"), _ad.get("egitim_gunu_gercek"), _ad.get("egitim_durumu"))))
 
 # --- B — eğitim sonrası --------------------------------------------------------
 SONRA = bebek("Ali", "2025-11-01")
