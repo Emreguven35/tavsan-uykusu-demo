@@ -152,6 +152,21 @@ for ad, soru, beklenen in VAKALAR:
     check(f"T3) {ad}: doğru yerler değişti, kelimeler korundu", sonuc == beklenen,
           f"\n      çıktı   : {sonuc}\n      beklenen: {beklenen}")
 
+# T3b — çok kelimeli ad: her kelime (ilki 2+, diğerleri 3+ harf) ayrı yakalanır.
+_t = takma_ad.takma_ad_sec("Ada Nur")
+_s = takma_ad.adi_gizle("Ada Nur uyudu. Ada'nın gecesi, Nur'u uyandırdı; NUR ağladı.",
+                        "Ada Nur", _t)
+check("T3b) 'Ada Nur': tam ad, 'Ada' ve 'Nur' ayrı ayrı değişti",
+      _s == f"{_t} uyudu. {_t}'nın gecesi, {_t}'u uyandırdı; {_t} ağladı.", _s)
+_s = takma_ad.adi_gizle("Su Naz uyudu, Su'yu yatırdım.", "Su Naz", "Zalvan")
+check("T3b) 'Su Naz': 2 harfli ilk kelime eskisi gibi yakalanıyor",
+      _s == "Zalvan uyudu, Zalvan'yu yatırdım.", _s)
+_s = takma_ad.adi_gizle("Ela Su uyudu, su içti. Su'yu sevdi.", "Ela Su", "Zalvo")
+check("T3b) 'Ela Su': 3 harften kısa SONRAKİ kelime tek başına aranmaz",
+      _s == "Zalvo uyudu, su içti. Su'yu sevdi.", _s)
+check("T3b) Çok kelimeli adda 'nur' (küçük, kesmesiz) dokunulmadan kalır",
+      takma_ad.adi_gizle("evde nur var", "Ada Nur", _t) == "evde nur var", "")
+
 # =============================================================================
 # T4 — sohbet ucu
 # =============================================================================
@@ -261,7 +276,30 @@ check("T6d) Uçta: override ile gönderilen kimlik istemde yok",
       r.status_code == 201 and "GercekAd" not in _PARAM["istem"]
       and "2020-02-02" not in _PARAM["istem"] and _PARAM["profil"].get("deneyim") == "ilk",
       r.text[:120])
+
+# T7 — annenin serbest metninde (sağlık notu, mizaç) geçen ad da istemde yok.
+for ad in ("Melis", "Ada Nur"):
+    t = takma_ad.takma_ad_sec(ad)
+    ilk, son = ad.split()[0], ad.split()[-1]
+    saglik = f"{ilk}'in reflüsü var, {son} geceleri öksürüyor"
+    bid = client.post("/api/v1/babies", headers=H, json={
+        "name": ad, **PROFIL, "saglik_problemi": saglik}).json()["id"]
+    r = client.post("/api/v1/plans/generate?sync=true", headers=H, json={
+        "baby_id": bid, "profile_overrides": {"mizac": f"{ad} çok hareketli, {son}'u zor uyutuyoruz"}})
+    istem = _PARAM.get("istem", "")
+    check(f"T7) {ad}: sağlık notu + mizaç içindeki ad _build_user_prompt'ta YOK",
+          r.status_code == 201 and not re.search(rf"\b({ilk}|{son})\b", istem) and t in istem,
+          [s for s in istem.splitlines() if ilk in s or son in s][:3])
+    check(f"T7) {ad}: sağlık notu istemde (maskeli) duruyor",
+          "reflüsü var" in istem and "geceleri öksürüyor" in istem, "")
 plan_generator.plan_uret = _asil_uret
+from api.services.plan_service import istem_parametresi    # noqa: E402
+_p = {"uyarilar": ["Sağlık notu: «Ada'nın reflüsü var»"], "bucket": "x"}
+_ip = istem_parametresi(_p, "Ada", "Zalva")
+check("T7) istem_parametresi: kopyada ad maskeli, asıl param (content'e giden) DEĞİŞMEDİ",
+      _ip["uyarilar"] == ["Sağlık notu: «Zalva'nın reflüsü var»"]
+      and _p["uyarilar"] == ["Sağlık notu: «Ada'nın reflüsü var»"] and _ip["bucket"] == "x",
+      (_ip, _p))
 
 check("Z) Canlı LLM çağrısı yapılmadı", canli_cagri_sayisi() == 0, canli_cagri_sayisi())
 

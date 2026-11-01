@@ -105,12 +105,18 @@ def takma_ad_sec(ad: str | None) -> str | None:
 
 
 def _bicimler(ad: str) -> list[str]:
-    """Metinde aranacak ad biçimleri: tam ad (+ çok kelimeliyse ilk kelime)."""
+    """Metinde aranacak ad biçimleri: tam ad + çok kelimeliyse her kelime.
+
+    İlk kelime 2 harften (eski kural: "Su Naz" → "Su"), diğerleri 3 harften
+    itibaren aranır ("Ada Nur" → "Ada", "Nur"; anne çoğu zaman tek kelimeyi
+    yazıyor)."""
     ad = ad.strip()
     out = [ad]
-    ilk = ad.split()[0] if " " in ad else None
-    if ilk and len(ilk) >= 2:
-        out.append(ilk)
+    kelimeler = ad.split()
+    if len(kelimeler) > 1:
+        for i, k in enumerate(kelimeler):
+            if len(k) >= (2 if i == 0 else 3) and k not in out:
+                out.append(k)
     return out
 
 

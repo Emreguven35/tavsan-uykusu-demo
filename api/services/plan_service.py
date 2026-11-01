@@ -572,11 +572,12 @@ def _yas_metni(dogum: date, bugun: date) -> str:
 
 
 def istem_profili(profile: dict, param: dict, takma: str | None,
-                  bugun: date | None = None) -> dict:
+                  bugun: date | None = None, gercek_ad: str | None = None) -> dict:
     """Plan isteminin PROFIL bölümü — yapay zekâya giden profil (2026-10-07).
 
     • Gerçek ad yerine ses uyumlu TAKMA AD (api/services/takma_ad.py); üretilen
-      metinde gerçek ada geri çevrilir.
+      metinde gerçek ada geri çevrilir. Annenin yazdığı serbest metinlerde
+      (sağlık notu, mizaç…) geçen ad da takma adla değişir (2026-10-26).
     • Tam doğum tarihi GİTMEZ; yerine yaş (ay + gün), prematürede düzeltilmiş yaş.
     • saglik_problemi istemde YALNIZ BİR KEZ geçer: uyarı metninde ("Sağlık
       notu: «…»") zaten varsa profilden çıkarılır."""
@@ -595,7 +596,15 @@ def istem_profili(profile: dict, param: dict, takma: str | None,
     saglik = str(profile.get("saglik_problemi") or "").strip()
     if saglik and any(saglik in u for u in param.get("uyarilar") or []):
         out.pop("saglik_problemi", None)
-    return out
+    return {k: (takma_ad.adi_gizle(v, gercek_ad, takma) if isinstance(v, str) else v)
+            for k, v in out.items()}
+
+
+def istem_parametresi(param: dict, gercek_ad: str | None, takma: str | None) -> dict:
+    """plan_uret'e giden kopya: uyarılardaki ad da takma adla değişir (sağlık notu
+    uyarı metnine gömülü). `param` DEĞİŞMEZ — content["uyarilar"] gerçek adla kalır."""
+    return dict(param, uyarilar=[takma_ad.adi_gizle(u, gercek_ad, takma)
+                                 for u in param.get("uyarilar") or []])
 
 
 def hazirlik_bolumunu_tazele(content: dict | None, baby: Baby | None,
@@ -655,7 +664,7 @@ def generate_content(baby: Baby, req_overrides: dict | None,
     # Yapay zekâya giden profil: takma ad, doğum tarihi yerine yaş, sağlık notu
     # bir kez. Hesaplar (yaş bandı, uyarılar) gerçek profilden yapıldı.
     takma = takma_ad.takma_ad_sec(baby.name)
-    param["profile_summary"] = istem_profili(profile, param, takma)
+    param["profile_summary"] = istem_profili(profile, param, takma, gercek_ad=baby.name)
 
     # --- 0-3 AY: EĞİTİM PLANI DEĞİL, YENİDOĞAN RİTİM REHBERİ -----------------
     # İlayda kuralı: bu yaşta katı program ve yapılandırılmış eğitim UYGULANMAZ.
@@ -709,11 +718,12 @@ def generate_content(baby: Baby, req_overrides: dict | None,
     markdown: str | None = None
     days: list[dict] | None = None
     son_hata: Exception | None = None
+    istem_param = istem_parametresi(param, baby.name, takma)
     for deneme in range(1, PLAN_DAYS_MAX_DENEME + 1):
         _kullanim: dict = {}
         _t0 = time.perf_counter()
         try:
-            markdown = plan_generator.plan_uret(param, usage_sink=_kullanim)
+            markdown = plan_generator.plan_uret(istem_param, usage_sink=_kullanim)
         except Exception as e:
             raise PlanError(str(e)) from e
         # Takma ad → gerçek ad (gün başlıkları ayrıştırılmadan ÖNCE).

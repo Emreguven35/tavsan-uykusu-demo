@@ -61,6 +61,7 @@ _SENTRY_DSN = re.compile(r"https://[^@\s]+@[^\s]+")
 # İstisna mesajları bu uzunluğu aşarsa büyük olasılıkla içerik taşıyor (SQL
 # parametresi, prompt parçası). Kırpılır — tip ve stack trace zaten elde.
 MAX_MESAJ = 200
+_SQL_PARAMETRELER = "[parameters:"
 
 
 def _hassas_anahtar(anahtar: Any) -> bool:
@@ -72,6 +73,11 @@ def metni_temizle(deger: Any) -> Any:
     """Serbest metinden e-posta/token/DSN kalıplarını sil, aşırı uzunsa kırp."""
     if not isinstance(deger, str):
         return deger
+    # SQLAlchemy hata metni: "[parameters: {...}]" ve sonrası satır değerleridir
+    # (bebek adı, mesaj). hide_parameters=True ile zaten eklenmiyor; ikinci kemer.
+    i = deger.find(_SQL_PARAMETRELER)
+    if i != -1:
+        deger = deger[:i] + _SQL_PARAMETRELER + " " + MASKE + "]"
     s = _SENTRY_DSN.sub(MASKE, deger)
     s = _BEARER.sub(MASKE, s)
     s = _EPOSTA.sub(MASKE, s)
@@ -161,6 +167,13 @@ def maskele(event: dict, hint: dict | None = None) -> dict | None:
     for alan in ("extra", "tags"):
         if isinstance(event.get(alan), dict):
             event[alan] = _derin_maskele(event[alan])
+
+    # 6) Transaction span'leri: `data` (SQL parametreleri, HTTP gövde/sorgu
+    #    ayrıntısı taşıyabilir) DÜŞER. Açıklama kalır: SQL'de yer tutuculu kalıp,
+    #    performans ekranı onunla gruplanıyor.
+    for span in event.get("spans") or []:
+        if isinstance(span, dict):
+            span.pop("data", None)
 
     return event
 

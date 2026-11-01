@@ -53,6 +53,9 @@ engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,          # bayat bağlantıları otomatik tazele (Railway idle)
     future=True,
+    # KVKK: hata metnine "[parameters: {'name': …, 'content': …}]" eklenmesin —
+    # istisna mesajı loga ve Sentry'ye gidiyor (bkz. api/observability.py).
+    hide_parameters=True,
     connect_args=_connect_args,
     **_pool_args,
 )
