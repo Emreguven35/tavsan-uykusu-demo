@@ -34,17 +34,25 @@ logger = logging.getLogger("tavsan.plans")
 router = APIRouter(prefix="/plans", tags=["plans"])
 
 
-def _gece_gunu(db: Session, bebek: Baby | None, gun: date) -> int | None:
-    """Gece kartının gece numarası — Sor ile AYNI hesap (sor_baglam.gun_durumu +
-    gece_sayilan_gun). Yalnız bugünün yanıtında ve eğitim sürerken; aksi hâlde
-    None (kart takvim gününe göre kurulur)."""
+def _gece_gunu(db: Session, bebek: Baby | None, gun: date) -> dict | None:
+    """Gece kartının gecesi — Sor ile AYNI hesap (sor_baglam.gun_durumu +
+    gece_sayilan_gun). Yalnız bugünün yanıtında ve eğitim sürerken/uzarken; aksi
+    hâlde None (kart takvim gününe göre kurulur).
+
+    Uzatmada (2026-11-01) aşama ve kural günü sor_kural.uzatma_asamasi'ndan, ilk
+    bekleme sor_baglam.uzatma_gece_ilk'ten — kart gerçek gün numarasıyla (18. gün →
+    90 dk, sınırsız) kurulmasın."""
     if bebek is None or bebek.training_started_at is None or gun != bugun_tr():
         return None
     from api.services import sor_baglam
     d = sor_baglam.gun_durumu(db, bebek)
-    if d.get("durum") != "egitim":
-        return None
-    return sor_baglam.gece_sayilan_gun(d)
+    if d.get("durum") == "egitim":
+        return {"gece_gunu": sor_baglam.gece_sayilan_gun(d)}
+    if d.get("durum") == "uzatma":
+        from api.services import sor_kural
+        _a, kural_gunu = sor_kural.uzatma_asamasi(d)
+        return {"gece_gunu": kural_gunu, "gece_ilk_dk": sor_baglam.uzatma_gece_ilk(d)}
+    return None
 
 
 def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
@@ -87,7 +95,7 @@ def _plan_yaniti(db: Session, user: User, plan: SleepPlan | None,
         try:
             resp.content = yontem_kart.plan_icerigi_isle(
                 resp.content, user, db.get(Baby, plan.baby_id), referans or plan.plan_date,
-                _gece_gunu(db, db.get(Baby, plan.baby_id), referans or plan.plan_date))
+                **(_gece_gunu(db, db.get(Baby, plan.baby_id), referans or plan.plan_date) or {}))
         except Exception:
             logger.exception("Gece kartı v2 kurulamadı (plan=%s) — saklanan kart "
                              "dönüyor", plan.id)

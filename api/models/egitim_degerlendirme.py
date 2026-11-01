@@ -44,5 +44,7 @@ class EgitimDegerlendirme(Base, TimestampMixin):
 
     # Karar: mezun | devam | yeniden_basla
     sonuc: Mapped[str] = mapped_column(String(20), nullable=False)
+    # devam ise: yatir_cik | gece_bekleme | ikisi (services/egitim_degerlendirme)
+    devam_turu: Mapped[str | None] = mapped_column(String(20), nullable=True)
     yeniden_degerlendirme_tarihi: Mapped[date | None] = mapped_column(Date, nullable=True)
     yeni_baslangic: Mapped[date | None] = mapped_column(Date, nullable=True)

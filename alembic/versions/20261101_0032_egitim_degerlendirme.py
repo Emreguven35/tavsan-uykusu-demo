@@ -36,6 +36,7 @@ def upgrade() -> None:
         sa.Column("yatir_cik", sa.Boolean(), nullable=False),
         sa.Column("uzun_aglama", sa.Boolean(), nullable=True),
         sa.Column("sonuc", sa.String(length=20), nullable=False),
+        sa.Column("devam_turu", sa.String(length=20), nullable=True),
         sa.Column("yeniden_degerlendirme_tarihi", sa.Date(), nullable=True),
         sa.Column("yeni_baslangic", sa.Date(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(),

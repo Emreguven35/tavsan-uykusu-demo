@@ -131,3 +131,5 @@ class EgitimDegerlendirmeReq(BaseModel):
 class EgitimDegerlendirmeResp(BaseModel):
     sonuc: Literal["mezun", "devam", "yeniden_basla"]
     yeniden_degerlendirme_tarihi: date | None = None
+    # devam ise: yatir_cik | gece_bekleme | ikisi; değilse null
+    devam_turu: Literal["yatir_cik", "gece_bekleme", "ikisi"] | None = None

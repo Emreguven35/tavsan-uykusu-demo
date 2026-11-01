@@ -283,7 +283,17 @@ def gun_durumu(db: Session, baby: Baby, simdi: datetime | None = None) -> dict:
         # (41. günde 205 dk). Karar: kullanıcı, 2026-10-26. Aşama ve kural günü
         # yöntem tablosundan sor_kural.uzatma_asamasi ile (tabloyu yalnız bayraklı
         # modüller okur — gece kartı da bu fonksiyonu çağırıyor).
-        return dict(d, durum="uzatma",
+        # 13. gün değerlendirmesi "devam" türü: gece_bekleme/ikisi'de gece ilk
+        # bekleme uzatmanın her gecesi artar (egitim_degerlendirme.uzatma_gece_ilk_dk).
+        from api.services import egitim_degerlendirme
+        try:
+            _son = egitim_degerlendirme.son_degerlendirme(db, baby, gun)
+            devam_turu = _son.devam_turu if _son is not None and _son.sonuc == "devam" else None
+            artis_bas = egitim_degerlendirme.gece_artis_baslangici(db, baby, gun)
+        except Exception:
+            logger.exception("Devam türü okunamadı (baby=%s) — gece beklemesi sabit", baby.id)
+            devam_turu = artis_bas = None
+        return dict(d, durum="uzatma", devam_turu=devam_turu, gece_artis_bas=artis_bas,
                     uzatma_beyan=_BEYAN_MERDIVEN.get(
                         (getattr(baby, "mevcut_asama", None) or "").strip()))
     return dict(d, durum="egitim")
@@ -295,6 +305,17 @@ _BEYAN_MERDIVEN = {"besik_yani": "besik_yani", "oda_ortasi": "oda_ortasi", "kapi
 # Kural bayrakları kapalıyken (tablo okunmaz) bağlamdaki aşama adı.
 _BEYAN_AD = {"besik_yani": "Beşik yanı", "oda_ortasi": "Oda ortası", "kapi": "Kapı",
              "kapi_esigi": "Kapı eşiği", "yatir_cik": "Yatır-çık"}
+
+
+def uzatma_gece_ilk(d: dict, gece_no: int | None = None) -> int:
+    """Uzatmada (gun_durumu durum="uzatma") bu gecenin ilk dış beklemesi — Sor kural
+    bloğu, doğrulama, bağlam ve gece kartı AYNI hesabı kullanır. Taban kural gününün
+    değeri (sor_kural.uzatma_asamasi); devam türü gece artan değilse taban."""
+    from api.services import egitim_degerlendirme, sor_kural, yontem_kart
+    _a, kural_gunu = sor_kural.uzatma_asamasi(d)
+    gece_no = gece_sayilan_gun(d) if gece_no is None else gece_no
+    return egitim_degerlendirme.uzatma_gece_ilk_dk(
+        yontem_kart.gece_ilk_bekleme_dk(kural_gunu), gece_no, d.get("gece_artis_bas"))
 
 
 def gece_sayilan_gun(d: dict) -> int:
@@ -475,6 +496,15 @@ def zaman_satirlari(db: Session, baby: Baby, simdi: datetime | None = None,
             ad, kural = a["ad"], f" Bu aşamanın kuralları ({kural_gunu}. günün değerleri) geçerli;"
         else:
             ad, kural = _BEYAN_AD.get(d["uzatma_beyan"] or "yatir_cik"), ""
+        if d.get("gece_artis_bas") is not None:
+            from api.services import egitim_degerlendirme as _ed
+            _ilk = uzatma_gece_ilk(d)
+            satirlar.append(
+                f"Devam: gece bekleme süresi artırılıyor, bu gece ilk bekleme {_ilk} dk "
+                f"(uzatmada her gece +{_ed.GECE_ARTIS_DK} dk, en fazla {_ed.GECE_UST_SINIR_DK} dk; "
+                f"diğer sayılar 13. günün değerleri).")
+        elif d.get("devam_turu") == "yatir_cik":
+            satirlar.append("Devam: yatır-çık çalışılıyor; gece beklemesi 13. günün değerinde sabit.")
         satirlar.append(
             f"Program durumu: {toplam} günlük program UZATILDI, henüz tamamlanmadı; "
             f"aşama: {ad} ({'annenin seçtiği aşama' if d['uzatma_beyan'] else 'programın son aşaması'})."

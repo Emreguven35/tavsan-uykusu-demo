@@ -4,13 +4,16 @@
   T  Karar tablosu: her cevap kombinasyonu
   V  422: uzun_aglama kuralı ve eksik alan; 409: gün < 13 / tamamlandı
   G  egitim_gunu sabitleme: 18. gün → 13 (gerçek 18), 13. gün, 10. gün; mezunda sabitlenmez
-  D  devam: tarih +3, satır, aşama boşalır (eski beyan satırda); durum
+  D  devam: tarih +7, satır, aşama boşalır (eski beyan satırda); durum
      degerlendirme_bekliyor → uzatma → 3 gün sonra degerlendirme_bekliyor;
      uzatmada erken yeniden değerlendirme serbest
   M  mezun: training_completed_at bugün, tamamlandi, tekrar 409
   Y  yeniden_basla: yarın 1. gün, eski deneme satırda, kayıt/plan silinmez,
      bugün "henüz başlamadı", 2. denemenin 3. günü, 2. denemenin 13. günü yeniden bekliyor
   S  Sor bağlamı: değerlendirme satırı ve deneme numarası
+  U  Devam türleri (yatir_cik / gece_bekleme / ikisi), 7 günlük yeniden
+     değerlendirme; uzatmada gece ilk beklemesi her gece +5, 95'te durur (kural
+     bloğu, doğrulama, duzelt, bağlam, gece kartı)
   K  Şema: sonuc sütunu tüm değerleri alır; KVKK dökümünde tablo var
 
 Çalıştırma: python tests/test_egitim_degerlendirme.py
@@ -39,6 +42,9 @@ os.environ["ENVIRONMENT"] = "development"
 os.environ["MAIL_PROVIDER"] = "disabled"
 os.environ["BETA_MODE"] = "true"
 os.environ["SOR_BAGLAM_V2"] = "true"
+os.environ["YONTEM_TABLOSU"] = "true"
+os.environ["SOR_KURAL_BLOGU"] = "true"
+os.environ["SOR_SAYI_DOGRULAMA"] = "duzelt"
 
 from fastapi.testclient import TestClient                   # noqa: E402
 from api.db import Base, SessionLocal, engine               # noqa: E402
@@ -47,7 +53,8 @@ from api.main import app                                    # noqa: E402
 from api.models import (Baby, EgitimDegerlendirme, SleepLog, SleepPlan,  # noqa: E402
                         User)
 from api.services import egitim_degerlendirme as ed         # noqa: E402
-from api.services import kvkk, sor_baglam                   # noqa: E402
+from api.services import kvkk, sor_baglam, sor_kural, yontem_kart  # noqa: E402
+from engine import yontem                                    # noqa: E402
 from api.zaman import TR, bugun_tr, saat_sabitle            # noqa: E402
 
 from tests.llm_muhuru import TAM_PROFIL, canli_cagri_sayisi, muhurle  # noqa: E402
@@ -153,9 +160,10 @@ check("G) 12. gün durumu devam", ed.durum(db, b13, BUGUN - timedelta(days=1)) =
 # =============================================================================
 r = degerlendir(b18, kendi_donuyor=False, yatir_cik=True)
 j = r.json()
-check("D) 200, sonuc devam, tarih bugün+3",
+check("D) 200, sonuc devam (gece_bekleme), tarih bugün+7",
       r.status_code == 200 and j["sonuc"] == "devam"
-      and j["yeniden_degerlendirme_tarihi"] == (BUGUN + timedelta(days=3)).isoformat(), j)
+      and j["yeniden_degerlendirme_tarihi"] == (BUGUN + timedelta(days=7)).isoformat()
+      and j["devam_turu"] == "gece_bekleme", j)
 db.expire_all()
 satir = db.query(EgitimDegerlendirme).filter_by(baby_id=b18.id).one()
 check("D) Satır cevaplarla: kendi F, yatır T, uzun None, 18. gün, deneme 1",
@@ -167,14 +175,14 @@ check("D) Aşama yatır-çık: bebekte mevcut_asama boşaldı, eski beyan 'kapi'
 a = adaptasyon(b18)
 check("D) Değerlendirmeden sonra uzatma; egitim_gunu hâlâ 13",
       a.get("egitim_durumu") == "uzatma" and a.get("egitim_gunu") == 13, a.get("egitim_durumu"))
-check("D) +2 gün hâlâ uzatma", ed.durum(db, b18, BUGUN + timedelta(days=2)) == "uzatma")
-check("D) +3 gün degerlendirme_bekliyor",
-      ed.durum(db, b18, BUGUN + timedelta(days=3)) == "degerlendirme_bekliyor")
-with saat_sabitle(an(BUGUN + timedelta(days=3))):
+check("D) +6 gün hâlâ uzatma", ed.durum(db, b18, BUGUN + timedelta(days=6)) == "uzatma")
+check("D) +7 gün degerlendirme_bekliyor",
+      ed.durum(db, b18, BUGUN + timedelta(days=7)) == "degerlendirme_bekliyor")
+with saat_sabitle(an(BUGUN + timedelta(days=7))):
     a = adaptasyon(b18)
-check("D) /plans/today +3 gün: degerlendirme_bekliyor, egitim_gunu 13, gerçek 21",
+check("D) /plans/today +7 gün: degerlendirme_bekliyor, egitim_gunu 13, gerçek 25",
       a.get("egitim_durumu") == "degerlendirme_bekliyor" and a.get("egitim_gunu") == 13
-      and a.get("egitim_gunu_gercek") == 21,
+      and a.get("egitim_gunu_gercek") == 25,
       (a.get("egitim_durumu"), a.get("egitim_gunu"), a.get("egitim_gunu_gercek")))
 d = sor_baglam.gun_durumu(db, db.get(Baby, b18.id), an(BUGUN))
 check("D) Sor uzatmada aşama yatır-çık (beyan yok)",
@@ -183,7 +191,7 @@ s = sor_baglam.zaman_satirlari(db, db.get(Baby, b18.id), simdi=an(BUGUN))
 check("S) Bağlam: '13. gün değerlendirmesi' + 'devam, gece kendi dönmüyor, yatır-çık yapılabiliyor'",
       "13. gün değerlendirmesi" in s
       and "devam, gece kendi dönmüyor, yatır-çık yapılabiliyor" in s
-      and f"yeniden değerlendirme {(BUGUN + timedelta(days=3)).isoformat()}" in s, s)
+      and f"yeniden değerlendirme {(BUGUN + timedelta(days=7)).isoformat()}" in s, s)
 check("S) Uzatmada uygulamanın gösterdiği gün 13", "'Gün 13' görünür" in s, s)
 check("S) 1. denemede 'Deneme:' satırı yok", "Deneme:" not in s, s)
 r = degerlendir(b18, kendi_donuyor=True, yatir_cik=True)
@@ -196,7 +204,7 @@ check("D) Uzatmada erken yeniden değerlendirme serbest → mezun",
 r = degerlendir(b13, kendi_donuyor=True, yatir_cik=True)
 db.expire_all()
 check("M) 13. gün mezun: yanıt tarihsiz", r.status_code == 200 and r.json() == {
-    "sonuc": "mezun", "yeniden_degerlendirme_tarihi": None}, r.text[:200])
+    "sonuc": "mezun", "yeniden_degerlendirme_tarihi": None, "devam_turu": None}, r.text[:200])
 check("M) training_completed_at = bugün", db.get(Baby, b13.id).training_completed_at == BUGUN)
 a = adaptasyon(b13)
 check("M) durum tamamlandi", a.get("egitim_durumu") == "tamamlandi", a.get("egitim_durumu"))
@@ -227,7 +235,8 @@ r = degerlendir(b14, kendi_donuyor=True, yatir_cik=False, uzun_aglama=True)
 db.expire_all()
 b14 = db.get(Baby, b14.id)
 check("Y) sonuc yeniden_basla, tarih null", r.status_code == 200 and r.json() == {
-    "sonuc": "yeniden_basla", "yeniden_degerlendirme_tarihi": None}, r.text[:200])
+    "sonuc": "yeniden_basla", "yeniden_degerlendirme_tarihi": None, "devam_turu": None},
+      r.text[:200])
 check("Y) Eğitim YARIN başlar; completed ve aşama boş",
       b14.training_started_at == BUGUN + timedelta(days=1)
       and b14.training_completed_at is None and b14.mevcut_asama is None,
@@ -266,16 +275,113 @@ check("Y) 2. denemenin 13. günü → degerlendirme_bekliyor (1. denemenin satı
       and ed.son_degerlendirme(db, b14, g13) is None)
 
 # =============================================================================
+# U — devam türleri ve uzatmada gece beklemesi (danışman, 2026-11-01)
+# =============================================================================
+for (k, y, u), bek in {(True, False, False): "yatir_cik", (False, True, None): "gece_bekleme",
+                       (False, False, False): "ikisi", (True, True, None): None,
+                       (True, False, True): None, (False, False, True): None}.items():
+    check(f"U) devam_turu kendi={k} yatir_cik={y} uzun={u} → {bek}",
+          ed.devam_turu(k, y, u) == bek, ed.devam_turu(k, y, u))
+check("U) YENIDEN_DEGERLENDIRME_GUN = 7", ed.YENIDEN_DEGERLENDIRME_GUN == 7)
+G13 = yontem_kart.gece_ilk_bekleme_dk(13)
+ADIM = int(yontem.deger("gece_uyanma.gunluk_artis_standart_dk"))
+check("U) Geçici sabitler türetmeye uyuyor: artış = günlük adım (5), üst = 13. gün (65) + 30 = 95",
+      (ed.GECE_ARTIS_DK, ed.GECE_UST_SINIR_DK, G13) == (ADIM, G13 + 30, 65),
+      (ed.GECE_ARTIS_DK, ed.GECE_UST_SINIR_DK, G13, ADIM))
+_seri = [ed.uzatma_gece_ilk_dk(65, n, 13) for n in range(13, 22)]
+check("U) uzatma_gece_ilk_dk: başlangıç gecesi taban, her gece +5, 95'te durur",
+      _seri == [65, 70, 75, 80, 85, 90, 95, 95, 95], _seri)
+check("U) artis_bas yoksa sabit taban", ed.uzatma_gece_ilk_dk(65, 30, None) == 65)
+
+
+def ilk_bekleme(k_) -> float | None:
+    """Kural sözlüğünden bu gecenin ilk beklemesi: gece_bekleme = {ilk, ilk+1, …} ∪
+    {önceki gecenin ilki}; ardılı kümede olan en küçük değer."""
+    kume = (k_ or {}).get("gece_bekleme") or set()
+    return min((x for x in kume if x + 1 in kume), default=None)
+
+
+def blok(b, gun):
+    bb = db.get(Baby, b.id)
+    d_ = sor_baglam.gun_durumu(db, bb, an(gun, "22:00"))
+    return d_, sor_kural.kurallar(d_, bb, soru="Gece uyandı, ne kadar bekleyeyim?")
+
+
+tur_bebekleri = {}
+for govde, tur in (({"kendi_donuyor": True, "yatir_cik": False, "uzun_aglama": False}, "yatir_cik"),
+                   ({"kendi_donuyor": False, "yatir_cik": True}, "gece_bekleme"),
+                   ({"kendi_donuyor": False, "yatir_cik": False, "uzun_aglama": False}, "ikisi")):
+    bt = bebek(13)
+    r = degerlendir(bt, **govde)
+    db.expire_all()
+    st = db.query(EgitimDegerlendirme).filter_by(baby_id=bt.id).one()
+    check(f"U) {tur}: yanıtta ve satırda devam_turu, tarih +7",
+          r.status_code == 200 and r.json()["sonuc"] == "devam" and r.json()["devam_turu"] == tur
+          and st.devam_turu == tur and st.yeniden_degerlendirme_tarihi == BUGUN + timedelta(days=7),
+          r.text[:200])
+    tur_bebekleri[tur] = bt
+
+for tur, bt in tur_bebekleri.items():
+    gunluk = []
+    for ek in (1, 2, 3, 6, 7, 9):                       # 14., 15., 16., 19., 20., 22. gece
+        d_, k_ = blok(bt, BUGUN + timedelta(days=ek))
+        gunluk.append((d_["durum"], ilk_bekleme(k_)))
+    bek = [65] * 6 if tur == "yatir_cik" else [70, 75, 80, 95, 95, 95]
+    check(f"U) {tur}: kural bloğu gece ilk bekleme 14/15/16/19/20/22. gece = {bek}",
+          [x[1] for x in gunluk] == bek and all(x[0] == "uzatma" for x in gunluk), gunluk)
+
+bt = tur_bebekleri["gece_bekleme"]
+d_, k_ = blok(bt, BUGUN + timedelta(days=2))            # 15. gece → 75
+check("U) Kural bloğu: 'önce dışarıda 75 dk bekle' + artış/üst sınır formülü",
+      k_ and "önce dışarıda 75 dk bekle" in k_["blok"] and "en fazla 95 dk" in k_["blok"],
+      (k_ or {}).get("blok", "")[:1500])
+check("U) Doğrulama kümesi bu gece (75, 76) + önceki gece (70); 65 yok",
+      k_ and {75.0, 76.0, 70.0} <= k_["gece_bekleme"] and 65.0 not in k_["gece_bekleme"],
+      sorted((k_ or {}).get("gece_bekleme") or []))
+YANLIS = "Bu gece uyandığında önce dışarıda 65 dakika bekleyin."
+_duz = sor_kural.duzelt(YANLIS, k_) if k_ else ""
+check("U) Doğrulama 65'i ihlal sayar, duzelt bu gecenin değerini (75) yazar",
+      k_ and sor_kural.dogrula(YANLIS, k_) and "75 dakika" in _duz and "65" not in _duz, _duz)
+s = sor_baglam.zaman_satirlari(db, db.get(Baby, bt.id), simdi=an(BUGUN + timedelta(days=2), "22:00"))
+check("S) Bağlam: 'Devam: gece bekleme süresi artırılıyor, bu gece ilk bekleme 75 dk'",
+      "Devam: gece bekleme süresi artırılıyor, bu gece ilk bekleme 75 dk" in s
+      and "devam türü: gece bekleme süresi artırılıyor" in s, s)
+s = sor_baglam.zaman_satirlari(db, db.get(Baby, tur_bebekleri["yatir_cik"].id),
+                               simdi=an(BUGUN + timedelta(days=2), "22:00"))
+check("S) yatir_cik türünde bağlam: gece beklemesi sabit",
+      "gece beklemesi 13. günün değerinde sabit" in s, s)
+
+db.get(User, bt.user_id).app_version = "1.0.0+99"          # gece kartı build >= 28
+db.commit()
+with saat_sabitle(an(BUGUN + timedelta(days=2), "22:00")):
+    _c = (client.get(f"/api/v1/plans/today?baby_id={bt.id}", headers=H)
+          .json().get("content") or {}).get("night_wake_protocol") or {}
+_adim = " ".join(a.get("metin", "") for a in _c.get("adimlar") or [])
+check("U) Gece kartı Sor ile aynı: 15. gece 'dışarıda 75 dakika' (gerçek gün değil)",
+      "dışarıda 75 dakika" in _adim, (_c.get("baslik"), _adim[:300]))
+
+with saat_sabitle(an(BUGUN + timedelta(days=7))):
+    r = degerlendir(bt, kendi_donuyor=False, yatir_cik=False, uzun_aglama=False)
+check("U) 7 gün sonra yeniden değerlendirme 200 (ikisi)",
+      r.status_code == 200 and r.json()["devam_turu"] == "ikisi", r.text[:200])
+d_, k_ = blok(bt, BUGUN + timedelta(days=8))
+check("U) İkinci 'devam'da artış sıfırlanmaz (21. gece 95, başlangıç 13. gece)",
+      ilk_bekleme(k_) == 95 and d_["gece_artis_bas"] == 13,
+      (d_.get("gece_artis_bas"), ilk_bekleme(k_)))
+
+# =============================================================================
 # K — şema ve KVKK
 # =============================================================================
 uz = EgitimDegerlendirme.__table__.c.sonuc.type.length
 check("K) sonuc sütunu tüm değerleri alır", all(len(x) <= uz for x in ed.SONUCLAR), uz)
+check("K) devam_turu sütunu tüm değerleri alır",
+      all(len(x) <= EgitimDegerlendirme.__table__.c.devam_turu.type.length for x in ed.DEVAM_TURLERI))
 check("K) mevcut_asama sütunu babies ile aynı uzunlukta",
       EgitimDegerlendirme.__table__.c.mevcut_asama.type.length
       >= Baby.__table__.c.mevcut_asama.type.length)
 dokum = kvkk.disa_aktar(db, db.get(User, b14.user_id))
-check("K) KVKK dökümünde egitim_degerlendirmeleri (4 satır)",
-      len(dokum.get("egitim_degerlendirmeleri") or []) == 4,
+check("K) KVKK dökümünde egitim_degerlendirmeleri (8 satır)",
+      len(dokum.get("egitim_degerlendirmeleri") or []) == 8,
       len(dokum.get("egitim_degerlendirmeleri") or []))
 check("K) Canlı LLM çağrısı yok", canli_cagri_sayisi() == 0, canli_cagri_sayisi())
 

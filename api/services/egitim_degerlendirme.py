@@ -11,7 +11,13 @@ sonuç üretir:
   devam          program uzar: aşama yatır-çık (mevcut_asama boşaltılır →
                  programın son aşaması), sayılar 13. günün değerlerinde
                  (sor_kural.uzatma_asamasi); YENIDEN_DEGERLENDIRME_GUN sonra
-                 yeniden sorulur
+                 yeniden sorulur. devam_turu (DEVAM_TURU_TABLOSU):
+                   yatir_cik     gece kendi dönüyor, yatır-çık yok
+                   gece_bekleme  yatır-çık var, gece kendi dönmüyor
+                   ikisi         ikisi de yok
+                 gece_bekleme/ikisi'de gece ilk bekleme uzatmanın her gecesi
+                 GECE_ARTIS_DK artar, GECE_UST_SINIR_DK'da durur
+                 (uzatma_gece_ilk_dk); diğer sayılar 13. gün değerinde.
 
 egitim_durumu (mobile giden plan yanıtında, adaptation içinde):
   "devam"                  gün < program uzunluğu
@@ -36,7 +42,14 @@ from api.services import plan_adapter
 from api.zaman import bugun_tr
 
 PROGRAM_GUN = 13                       # plan_secimi.gunler yoksa
-YENIDEN_DEGERLENDIRME_GUN = 3          # "devam" sonrası kaç gün sonra yeniden sorulur
+YENIDEN_DEGERLENDIRME_GUN = 7          # "devam" sonrası kaç gün sonra yeniden sorulur
+
+# Uzatmada gece ilk bekleme (gece_bekleme / ikisi). DANIŞMANDAN BEKLENİYOR — şimdilik:
+#   GECE_ARTIS_DK     programın kendi günlük adımı (gece_uyanma.gunluk_artis_standart_dk = 5)
+#   GECE_UST_SINIR_DK 13. gecenin değeri (5 + 5×12 = 65) + 30
+# Yöntem tablosu değişirse bunlar KENDİLİĞİNDEN değişmez (test uyarır).
+GECE_ARTIS_DK = 5
+GECE_UST_SINIR_DK = 95
 
 MEZUN, DEVAM, YENIDEN_BASLA = "mezun", "devam", "yeniden_basla"
 SONUCLAR = (MEZUN, DEVAM, YENIDEN_BASLA)
@@ -54,6 +67,16 @@ KARAR_TABLOSU: tuple[tuple[dict[str, bool], str], ...] = (
 )
 VARSAYILAN_KARAR = DEVAM
 
+DT_YATIR_CIK, DT_GECE, DT_IKISI = "yatir_cik", "gece_bekleme", "ikisi"
+DEVAM_TURLERI = (DT_YATIR_CIK, DT_GECE, DT_IKISI)
+GECE_ARTAN_TURLER = (DT_GECE, DT_IKISI)
+# "devam" kararında tür: (kendi_donuyor, yatir_cik) → tür. (True, True) mezundur.
+DEVAM_TURU_TABLOSU: dict[tuple[bool, bool], str] = {
+    (True, False): DT_YATIR_CIK,
+    (False, True): DT_GECE,
+    (False, False): DT_IKISI,
+}
+
 
 def karar(kendi_donuyor: bool, yatir_cik: bool, uzun_aglama: bool | None) -> str:
     cevap = {"kendi_donuyor": kendi_donuyor, "yatir_cik": yatir_cik,
@@ -62,6 +85,13 @@ def karar(kendi_donuyor: bool, yatir_cik: bool, uzun_aglama: bool | None) -> str
         if all(cevap[k] is v for k, v in kosul.items()):
             return sonuc
     return VARSAYILAN_KARAR
+
+
+def devam_turu(kendi_donuyor: bool, yatir_cik: bool, uzun_aglama: bool | None) -> str | None:
+    """Karar "devam" ise türü, değilse None."""
+    if karar(kendi_donuyor, yatir_cik, uzun_aglama) != DEVAM:
+        return None
+    return DEVAM_TURU_TABLOSU.get((bool(kendi_donuyor), bool(yatir_cik)), DT_IKISI)
 
 
 def cevap_hatasi(yatir_cik: bool, uzun_aglama: bool | None) -> str | None:
@@ -124,6 +154,34 @@ def durum(db: Session, baby: Baby, gun: date, toplam: int = PROGRAM_GUN) -> str 
     return D_BEKLIYOR if tarih is not None and gun >= tarih else D_UZATMA
 
 
+def gece_artis_baslangici(db: Session, baby: Baby, gun: date) -> int | None:
+    """Uzatmada gece ilk beklemesinin artmaya başladığı gece (eğitim günü) ya da None.
+
+    Yalnız bu denemenin EN SON değerlendirmesi gece artan türde "devam" ise; başlangıç
+    o türdeki İLK "devam"ın günü — yeniden değerlendirmede yine gece türü çıkarsa
+    artış sıfırlanmaz (bekleme önceki geceden az olamaz)."""
+    son = son_degerlendirme(db, baby, gun)
+    if son is None or son.sonuc != DEVAM or son.devam_turu not in GECE_ARTAN_TURLER:
+        return None
+    ilk = (db.query(EgitimDegerlendirme)
+           .filter(EgitimDegerlendirme.baby_id == baby.id,
+                   EgitimDegerlendirme.egitim_baslangic == baby.training_started_at,
+                   EgitimDegerlendirme.gun <= gun, EgitimDegerlendirme.sonuc == DEVAM,
+                   EgitimDegerlendirme.devam_turu.in_(GECE_ARTAN_TURLER))
+           .order_by(EgitimDegerlendirme.created_at).first())
+    return ilk.egitim_gunu if ilk is not None else None
+
+
+def uzatma_gece_ilk_dk(taban: int, gece_no: int, artis_bas: int | None) -> int:
+    """Uzatmada bu gecenin ilk beklemesi. `taban`: kural gününün (13) değeri.
+    artis_bas None → taban (sabit). Aksi hâlde artis_bas gecesinden sonraki her
+    gece +GECE_ARTIS_DK, en fazla GECE_UST_SINIR_DK (taban daha büyükse taban)."""
+    if artis_bas is None:
+        return taban
+    return min(taban + GECE_ARTIS_DK * max(0, int(gece_no) - int(artis_bas)),
+               max(taban, GECE_UST_SINIR_DK))
+
+
 def gun_alanlari(db: Session, baby: Baby, gun: date, toplam: int = PROGRAM_GUN) -> dict:
     """{egitim_gunu (eski sürümler için sabitlenmiş), egitim_gunu_gercek, egitim_durumu}."""
     gercek = plan_adapter.egitim_gunu(baby.training_started_at, gun)
@@ -180,6 +238,7 @@ def degerlendir(db: Session, user: User, baby: Baby, kendi_donuyor: bool,
 
     sonuc = karar(kendi_donuyor, yatir_cik, uzun_aglama)
     satir = EgitimDegerlendirme(
+        devam_turu=devam_turu(kendi_donuyor, yatir_cik, uzun_aglama),
         user_id=user.id, baby_id=baby.id, gun=bugun, deneme_no=deneme_no(db, baby),
         egitim_baslangic=baby.training_started_at,
         egitim_gunu=plan_adapter.egitim_gunu(baby.training_started_at, bugun),
@@ -205,6 +264,9 @@ def degerlendir(db: Session, user: User, baby: Baby, kendi_donuyor: bool,
 
 # --- Sor bağlamı ---------------------------------------------------------------
 _SONUC_AD = {MEZUN: "mezun", DEVAM: "devam", YENIDEN_BASLA: "yeniden başla"}
+_TUR_AD = {DT_YATIR_CIK: "yatır-çık çalışılıyor",
+           DT_GECE: "gece bekleme süresi artırılıyor",
+           DT_IKISI: "yatır-çık çalışılıyor ve gece bekleme süresi artırılıyor"}
 
 
 def baglam_satirlari(db: Session, baby: Baby, gun: date,
@@ -231,6 +293,8 @@ def baglam_satirlari(db: Session, baby: Baby, gun: date,
                          else "30 dk üzeri ağlama yok")
         metin = (f"{PROGRAM_GUN}. gün değerlendirmesi ({son.gun.isoformat()}, "
                  f"{son.deneme_no}. denemenin {son.egitim_gunu}. günü): " + ", ".join(parca))
+        if son.sonuc == DEVAM and son.devam_turu:
+            metin += f"; devam türü: {_TUR_AD.get(son.devam_turu, son.devam_turu)}"
         if son.sonuc == DEVAM and son.yeniden_degerlendirme_tarihi:
             metin += f"; yeniden değerlendirme {son.yeniden_degerlendirme_tarihi.isoformat()}"
         elif son.sonuc == YENIDEN_BASLA and son.yeni_baslangic:

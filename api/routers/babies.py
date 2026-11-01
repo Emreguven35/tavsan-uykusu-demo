@@ -261,7 +261,8 @@ def egitim_degerlendir(baby_id: uuid.UUID, req: EgitimDegerlendirmeReq,
             "detail": "Eğitim şu an değerlendirilemez.",
             "hata": "DEGERLENDIRME_ZAMANI_DEGIL", "egitim_durumu": e.egitim_durumu})
     db.commit()
-    logger.info("Eğitim değerlendirmesi: baby=%s deneme=%s gün=%s sonuc=%s",
-                baby.id, satir.deneme_no, satir.egitim_gunu, satir.sonuc)
+    logger.info("Eğitim değerlendirmesi: baby=%s deneme=%s gün=%s sonuc=%s tur=%s",
+                baby.id, satir.deneme_no, satir.egitim_gunu, satir.sonuc, satir.devam_turu)
     return EgitimDegerlendirmeResp(
-        sonuc=satir.sonuc, yeniden_degerlendirme_tarihi=satir.yeniden_degerlendirme_tarihi)
+        sonuc=satir.sonuc, yeniden_degerlendirme_tarihi=satir.yeniden_degerlendirme_tarihi,
+        devam_turu=satir.devam_turu)

@@ -413,6 +413,18 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
         icerde = yontem.deger("gece_uyanma.icerde_temas_kapi")
     # Bu gecenin ilk beklemesi (1. gece 5, her gece +5) ve gece içi artış (+1)
     gece_ilk = yontem_kart.gece_ilk_bekleme_dk(g) if yeni else None
+    gece_onceki = yontem_kart.gece_ilk_bekleme_dk(g - 1) if yeni else None
+    gece_formul = (f"1. gece {yontem_kart.gece_ilk_bekleme_dk(1)} dk, her gece +{artis_std} dk"
+                   if yeni else "")
+    if yeni and uzatma:
+        # 13. gün değerlendirmesi (2026-11-01): uzatmada taban kural gününün değeri;
+        # devam türü gece_bekleme/ikisi ise her gece artar, üst sınırda durur.
+        from api.services import egitim_degerlendirme as _ed
+        gece_ilk = sor_baglam.uzatma_gece_ilk(d, gercek_gece)
+        gece_onceki = sor_baglam.uzatma_gece_ilk(d, gercek_gece - 1)
+        gece_formul = (f"program uzatıldı; uzatmada her gece +{_ed.GECE_ARTIS_DK} dk, en fazla "
+                       f"{_ed.GECE_UST_SINIR_DK} dk" if d.get("gece_artis_bas") is not None else
+                       f"program uzatıldı; {g}. günün değeri, artmaz")
     gece_ici = yontem_kart.gece_ici_artis_dk() if yeni else None
     destek_gecesi = yontem_kart.destek_gecesi_mi(g) if yeni else True
     icerde_sayili = asama["kod"] == "yatir_cik"                 # "on saniye – bir dakika"
@@ -534,8 +546,7 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
          f"uyumazsa {gece_diger}. Destekle uyutma yalnız destek gecesinde (ilk gece); anneye "
          f"'destek verip uyutun' DEME. Yumuşatma ve suçlama yok."),
         (f"- GECE UYANMASI (bebek uyuduktan sonra gece uyanırsa; yatışta değil): önce dışarıda "
-         f"{gece_ilk} dk bekle ({gece_etiket}: 1. gece "
-         f"{yontem_kart.gece_ilk_bekleme_dk(1)} dk, her gece +{artis_std} dk); aynı gece her yeni "
+         f"{gece_ilk} dk bekle ({gece_etiket}: {gece_formul}); aynı gece her yeni "
          f"uyanmada bir öncekinden +{gece_ici} dk (ör. {gece_ilk} → {gece_ilk + gece_ici} → "
          f"{gece_ilk + 2 * gece_ici}). Sonra içeri gir ve {akis['3_deneme_dk']} dk dene; uyumazsa odada "
          f"{akis['4_rutin_dk']} dk rutin (beslenme yok); "
@@ -703,7 +714,7 @@ def kurallar(d: dict, baby: Any, soru: str | None = None,
             "geri_dalis": float(geri_dalis), "yatis": yatis, "uyku_baslari": uyku_baslari,
             "yeni": yeni, "destek_gecesi": destek_gecesi,
             "gece_bekleme": ({float(gece_ilk + k * gece_ici) for k in range(0, 5)}   # en çok 5 uyanma
-                             | {float(yontem_kart.gece_ilk_bekleme_dk(g - 1))} if yeni else set()),
+                             | {float(gece_onceki)} if yeni else set()),
             "db_aralik": (float(db["en_az"]), float(db["en_fazla"])) if yeni else None,
             "saat_araliklari": {a: tuple(float(x) for x in (bant or {}).get(a))
                                 for a in ("uyaniklik_penceresi_dk", "gece_uykusu_dk",

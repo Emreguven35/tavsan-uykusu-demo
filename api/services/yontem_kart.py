@@ -113,7 +113,8 @@ _ICERIDE = {
 }
 
 
-def gece_adimlari(asama_kod: str | None, gece_no: int | None = None) -> list[dict]:
+def gece_adimlari(asama_kod: str | None, gece_no: int | None = None,
+                  ilk_dk: int | None = None) -> list[dict]:
     """İlayda'nın gece akışı (gece_uyanma.akis, protokol_karti, seans.uc_tekrar_sonrasi).
     Dış bekleme o gecenin sayısıyla; son adım destek gecesi / diğer geceler ayrı."""
     akis = yontem.deger("gece_uyanma.akis")
@@ -122,7 +123,7 @@ def gece_adimlari(asama_kod: str | None, gece_no: int | None = None) -> list[dic
     sonrasi = yontem.deger("seans.uc_tekrar_sonrasi")
     gece_sonrasi = sonrasi["gece"]
     if gece_no:
-        ilk = gece_ilk_bekleme_dk(gece_no)
+        ilk = ilk_dk if ilk_dk is not None else gece_ilk_bekleme_dk(gece_no)
         dis = (f"Önce odaya girmeden dışarıda {ilk} dakika bekleyin; aynı gece yeniden uyanırsa "
                f"her seferinde {gece_ici_artis_dk()} dakika daha uzun bekleyin.")
     else:
@@ -149,11 +150,13 @@ def gece_adimlari(asama_kod: str | None, gece_no: int | None = None) -> list[dic
     return adimlar
 
 
-def gece_karti(protokol: dict, asama_: dict | None) -> dict:
-    """Saklanan karta baslik + adimlar ekle; diğer alanlar AYNEN kalır."""
+def gece_karti(protokol: dict, asama_: dict | None, ilk_dk: int | None = None) -> dict:
+    """Saklanan karta baslik + adimlar ekle; diğer alanlar AYNEN kalır. `ilk_dk`:
+    uzatmada ilk dış bekleme (sor_baglam.uzatma_gece_ilk) — verilmezse gece numarasından."""
     kart = dict(protokol)
     kart["baslik"] = "GECE UYANIRSA" + (f" · {asama_['ad']}" if asama_ else "")
-    kart["adimlar"] = gece_adimlari((asama_ or {}).get("kod"), (asama_ or {}).get("egitim_gunu"))
+    kart["adimlar"] = gece_adimlari((asama_ or {}).get("kod"), (asama_ or {}).get("egitim_gunu"),
+                                    ilk_dk)
     return kart
 
 
@@ -416,13 +419,15 @@ def kisa_gunduz_plan_duzelt(content: dict, baby: Any) -> tuple[dict, list[tuple[
 
 
 def plan_icerigi_isle(content: dict | None, user: Any, baby: Any, gun: date,
-                      gece_gunu: int | None = None) -> dict | None:
+                      gece_gunu: int | None = None,
+                      gece_ilk_dk: int | None = None) -> dict | None:
     """_plan_yaniti'nda okuma anında çağrılır (bayrak açıkken). Önce kısa gündüz
     cümlesi düzelir; sonra kart (yoksa içerik o hâliyle döner). Build < 28 /
     bilinmiyor → kart çıkarılır.
 
     `gece_gunu`: gecesi sayılan eğitim günü (sor_baglam.gece_sayilan_gun — Sor ile
-    aynı hesap; 02:30 → önceki akşamın gecesi). Verilmezse takvim günü `gun`."""
+    aynı hesap; 02:30 → önceki akşamın gecesi). Verilmezse takvim günü `gun`.
+    `gece_ilk_dk`: uzatmada ilk dış bekleme (gece_gunu o zaman kural günüdür)."""
     if content:
         content, _ = kisa_gunduz_plan_duzelt(content, baby)
     if not content or "night_wake_protocol" not in content:
@@ -440,7 +445,7 @@ def plan_icerigi_isle(content: dict | None, user: Any, baby: Any, gun: date,
     else:
         a = asama(getattr(baby, "training_started_at", None),
                   getattr(baby, "training_completed_at", None), gun) if baby is not None else None
-    c["night_wake_protocol"] = gece_karti(c["night_wake_protocol"], a)
+    c["night_wake_protocol"] = gece_karti(c["night_wake_protocol"], a, gece_ilk_dk)
     return c
 
 
