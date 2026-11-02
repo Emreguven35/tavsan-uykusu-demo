@@ -868,6 +868,8 @@ def _oturum(k: dict, sinif: str, satirlar: dict) -> TimelineOturum:
                             or any(r.kapanis_kaynagi in _TAHMINI_BITIS
                                    or _OTOMATIK_NOT in (r.notes or "") for r in ham)),
         parcalar=[uuid.UUID(p) for p in parcalar] if len(parcalar) > 1 else [],
+        bitis_bilinmiyor=bool(k.get("_bitis_bilinmiyor")),
+        sayima_girmez=bool(devam or k.get("_asiri_uzun") or k.get("_bitis_bilinmiyor")),
     )
 
 
@@ -890,7 +892,10 @@ def timeline(
     `gece_dk + gunduz_dk` = weekly-summary `sleep_hours × 60` (24 sa kırpması
     hariç). Açık kayıt: bitis=null, devam=true, süresi toplama girmez.
     Sunucunun kapattığı kayıt (K16.1/bakım): bitiş bilinmiyor — sure_dk=null,
-    otomatik_kapatildi=true, toplamlara ve sabah uyanışına girmez."""
+    otomatik_kapatildi=true, bitis_bilinmiyor=true, toplamlara ve sabah uyanışına
+    girmez. `sayima_girmez=true` olan oturum hiçbir istatistiğe girmez (devam,
+    asiri_uzun ya da bitis_bilinmiyor). Gece uyanması ait olduğu gecenin gününe
+    yazılır (19:00 sonrası → ertesi gün)."""
     baby = get_owned_baby(baby_id, db, user)
     today = bugun_tr()
     start = today - timedelta(days=days - 1)

@@ -932,12 +932,21 @@ def gun_kayitlari(logs: Iterable[Any], gun: date, hedef_minute: int,
 
         # --- K12.1 — UYANMA KAYITLARI: asla uyku değildir --------------------
         if tip in ("wake", "night_wake"):
+            if tip == "night_wake":
+                # 2026-11-02 — gece uyanması AİT OLDUĞU GECENİN gününe yazılır
+                # (gece uykusu gibi: bittiği gün). 19:00 ve sonrası uyanma o
+                # akşam başlayan gecenindir → ertesi gün; eksen o günün
+                # dakikasıdır (negatif: dünün akşamı). Eskiden 23:30 uyanması
+                # 1 Kas'a, aynı gecenin uykusu 2 Kas'a düşüyordu. 06:00 öncesi
+                # `wake` zaten sabahın gününde — değişmedi.
+                k = gece_uyanmasi_gune_bagla(k)
+                if k["bas_gun"] != gun:
+                    continue
+                out["gece_uyanmalari"].append(k)
+                continue
             if k["bas_gun"] != gun:
                 continue
-            if tip == "night_wake":
-                out["gece_uyanmalari"].append(k)
-            else:
-                wake_adaylari.append(k)     # K19.4 — döngüden SONRA çözülür
+            wake_adaylari.append(k)         # K19.4 — döngüden SONRA çözülür
             continue
 
         if tip == "feed":
@@ -1328,6 +1337,22 @@ def _parcalari_birlestir(kayitlar: list[dict], out: dict,
         if k.get("_parcalar"):
             out["birlesen"].append([i for i in k["_parcalar"] if i])
     return out_list
+
+
+def gece_uyanmasi_gune_bagla(k: dict) -> dict:
+    """`night_wake` kaydını ait olduğu gecenin gününe taşı.
+
+    19:00 (GUNDUZ_PENCERE_BIT) ve sonrası başlayan uyanma, o akşam başlayan
+    gece uykusunun parçasıdır; gece uykusu BİTTİĞİ güne bağlandığı için uyanma
+    da ertesi güne yazılır. Dakikalar yeni günün eksenine çekilir (−1440), böylece
+    `_tr_an(bas_gun, bas_dk)` aynı anı verir ve sabahki uyanmalardan önce sıralanır.
+    Diğer saatler aynen kalır (06:00 öncesi zaten sabahın günü)."""
+    if k.get("bas_dk") is None or k["bas_dk"] < GUNDUZ_PENCERE_BIT:
+        return k
+    return dict(k, bas_gun=k["bas_gun"] + timedelta(days=1),
+                bas_dk=k["bas_dk"] - 1440,
+                bit_dk_lin=(None if k.get("bit_dk_lin") is None
+                            else k["bit_dk_lin"] - 1440))
 
 
 def gece_uyanma_suresi(k: dict) -> int:

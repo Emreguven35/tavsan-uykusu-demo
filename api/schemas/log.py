@@ -167,6 +167,14 @@ class TimelineOturum(BaseModel):
     # gösterilmez (sure_dk=null) ve gece_dk'ya girmez.
     asiri_uzun: bool = False
     parcalar: list[uuid.UUID] = []
+    # 2026-11-02 (paylaşım kartı denetimi) — YENİ alanlar, eskiler aynen duruyor.
+    # bitis_bilinmiyor: sunucunun kapattığı kayıt (kapanis_kaynagi k16_1/bakim);
+    #   `bitis` dolu ama bir TAHMİNDİR — sure_dk=null, gece_dk/gunduz_dk'ya girmez.
+    # sayima_girmez: oturum hiçbir istatistiğe (toplam, en uzun, adet) GİRMEZ —
+    #   devam | asiri_uzun | bitis_bilinmiyor. Mobil süreyi bitiş−başlangıçtan
+    #   kendisi hesaplamamalı; bu bayrakla oturumu sayıdan düşmeli.
+    bitis_bilinmiyor: bool = False
+    sayima_girmez: bool = False
 
 
 class TimelineSabah(BaseModel):

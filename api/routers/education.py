@@ -34,14 +34,8 @@ def _bebek(db: Session, user: User, baby_id: uuid.UUID | None) -> Baby | None:
     baby_id verilmezse kullanıcının EN YENİ bebeği kullanılır: eğitim sekmesi
     bebek seçtirmiyor ve tek bebekli hesapların ezici çoğunluğunda doğru cevap
     budur. Bebeği olmayan kullanıcıda aşama "eğitim öncesi" olur."""
-    q = db.query(Baby).filter(Baby.user_id == user.id)
-    if baby_id is not None:
-        bebek = q.filter(Baby.id == baby_id).one_or_none()
-        if bebek is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                                detail="Bebek bulunamadı")
-        return bebek
-    return q.order_by(Baby.created_at.desc()).first()
+    from api.deps import aktif_bebek
+    return aktif_bebek(baby_id, db, user)
 
 
 @router.get("/videos", response_model=EgitimVideolariResp)

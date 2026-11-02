@@ -136,6 +136,18 @@ def get_owned_baby(baby_id, db: Session, user: User):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Bebek bulunamadı")
     return baby
+
+
+def aktif_bebek(baby_id, db: Session, user: User):
+    """baby_id verilmişse sahiplik kontrollü o bebek (yoksa/başkasınınsa 404);
+    verilmemişse kullanıcının AKTİF bebeği = EN YENİ bebeği (created_at azalan).
+    Bebeği hiç yoksa None — çağıran karar verir. Tek kural: eğitim videoları ve
+    paylaşım kartları aynı bebeği seçer."""
+    from api.models import Baby            # döngüsel import önleme
+    if baby_id is not None:
+        return get_owned_baby(baby_id, db, user)
+    return (db.query(Baby).filter(Baby.user_id == user.id)
+            .order_by(Baby.created_at.desc(), Baby.id.desc()).first())
 # --- Premium kapısı (Faz V) --------------------------------------------------
 # Mobil BETA_MODE'da herkesi premium sayıyor, sunucuda ise premium kararı YALNIZ
 # GET /subscriptions/status içinde gömülüydü ve hiçbir uç onu ZORLAMIYORDU.
