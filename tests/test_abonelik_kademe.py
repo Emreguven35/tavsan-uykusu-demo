@@ -208,7 +208,7 @@ finally:
 a = client.get("/api/v1/abonelik/durum", headers=HU).json()
 check("A1) Ücretsiz: durum, deneme hakkı var, sor_kalan 0, deneme alanları null",
       a == {"durum": "ucretsiz", "deneme_gunu": None, "deneme_bitis": None,
-            "deneme_hakki_var": True, "sor_kalan": 0}, a)
+            "deneme_hakki_var": True, "sor_kalan": 0, "will_renew": None, "bitis": None}, a)
 a = client.get("/api/v1/abonelik/durum", headers=HD).json()
 check("A2) Deneme: deneme_gunu 1, bitiş dolu, hak yok, sor_kalan 10",
       a["durum"] == "deneme" and a["deneme_gunu"] == 1 and a["deneme_bitis"]
@@ -238,12 +238,101 @@ premium_svc.musteri_cek = lambda uid: {"subscriber": {"subscriptions": {URUN: {
 a = client.post("/api/v1/abonelik/senkron", headers=HY).json()
 check("A6) /abonelik/senkron RevenueCat'ten çekip deneme yazdı, aynı cevap şekli",
       a.get("durum") == "deneme" and a.get("deneme_gunu") == 1
-      and set(a) == {"durum", "deneme_gunu", "deneme_bitis", "deneme_hakki_var", "sor_kalan"}, a)
+      and set(a) == {"durum", "deneme_gunu", "deneme_bitis", "deneme_hakki_var", "sor_kalan",
+                     "will_renew", "bitis"}, a)
 premium_svc.musteri_cek = _gercek_cek
 get_settings().revenuecat_api_key = ""
 r = client.post("/api/v1/abonelik/senkron", headers=HY)
 check("A7) Mağaza anahtarı yoksa senkron 503", r.status_code == 503, r.status_code)
 get_settings().revenuecat_api_key = "sk_test_sahte"
+
+# --- A8+ will_renew / bitis (2026-11-02) --------------------------------------
+def _ayni_an(iso, t):
+    if not iso:
+        return False
+    d = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    d = d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    return abs((d - t).total_seconds()) < 2
+
+
+get_settings().beta_haric_emails.update({"iptal@gercek.com", "ikisatir@gercek.com",
+                                         "odeme@gercek.com"})
+HC, UC = hesap("iptal@gercek.com")
+
+
+def olay_c(tur, period, gun, uid, urun=URUN):
+    return {"api_version": "1.0", "event": {
+        "id": str(uuid.uuid4()), "type": tur, "app_user_id": str(uid),
+        "product_id": urun, "entitlement_ids": ["premium"], "store": "APP_STORE",
+        "environment": "SANDBOX", "period_type": period, "purchased_at_ms": MS(SIMDI),
+        "expiration_at_ms": MS(SIMDI + timedelta(days=gun))}}
+
+
+client.post("/api/v1/webhooks/revenuecat", json=olay_c("INITIAL_PURCHASE", "TRIAL", 3, UC),
+            headers={"Authorization": SIR})
+a = client.get("/api/v1/abonelik/durum", headers=HC).json()
+check("A8) Deneme sürüyor: will_renew true, bitis = deneme sonu (deneme_bitis ile aynı an)",
+      a["durum"] == "deneme" and a["will_renew"] is True
+      and _ayni_an(a["bitis"], SIMDI + timedelta(days=3))
+      and _ayni_an(a["deneme_bitis"], SIMDI + timedelta(days=3)), a)
+client.post("/api/v1/webhooks/revenuecat", json=olay_c("CANCELLATION", "TRIAL", 3, UC),
+            headers={"Authorization": SIR})
+a = client.get("/api/v1/abonelik/durum", headers=HC).json()
+check("A9) Deneme iptal (CANCELLATION): will_renew false, bitis aynı, hâlâ deneme",
+      a["durum"] == "deneme" and a["will_renew"] is False
+      and _ayni_an(a["bitis"], SIMDI + timedelta(days=3)), a)
+client.post("/api/v1/webhooks/revenuecat", json=olay_c("UNCANCELLATION", "TRIAL", 3, UC),
+            headers={"Authorization": SIR})
+a = client.get("/api/v1/abonelik/durum", headers=HC).json()
+check("A10) UNCANCELLATION → will_renew yine true", a["will_renew"] is True, a)
+
+a = client.get("/api/v1/abonelik/durum", headers=HP).json()
+check("A11) Ücretli premium: will_renew satırdaki değer (null — eski satır), bitis dönem sonu",
+      a["durum"] == "premium" and a["will_renew"] is None
+      and _ayni_an(a["bitis"], SIMDI + timedelta(days=30)), a)
+a = client.get("/api/v1/abonelik/durum", headers=HH).json()
+check("A12) Yalnız manuel hak (mağaza satırı yok): will_renew ve bitis null",
+      a["durum"] == "premium" and a["will_renew"] is None and a["bitis"] is None, a)
+a = client.get("/api/v1/abonelik/durum", headers=HB).json()
+check("A13) Beta, mağaza satırı yok: null", a["will_renew"] is None and a["bitis"] is None, a)
+a = client.get("/api/v1/abonelik/durum", headers=HS0).json()
+check("A14) Bitişi boş (erişim vermeyen) satır: null",
+      a["will_renew"] is None and a["bitis"] is None, a)
+
+HI, UI = hesap("ikisatir@gercek.com")
+_db = SessionLocal()
+try:
+    _db.add(Subscription(user_id=UI, platform="ios", product_id=URUN, status="active",
+                         period_type="TRIAL", will_renew=True,
+                         expires_at=SIMDI + timedelta(days=40)))
+    _db.add(Subscription(user_id=UI, platform="ios", product_id="tavsan_premium_aylik_hemen",
+                         status="active", period_type="NORMAL", will_renew=False,
+                         expires_at=SIMDI + timedelta(days=20)))
+    _db.add(Subscription(user_id=UI, platform="ios", product_id="eski_urun", status="expired",
+                         period_type="NORMAL", will_renew=True,
+                         expires_at=SIMDI + timedelta(days=90)))
+    _db.commit()
+finally:
+    _db.close()
+a = client.get("/api/v1/abonelik/durum", headers=HI).json()
+check("A15) İki aktif satır: kararı veren ÜCRETLİ satır esas (deneme daha geç bitse de); "
+      "expired satır sayılmaz",
+      a["durum"] == "premium" and a["will_renew"] is False
+      and _ayni_an(a["bitis"], SIMDI + timedelta(days=20)), a)
+
+HO, UO = hesap("odeme@gercek.com")
+_g = SIMDI + timedelta(days=5)
+client.post("/api/v1/webhooks/revenuecat", json=olay_c("INITIAL_PURCHASE", "NORMAL", 1, UO),
+            headers={"Authorization": SIR})
+_e = olay_c("BILLING_ISSUE", "NORMAL", 1, UO)
+_e["event"]["grace_period_expiration_at_ms"] = MS(_g)
+client.post("/api/v1/webhooks/revenuecat", json=_e, headers={"Authorization": SIR})
+a = client.get("/api/v1/abonelik/durum", headers=HO).json()
+check("A16) Ödeme sorunu: bitis = ek süre sonu (erişimin bittiği an)",
+      a["durum"] == "premium" and _ayni_an(a["bitis"], _g), a)
+_d = client.get("/api/v1/subscriptions/status", headers=HC).json()
+check("A17) /subscriptions/status alan seti değişmedi (abonelik_bitis/bitis sızmadı)",
+      "abonelik_bitis" not in _d and "bitis" not in _d, sorted(_d))
 
 # =============================================================================
 # V — /subscriptions/verify

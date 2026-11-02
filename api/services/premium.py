@@ -186,8 +186,12 @@ def beta_haric_mi(user: User) -> bool:
 
 def durum(db: Session, user: User, simdi: datetime | None = None) -> dict:
     """{kademe, premium, source, expires_at, product_id, will_renew, period_type,
-    kurucu_uye, deneme_bitis}. kademe: ucretsiz | deneme | premium;
-    premium = (kademe == "premium"). source: beta | store | manual | kurucu | none."""
+    kurucu_uye, deneme_bitis, abonelik_bitis}. kademe: ucretsiz | deneme | premium;
+    premium = (kademe == "premium"). source: beta | store | manual | kurucu | none.
+    will_renew / period_type / product_id / abonelik_bitis: karar için seçilen
+    MAĞAZA satırından (ücretli önce, yoksa deneme; birden çoksa en geç biten);
+    mağaza satırı yoksa None. `expires_at` ise kaynağa göre değişir (manual /
+    kurucu onu kendi bitişiyle ezer) — abonelik_bitis ezilmez."""
     simdi = simdi or _simdi()
     ucretli = aktif_abonelik(db, user, simdi, deneme=False)
     deneme = aktif_abonelik(db, user, simdi, deneme=True)
@@ -195,12 +199,14 @@ def durum(db: Session, user: User, simdi: datetime | None = None) -> dict:
     kurucu = kurucu_uye_mi(user, db)
     sonuc = {"kademe": "ucretsiz", "premium": False, "source": "none",
              "expires_at": None, "product_id": None, "will_renew": None,
-             "period_type": None, "kurucu_uye": kurucu, "deneme_bitis": None}
+             "period_type": None, "kurucu_uye": kurucu, "deneme_bitis": None,
+             "abonelik_bitis": None}
     if abonelik is not None:                       # beta'da da ayrıntı görünsün
         sonuc.update(expires_at=_utc(abonelik.expires_at),
                      product_id=abonelik.product_id,
                      will_renew=abonelik.will_renew,
-                     period_type=abonelik.period_type)
+                     period_type=abonelik.period_type,
+                     abonelik_bitis=_utc(abonelik.expires_at))
     if get_settings().beta_mode and not beta_haric_mi(user):
         sonuc.update(kademe="premium", premium=True, source="beta")
         return sonuc

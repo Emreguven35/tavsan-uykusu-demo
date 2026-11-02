@@ -3,7 +3,8 @@ abonelik router — /api/v1/abonelik (premium abonelik, 2026-10-13)
 
 Mobilin beklediği sözleşme — alan adları AYNEN korunmalı:
 
-GET  /abonelik/durum   → {durum, deneme_gunu, deneme_bitis, deneme_hakki_var, sor_kalan}
+GET  /abonelik/durum   → {durum, deneme_gunu, deneme_bitis, deneme_hakki_var, sor_kalan,
+                          will_renew, bitis}   (son ikisi 2026-11-02 eki)
 POST /abonelik/senkron → RevenueCat REST'ten çek, kaydı güncelle, aynı cevabı dön.
 
 Karar services.premium.durum'dan (TEK kaynak): durum = kademe
@@ -31,7 +32,9 @@ def _durum_yaniti(db: Session, user: User) -> AbonelikDurumResp:
         deneme_gunu=premium_svc.deneme_gunu(user, d),
         deneme_bitis=d.get("deneme_bitis") if kademe == "deneme" else None,
         deneme_hakki_var=premium_svc.deneme_hakki_var(db, user),
-        sor_kalan=sor_hakki.kalan(db, user, kademe))
+        sor_kalan=sor_hakki.kalan(db, user, kademe),
+        will_renew=d.get("will_renew"),
+        bitis=d.get("abonelik_bitis"))
 
 
 @router.get("/durum", response_model=AbonelikDurumResp)

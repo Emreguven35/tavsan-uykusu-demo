@@ -70,9 +70,17 @@ class AbonelikDurumResp(BaseModel):
       deneme_hakki_var  hiç mağaza kaydı yok ve deneme kullanılmadı
       sor_kalan         bugün kalan Sor hakkı — deneme: 10 - kullanılan,
                         ücretsiz: 0, premium: null (sınırsız)
+      will_renew        erişim kararında kullanılan mağaza satırının otomatik
+                        yenileme bilgisi (False = iptal edildi, bitişe kadar
+                        erişim sürer); aktif mağaza aboneliği yoksa null
+      bitis             o satırın erişim bitişi (deneme ya da dönem sonu; ödeme
+                        sorununda ek süre sonu); aktif mağaza aboneliği yoksa null
+    (will_renew / bitis 2026-11-02 eki — mevcut alanlar değişmedi.)
     """
     durum: str
     deneme_gunu: int | None = None
     deneme_bitis: datetime | None = None
     deneme_hakki_var: bool
     sor_kalan: int | None = None
+    will_renew: bool | None = None
+    bitis: datetime | None = None
