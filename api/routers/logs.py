@@ -47,7 +47,7 @@ from api.deps import get_current_user, get_owned_baby
 from api.models import Baby, SilinenSleepLog, SleepLog, User
 from api.schemas.log import (
     BatchReq, BatchResult, DaySummary, KapatilanEntry, SkippedEntry, SleepLogIn,
-    SleepLogPatch, SleepLogResp, SyncedEntry, TimelineGun, TimelineOturum,
+    SleepLogListResp, SleepLogPatch, SleepLogResp, SyncedEntry, TimelineGun, TimelineOturum,
     TimelineResp, TimelineSabah, TimelineYokSayilan, WeeklySummaryResp,
 )
 from api.services import plan_adapter
@@ -663,7 +663,7 @@ def gun_filtresi(gun: date, tz_offset_min: int = TZ_OFFSET_MIN,
     )
 
 
-@router.get("", response_model=list[SleepLogResp])
+@router.get("", response_model=list[SleepLogListResp])
 def list_logs(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -717,13 +717,13 @@ def _bebek_bantlari(db: Session, baby_ids: set) -> dict:
     return out
 
 
-def _kategorili(row: SleepLog, bant: dict | None = None) -> SleepLogResp:
+def _kategorili(row: SleepLog, bant: dict | None = None) -> SleepLogListResp:
     """K19.2 — satırı yanıta çevirirken uyku SINIFINI ekle.
 
     Sınıf motorla AYNI fonksiyondan (plan_adapter.uyku_sinifi_ham) gelir; iki
     yerde ayrı yazılsaydı mobilin bastığı etiket ile çizelgenin hesabı
     ayrışabilirdi."""
-    resp = SleepLogResp.model_validate(row)
+    resp = SleepLogListResp.model_validate(row)
     if sabah_cevabi_ham(row.type, row.started_at, row.ended_at, TZ_OFFSET_MIN):
         # K12.5 — sabah sorusunun cevabı bir uyku değil, sabah uyanışıdır.
         resp.kategori = SABAH_UYANISI
@@ -732,6 +732,24 @@ def _kategorili(row: SleepLog, bant: dict | None = None) -> SleepLogResp:
         resp.kategori = uyku_sinifi_ham(row.started_at, row.ended_at,
                                         TZ_OFFSET_MIN, bant)
         resp.kategori_etiket = UYKU_ETIKETLERI.get(resp.kategori)
+    return _sayim_alanlari(resp, row)
+
+
+def _sayim_alanlari(resp: SleepLogListResp, row: SleepLog) -> SleepLogListResp:
+    """bitis_bilinmiyor / sayima_girmez — timeline oturumuyla aynı tanım, ham kayıtta.
+
+    Motorun `_log_alanlari` kuralı: sunucunun kapattığı (TAHMINI_BITIS_KAYNAKLARI)
+    ve bitişi başlangıçtan sonra olan kayıt. Aşırı uzun = 16 saati
+    (GECE_KAYIT_MAKS_DK) aşan kapalı kayıt (K21/K21.2)."""
+    if row.type not in UYKU_TIPLERI_TUM:
+        return resp
+    if row.ended_at is None:
+        resp.sayima_girmez = True
+        return resp
+    bas, bit = _as_utc(row.started_at), _as_utc(row.ended_at)
+    resp.bitis_bilinmiyor = bool(bit > bas and row.kapanis_kaynagi in _TAHMINI_BITIS)
+    asiri_uzun = (bit - bas).total_seconds() / 60 > plan_adapter.GECE_KAYIT_MAKS_DK
+    resp.sayima_girmez = resp.bitis_bilinmiyor or asiri_uzun
     return resp
 
 
@@ -1050,7 +1068,7 @@ def _gecersiz(detay: str) -> HTTPException:
                          detail=detay)
 
 
-@router.patch("/{log_id}", response_model=SleepLogResp)
+@router.patch("/{log_id}", response_model=SleepLogListResp)
 def patch_log(log_id: uuid.UUID, req: SleepLogPatch,
               db: Session = Depends(get_db),
               user: User = Depends(get_current_user)):

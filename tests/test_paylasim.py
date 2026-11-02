@@ -22,6 +22,7 @@ paylaşım kartı vakasının YALNIZ SAATLERİDİR (kişisel veri yok).
      weekly-summary aynı günü sayar
   K  Timeline: bitis_bilinmiyor / sayima_girmez
   L  baby_id opsiyonel: parametresiz → aktif (en yeni) bebek; bebek yoksa 404
+  M  GET /logs?date= (+PATCH): bitis_bilinmiyor / sayima_girmez; batch logs[] aynen
 
 Çalıştırma: python tests/test_paylasim.py
 """
@@ -577,6 +578,76 @@ check("L6 baby_id başkasınınsa yine 404 (sahiplik)",
 with saat_sabitle(SAAT):
     ev = client.get("/api/v1/education/videos", headers=H_L)
 check("L7 eğitim videoları ucu (aynı kural) hâlâ 200", ev.status_code == 200, ev.text[:200])
+
+# =============================================================================
+# M — GET /logs?date= : bitis_bilinmiyor / sayima_girmez (timeline ile aynı tanım)
+# =============================================================================
+BM = yeni_bebek("Liste")
+MD = DUN
+ekle(BM, [("nap", (MD, "09:00"), (MD, "10:00")),                       # normal
+          ("nap", (MD, "11:00"), (MD, "12:10"), "k16_1"),               # sunucu kapattı
+          ("nap", (MD, "13:00"), (MD, "14:00"), "bakim"),               # sunucu kapattı
+          ("nap", (MD, "15:00"), (MD, "16:00"), "k13_3"),               # anne bitişi: bilinir
+          ("sleep", (MD - timedelta(days=1), "01:00"), (MD, "18:30")),  # 41,5 sa
+          ("night_wake", (MD, "03:00"), None),
+          ("feed", (MD, "05:00"), None),
+          ("nap", (BUGUN, "09:30"), None)])                            # açık
+with saat_sabitle(SAAT):
+    lst = client.get(f"/api/v1/logs?date={MD}&baby_id={BM}", headers=H).json()
+    lst_b = client.get(f"/api/v1/logs?date={BUGUN}&baby_id={BM}", headers=H).json()
+
+
+def _sat(liste, hhmm: str, tip: str | None = None):
+    for r in liste:
+        t = datetime.fromisoformat(r["started_at"].replace("Z", "+00:00"))
+        if t.tzinfo is None:                     # SQLite saat dilimsiz döndürür: UTC
+            t = t.replace(tzinfo=timezone.utc)
+        t = t.astimezone(TR)
+        if t.strftime("%H:%M") == hhmm and (tip is None or r["type"] == tip):
+            return r
+    return None
+
+
+n_, k16_, bak_, k13_ = (_sat(lst, "09:00"), _sat(lst, "11:00"), _sat(lst, "13:00"),
+                        _sat(lst, "15:00"))
+uzun_, nw_, fd_ = _sat(lst, "01:00", "sleep"), _sat(lst, "03:00"), _sat(lst, "05:00")
+acik_ = _sat(lst_b, "09:30")
+check("M1 normal gündüz uykusu: false/false",
+      n_ and n_["bitis_bilinmiyor"] is False and n_["sayima_girmez"] is False, n_)
+check("M2 k16_1 ve bakim: bitis_bilinmiyor=true, sayima_girmez=true (mevcut alanlar duruyor)",
+      k16_ and bak_ and k16_["bitis_bilinmiyor"] and k16_["sayima_girmez"]
+      and bak_["bitis_bilinmiyor"] and bak_["sayima_girmez"]
+      and k16_["ended_at"] is not None and k16_["kategori"] == "gunduz_uykusu", (k16_, bak_))
+check("M3 k13_3 (anne bitişi): false/false — timeline ile aynı",
+      k13_ and k13_["bitis_bilinmiyor"] is False and k13_["sayima_girmez"] is False, k13_)
+check("M4 16 saati aşan kayıt: bitis_bilinmiyor=false, sayima_girmez=true",
+      uzun_ and uzun_["bitis_bilinmiyor"] is False and uzun_["sayima_girmez"] is True, uzun_)
+check("M5 night_wake / feed: false/false",
+      nw_ and fd_ and not nw_["sayima_girmez"] and not nw_["bitis_bilinmiyor"]
+      and not fd_["sayima_girmez"], (nw_, fd_))
+check("M6 açık uyku: sayima_girmez=true, bitis_bilinmiyor=false",
+      acik_ and acik_["sayima_girmez"] is True and acik_["bitis_bilinmiyor"] is False, acik_)
+with saat_sabitle(SAAT):
+    tl_m = client.get(f"/api/v1/logs/timeline?baby_id={BM}&days=2", headers=H).json()
+tl_sayim = {o["id"]: (o["bitis_bilinmiyor"], o["sayima_girmez"])
+            for g in tl_m["gunler"] for o in g["oturumlar"]}
+lst_sayim = {r["id"]: (r["bitis_bilinmiyor"], r["sayima_girmez"]) for r in lst + lst_b
+             if r["id"] in tl_sayim}
+check("M7 timeline'da da görünen kayıtlarda iki uç AYNI değeri veriyor",
+      lst_sayim and lst_sayim == {k: tl_sayim[k] for k in lst_sayim}, (lst_sayim, tl_sayim))
+with saat_sabitle(SAAT):
+    pt = client.patch(f"/api/v1/logs/{k16_['id']}", headers=H, json={"notes": "x"})
+    bt = client.post("/api/v1/logs/batch", headers=H, json={"logs": [
+        {"baby_id": str(BM), "type": "nap", "started_at": tr(BUGUN, "07:00").isoformat(),
+         "client_id": "m-acik"}]})
+check("M8 PATCH yanıtı da alanları taşıyor (k16_1 → true/true)",
+      pt.status_code == 200 and pt.json()["bitis_bilinmiyor"] is True
+      and pt.json()["sayima_girmez"] is True, pt.text[:300])
+bl = (bt.json().get("logs") or [{}])[0] if bt.status_code == 200 else {}
+# Batch yanıtının logs[] kalemleri eski istemciler için DEĞİŞMEZ (K6c) — yeni alan yok.
+check("M9 batch yanıtı logs[] alan seti değişmedi (yeni alanlar yalnız GET/PATCH)",
+      bt.status_code == 200 and bl and "sayima_girmez" not in bl and "bitis_bilinmiyor" not in bl,
+      bt.text[-400:])
 
 # =============================================================================
 gecen = sum(1 for _, ok, _ in results if ok)

@@ -75,6 +75,20 @@ class SleepLogResp(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SleepLogListResp(SleepLogResp):
+    """GET /logs ve PATCH /logs/{id} kalemi. Batch yanıtının `logs` alanı eski
+    istemciler için SleepLogResp'te AYNEN kalır (alan seti sabit, bkz. K6c).
+
+    2026-11-02 — timeline oturumuyla AYNI tanım (yalnız uyku kayıtlarında
+    true olabilir; feed/wake/night_wake'te ikisi de false):
+      bitis_bilinmiyor: sunucunun kapattığı kayıt (kapanis_kaynagi k16_1/bakim);
+        ended_at dolu ama bir TAHMİN.
+      sayima_girmez: uyku istatistiğine girmez — açık (ended_at yok) | 16 saati
+        aşan (asiri_uzun) | bitis_bilinmiyor."""
+    bitis_bilinmiyor: bool = False
+    sayima_girmez: bool = False
+
+
 class SyncedEntry(BaseModel):
     """Sunucuya YAZILAN kayıt: mobilin yerel satırı eşleyebilmesi için."""
     client_id: str | None = None
