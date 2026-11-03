@@ -11,7 +11,11 @@ bekleme (BETA_HARIC hesabı, beta kapanınca tüm eski paketliler).
      kesik kopya yazılamazsa içerik kilitli kalır.
   P  Premium: aynı eski paketin tam dosyaları, onizleme yok.
   N  Ninni: yalnız paketteyse ve dosyası STS ile üretildiyse (ya da dosyası
-     yoksa) listelenir; eski TTS ninni dosyası listelenmez, SİLİNMEZ.
+     yoksa ve üretim SÜRÜYORSA) listelenir; eski TTS ninni dosyası
+     listelenmez, SİLİNMEZ.
+  B  Bitmiş paket (2026-11-03): paket listesi sonradan büyüse de (yeni ninni)
+     dosyası olmayan içerik "hazırlanıyor" görünmez, sayaca girmez;
+     üretim sürerken dosyasız içerik hazırlanıyor görünür.
   M  Masalsız eski paket (ücretsiz): status "none" + bir yeniden kayıt hakkı;
      POST /clone beklemeyi atlar, yeni kayıt önizleme profili; hak tek sefer.
   U  Üretim `yontem` yazar (tts).
@@ -240,9 +244,10 @@ t2 = reg("premium1@test.com")                 # beta: premium
 pid2 = eski_paket(t2, ESKI_NINNILER + [ONIZLEME])
 s2 = stories(t2)
 m2 = {x["id"]: x for x in s2["masallar"]}
-check("P1) Premium: masal listesi tam paket (5 masal, hepsi pakette)",
-      sorted(m2) == sorted(MASALLAR) and all(x["in_package"] for x in m2.values()),
-      str(sorted(m2)))
+check("P1) Premium: masal kataloğu tam; bitmiş pakette yalnız dosyası olan pakette",
+      sorted(m2) == sorted(MASALLAR)
+      and [k for k, x in m2.items() if x["in_package"]] == [ONIZLEME],
+      str({k: x["in_package"] for k, x in m2.items()}))
 check("P2) Premium: hazır masal TAM dosya bağlantısı, onizleme yok, kilitsiz",
       m2[ONIZLEME]["locked"] is False and m2[ONIZLEME]["onizleme"] is False
       and f"/{ONIZLEME}.mp3?" in (m2[ONIZLEME]["audio_url"] or ""), str(m2[ONIZLEME]))
@@ -279,8 +284,8 @@ check("N2) Pakette ama dosyası TTS (eski, yontem NULL) → listelenmez",
       "ninni_uyu_yavrum" not in n3, str(list(n3)))
 check("N3) STS dosyası var ama pakette değil → listelenmez",
       "ninni_ay_isigi" not in n3, str(list(n3)))
-check("N4) Pakette, dosyası henüz yok → listelenir (hazırlanıyor)",
-      "ninni_e_bebegim" in n3 and n3["ninni_e_bebegim"]["hazir"] is False, str(list(n3)))
+check("N4) Pakette, dosyası yok, paket BİTMİŞ → listelenmez (hazırlanıyor kalmaz)",
+      "ninni_e_bebegim" not in n3, str(list(n3)))
 check("N5) STS kapalı (canlı): paket ninnisiz, ninni listesi boş",
       stories(t3)["ninniler"] == [], "")
 
@@ -350,6 +355,52 @@ check("U1) Önizleme üretimi: tek dosya, yontem='tts', ≤ 30 sn",
 s4c = {x["id"]: x for x in stories(t4)["masallar"]}
 check("U2) Yeni önizleme profili: masal onizleme + bağlantı (mevcut yol)",
       s4c[ONIZLEME]["onizleme"] is True and s4c[ONIZLEME]["audio_url"], str(s4c[ONIZLEME]))
+
+# =============================================================================
+# B — BİTMİŞ PAKET: DOSYASIZ İÇERİK "HAZIRLANIYOR" GÖRÜNMEZ (2026-11-03)
+# =============================================================================
+def _durum_ayarla(pid, status, voice_id=None):
+    db = SessionLocal()
+    try:
+        p = db.get(VoiceProfile, pid)
+        p.status, p.elevenlabs_voice_id = status, voice_id
+        db.commit()
+    finally:
+        db.close()
+
+
+# Paket önce 2 ninni + 5 masalla üretilmiş; sonra yeni ninni (Uykudan Uyanmış)
+# pakete girmiş. Annenin dosyaları: 2 STS ninni + 5 masal.
+os.environ["VOICE_PAKET_NINNILER"] = ("ninni_dandini,ninni_uyusun_da_buyusun,"
+                                      "ninni_uykudan_uyanmis")
+voice_paket.ninni_uretilebilir = lambda cid: True     # referans + STS varmış gibi
+try:
+    t5 = reg("bitmis_paket@test.com")
+    pid5 = eski_paket(t5, ["ninni_dandini", "ninni_uyusun_da_buyusun"] + MASALLAR,
+                      yontem={"ninni_dandini": "sts", "ninni_uyusun_da_buyusun": "sts"})
+    for _st in ("released", "ready", "failed"):
+        _durum_ayarla(pid5, _st)
+        s5 = stories(t5)
+        n5 = [x["id"] for x in s5["ninniler"]]
+        pk5 = [x for x in s5["masallar"] + s5["ninniler"] if x["in_package"]]
+        check(f"B1) {_st}: yeni ninni (dosyası yok) listelenmez",
+              n5 == ["ninni_dandini", "ninni_uyusun_da_buyusun"], str(n5))
+        check(f"B2) {_st}: sayaç gerçek dosyalara göre (7 pakette, hepsi hazır)",
+              len(pk5) == 7 and all(x["hazir"] and x["durum"] == "hazir" for x in pk5),
+              str([(x["id"], x["durum"]) for x in pk5]))
+    _durum_ayarla(pid5, "generating", "voice_test")
+    n6 = {x["id"]: x for x in stories(t5)["ninniler"]}
+    _y = n6.get("ninni_uykudan_uyanmis") or {}
+    check("B3) Üretim SÜRERKEN dosyasız paket ninnisi hazırlanıyor görünür",
+          _y.get("hazir") is False and _y.get("durum") == "hazirlaniyor"
+          and _y.get("in_package") is True, str(list(n6)))
+    _durum_ayarla(pid5, "cloning", None)
+    check("B4) Klonlama sürerken de dosyasız ninni listede (3 ninni)",
+          len(stories(t5)["ninniler"]) == 3, "")
+    _durum_ayarla(pid5, "released")
+finally:
+    voice_paket.ninni_uretilebilir = _gercek_uretilebilir
+    os.environ.pop("VOICE_PAKET_NINNILER", None)
 
 # =============================================================================
 print("\n" + "=" * 74)

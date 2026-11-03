@@ -121,6 +121,11 @@ def _klon_durumu(profile: VoiceProfile | None, simdi: datetime | None = None,
             "_kalan_saniye": max(1, int(kalan.total_seconds()))}
 
 
+# Üretimi süren profil durumları: dosyası henüz olmayan paket içeriği yalnız
+# bunlarda "hazırlanıyor" sayılır (bkz. stories).
+_URETIM_SURUYOR = ("cloning", "generating")
+
+
 def _son_profil(db: Session, user: User) -> VoiceProfile | None:
     """Kullanıcının GÜNCEL ses profili.
 
@@ -448,6 +453,16 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
             yontemler[a.content_id] = a.yontem
     paket_idler = [x["id"] for x in voice_paket.paket_icerikleri()]
     paket_kume = set(paket_idler)
+    # BİTMİŞ PAKET (2026-11-03): paket listesi sonradan büyüyebilir (yeni
+    # ninninin referans kaydı gelince). Üretimi bitmiş annede dosyası olmayan
+    # içerik ASLA üretilmeyecek (klon silinmiş): "hazırlanıyor" diye ve
+    # sayaçta görünmemeli. Dosyasız içerik yalnız üretim SÜRERKEN pakette
+    # sayılır; bitmiş pakette pakette = gerçekten var olan dosya.
+    bitmis = (profile is not None
+              and profile.status not in _URETIM_SURUYOR)
+
+    def _pakette(cid: str) -> bool:
+        return cid in paket_kume and (not bitmis or cid in hazir_yollar)
     from api.services import erisim
     premium = _premium_mi(db, user)          # deneme premium sayılmaz
     # Önizleme kaydında tek dosya var ve o masalın 30 sn'si: kilitsiz verilir,
@@ -492,7 +507,7 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
         return StoryItem(
             id=x["id"], type=x.get("type", ""), title=x.get("title", ""),
             duration_hint=x.get("duration_hint"),
-            hazir=bool(yol), durum=durum, in_package=x["id"] in paket_kume,
+            hazir=bool(yol), durum=durum, in_package=_pakette(x["id"]),
             is_free=x["id"] == UCRETSIZ_NINNI, ses_kaynagi=kaynak if yol else None,
             locked=kilit, premium_required=kilit, onizleme=on,
             # Kilitliyse dosya bağlantısı VERİLMEZ (imzalı bağlantı = erişim).
@@ -503,8 +518,9 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
         # Ninni yalnız PAKETTEYSE ve kullanıcının dosyası STS ile üretildiyse
         # (ya da henüz dosyası yoksa) listelenir. Eski düz okuma (TTS) ninni
         # dosyaları listelenmez — dosyalar SİLİNMEZ (2026-10-16).
+        # Bitmiş pakette dosyası olmayan ninni hiç listelenmez (_pakette).
         ninniler=[_item(x) for x in cat.get("ninniler", [])
-                  if x["id"] in paket_kume
+                  if _pakette(x["id"])
                   and (x["id"] not in hazir_yollar or yontemler.get(x["id"]) == "sts")],
         paket=voice_paket.paket_adi(), paket_icerikleri=paket_idler,
         vitrin=None if premium else voice_paket.vitrin())
