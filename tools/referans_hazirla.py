@@ -205,7 +205,8 @@ def calistir(klasor: Path, ffmpeg: str, ffprobe: str, zorla: bool = False,
         sn = sure(ffprobe, yol) if yol.exists() else None
         uyari = []
         if not yol.exists():
-            uyari.append("KAYIT YOK → TTS")
+            uyari.append("KAYIT YOK → gizli (ninni düz okunmaz)" if tur == "ninni"
+                         else "KAYIT YOK → TTS")
         elif sn is not None:
             if sn < EN_KISA_SN:
                 uyari.append("çok kısa — kırpma sesi yemiş olabilir")

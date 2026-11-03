@@ -171,9 +171,9 @@ check("7b) /audio hash olmayan ad reddedilir",
 cat = voice_svc.load_stories()
 masallar = cat.get("masallar", [])
 ninniler = cat.get("ninniler", [])
-# 2026-10-16: 5 paket ninnisi + eski paketten kalan 2 (yalnız eski dosyalar için).
-check("8) 5 masal + 7 ninni",
-      len(masallar) == 5 and len(ninniler) == 7,
+# 2026-10-16: paket ninnileri + eski paketten kalan 2 (yalnız eski dosyalar için); 11-03: +Uykudan Uyanmış.
+check("8) 5 masal + 8 ninni",
+      len(masallar) == 5 and len(ninniler) == 8,
       f"masal={len(masallar)} ninni={len(ninniler)}")
 
 _beklenen_basliklar = {
@@ -198,8 +198,9 @@ _kirli = [m["title"] for m in masallar
           if any(t in m.get("text", "") for t in ("**", "##", "- ", "* ", "•"))]
 check("8e) Masal metinleri düz (markdown/madde işareti yok)", not _kirli, f"kirli={_kirli}")
 
-check("8f) Ninni kimlikleri: 5 paket ninnisi + eski 2 (eski dosyalar bozulmasın)",
+check("8f) Ninni kimlikleri: 6 paket ninnisi + eski 2 (eski dosyalar bozulmasın)",
       {n["id"] for n in ninniler} == {"ninni_dandini", "ninni_uyusun_da_buyusun",
+                                      "ninni_uykudan_uyanmis",
                                       "ninni_e_bebegim", "ninni_atem_tutam",
                                       "ninni_camlibelden", "ninni_uyu_yavrum",
                                       "ninni_ay_isigi"},

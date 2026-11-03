@@ -1,8 +1,9 @@
 """
 Ses paketi tanımı — anne başına hangi içerikler üretilecek.
 
-KARAR (2026-10-13): paket 5 ninni + 5 masal. Liste AYARDAN gelir:
-    VOICE_PAKET_NINNILER  virgülle ayrılmış içerik kimlikleri (en fazla 5)
+KARAR (2026-10-13): paket 5 ninni + 5 masal; 2026-11-03'ten beri en fazla
+6 ninni (Uykudan Uyanmış eklendi). Liste AYARDAN gelir:
+    VOICE_PAKET_NINNILER  virgülle ayrılmış içerik kimlikleri (en fazla 6)
     VOICE_PAKET_MASALLAR  virgülle ayrılmış içerik kimlikleri (en fazla 5)
 Ayar yoksa aşağıdaki varsayılanlar. Katalogda (data/stories.json) henüz
 BULUNMAYAN kimlik üretilmez — o yer boş kalır.
@@ -33,11 +34,14 @@ from api.services import voice as voice_svc
 
 logger = logging.getLogger("tavsan.voice.paket")
 
-PAKET_NINNI_SAYISI = 5
+# 6: kaydı gelen 3 ninni + kaydı henüz olmayan 3 (referans gelince kendiliğinden
+# girer; o zamana dek ninni_uretilebilir onları süzer).
+PAKET_NINNI_SAYISI = 6
 PAKET_MASAL_SAYISI = 5
 VARSAYILAN_NINNILER = (
     "ninni_dandini",
     "ninni_uyusun_da_buyusun",
+    "ninni_uykudan_uyanmis",
     "ninni_e_bebegim",
     "ninni_atem_tutam",
     "ninni_camlibelden",

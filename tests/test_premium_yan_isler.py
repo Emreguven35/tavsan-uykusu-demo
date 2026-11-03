@@ -6,7 +6,7 @@ Premium yan işleri (2026-10-13) — ağ YOK, LLM YOK, ElevenLabs/Resend/Revenue
   M  MP3 kesme: çerçeve sınırında 30 sn, Xing notu atılır.
   S  Anne Sesi: ücretsiz kayıt → tek masaldan 30 sn önizleme (onizleme=true);
      amac=paket premium ister; premium alınca BİR KEZ beklemesiz yeniden kayıt;
-     paket 5 ninni + 5 masal (ayardan), katalogda olmayan yer boş;
+     paket 6 ninni + 5 masal (ayardan), katalogda olmayan yer boş;
      ücretsiz dandini yok; eski paket sahibinin dosyaları aynen.
   T  Topluluk: şikâyette moderatöre e-posta; günde 20 sınırı; oto-gizleme
      yalnız 24 saatten eski hesapları sayar; kuyrukta yazar + ban_author;
@@ -188,9 +188,9 @@ check("M4) Zaten kısa dosya aynı süreyle döner",
 # =============================================================================
 print("S) Anne Sesi")
 _liste = voice_paket.paket_listesi()
-check("S1) Paket yapısı 5 ninni + 5 masal (2026-10-16 ninni listesi)",
-      len(_liste["masallar"]) == 5 and len(_liste["ninniler"]) == 5
-      and voice_paket.PAKET_NINNI_SAYISI == 5 and voice_paket.PAKET_MASAL_SAYISI == 5,
+check("S1) Paket yapısı 6 ninni + 5 masal (2026-11-03: Uykudan Uyanmış eklendi)",
+      len(_liste["masallar"]) == 5 and len(_liste["ninniler"]) == 6
+      and voice_paket.PAKET_NINNI_SAYISI == 6 and voice_paket.PAKET_MASAL_SAYISI == 5,
       str(_liste))
 os.environ["VOICE_PAKET_NINNILER"] = ("ninni_dandini,ninni_ay_isigi,ninni_uyu_yavrum,"
                                       "ninni_yeni_bir,ninni_yeni_iki")

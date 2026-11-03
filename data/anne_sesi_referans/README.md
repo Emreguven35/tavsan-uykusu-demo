@@ -13,6 +13,7 @@ Uygulamanın okuduğu dosya: `{icerik_id}.mp3` (hazırlama betiğinin çıktıs�
 |---|---|
 | `ninni_dandini.mp3` | Dandini Dandini Dastana |
 | `ninni_uyusun_da_buyusun.mp3` | Uyusun da Büyüsün |
+| `ninni_uykudan_uyanmis.mp3` | Uykudan Uyanmış |
 | `ninni_e_bebegim.mp3` | E Bebeğim Ee |
 | `ninni_atem_tutam.mp3` | Atem Tutam Ben Seni |
 | `ninni_camlibelden.mp3` | Çamlıbel'den Çıktım Yayan |

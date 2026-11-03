@@ -489,7 +489,7 @@ print("N) Ninni kuralı (2026-10-16)")
 from api.routers import voice as voice_router                  # noqa: E402
 sifirla()
 os.environ["ANNE_SESI_STS"] = "true"
-os.environ.pop("VOICE_PAKET_NINNILER", None)                       # varsayılan 5 ninni
+os.environ.pop("VOICE_PAKET_NINNILER", None)                       # varsayılan 6 ninni
 _ids = lambda: [x["id"] for x in voice_paket.paket_icerikleri()]  # noqa: E731
 check("N1) Varsayılan paket: yalnız referansı olan ninni (dandini) girdi",
       [i for i in _ids() if i.startswith("ninni_")] == ["ninni_dandini"], str(_ids()))
@@ -549,7 +549,7 @@ check("C3) Uzman mesajı katalogla aynı metni taşıyor, önizleme işareti ilk
 _nn = {x["id"]: x for x in _kat["ninniler"]}
 check("C5) Paket ninnileri katalogda, başlıkla; yeniler söz metinsiz; 'Ninni Bebeğim' yok",
       [_nn[i]["title"] for i in voice_paket.VARSAYILAN_NINNILER]
-      == ["Dandini Dandini Dastana", "Uyusun da Büyüsün", "E Bebeğim Ee",
+      == ["Dandini Dandini Dastana", "Uyusun da Büyüsün", "Uykudan Uyanmış", "E Bebeğim Ee",
           "Atem Tutam Ben Seni", "Çamlıbel'den Çıktım Yayan"]
       and not any("text" in _nn[i] for i in voice_paket.VARSAYILAN_NINNILER[1:])
       and not any("Ninni Bebeğim" in x["title"] for x in _kat["ninniler"]), str(list(_nn)))

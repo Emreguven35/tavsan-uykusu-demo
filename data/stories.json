@@ -51,6 +51,12 @@
       "duration_hint": "2–3 dk"
     },
     {
+      "id": "ninni_uykudan_uyanmis",
+      "type": "ninni",
+      "title": "Uykudan Uyanmış",
+      "duration_hint": "2–3 dk"
+    },
+    {
       "id": "ninni_e_bebegim",
       "type": "ninni",
       "title": "E Bebeğim Ee",
