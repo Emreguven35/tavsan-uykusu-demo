@@ -17,9 +17,10 @@ sınırında bölünür, her parça ayrı dönüştürülür, çıktı tek MP3't
 bu süreç boyunca STS bir daha denenmez ve içerik TTS'e düşer. Anahtar ASLA
 loglanmaz; yanıttan yalnız durum kodu ve hata sınıfı yazılır.
 
-MALİYET: ElevenLabs STS'yi ses dakikası başına ücretlendirir (dakikada 1.000
-kredi). api_usage'a operation="sts", characters=kredi olarak yazılır; USD
-karşılığı services/usage.maliyet_hesapla'da.
+MALİYET: ElevenLabs STS'yi ses süresine göre ücretlendirir. ÖLÇÜM (2026-11-03,
+3 çağrı, 235 sn → hesaptan 2.582 kredi): saniyede ~11 kredi (KREDI_SANIYE).
+Eski "dakikada 1.000" varsayımı ~%50 fazlaydı. api_usage'a operation="sts",
+characters=kredi olarak yazılır; USD karşılığı services/usage.maliyet_hesapla'da.
 """
 from __future__ import annotations
 
@@ -46,7 +47,7 @@ REFERANS_KLASOR = (Path(__file__).resolve().parent.parent.parent
 # 4,5 dk: bildirilen 5 dk istek sınırının güvenli altı. Çoğu ninni tek parça.
 PARCA_SN = 270
 STS_TIMEOUT_S = 180
-KREDI_DAKIKA = 1000
+KREDI_SANIYE = 11                     # ölçüm: 2.582 kredi / 235 sn
 
 _izin_kilidi = threading.Lock()
 _izin_yok = False                     # süreç boyunca: anahtarda STS izni yok
@@ -87,7 +88,7 @@ def referans_yolu(icerik_id: str) -> Path | None:
 
 
 def kredi(saniye: float) -> int:
-    return max(1, round(saniye * KREDI_DAKIKA / 60))
+    return max(1, round(saniye * KREDI_SANIYE))
 
 
 def _hata_sinifi(r) -> str:

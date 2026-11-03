@@ -164,7 +164,11 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
     from api.deps import PremiumGerekli
     from api.services import ucretsiz_erisim
     premium = ucretsiz_erisim.premium_mi(db, user)
-    if amac not in (None, "", voice_paket.AMAC_PAKET, voice_paket.AMAC_ONIZLEME):
+    from api.services import ninni_ekle
+    gecerli = {None, "", voice_paket.AMAC_PAKET, voice_paket.AMAC_ONIZLEME}
+    if ninni_ekle.acik_mi():                 # bayrak kapalıyken amaç YOK sayılır
+        gecerli.add(ninni_ekle.AMAC)
+    if amac not in gecerli:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="Geçersiz kayıt amacı")
     if amac == voice_paket.AMAC_PAKET and not premium:
@@ -176,6 +180,12 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
     hata = _ses_rizasi_eksik(db, user, x_app_version)
     if hata is not None:
         return hata
+    if _ninni_ekleme_suruyor(db, user):
+        # Geçici klon + dosya yazımı sürerken yeni kayıt eski paketi silerdi.
+        return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={
+            "detail": NINNI_EKLE_SURUYOR_MESAJ, "code": "ninni_ekle_suruyor"})
+    if amac == ninni_ekle.AMAC:
+        return await _ninni_ekle_klon(audio, name, db, user, premium)
     # AYLIK LİMİT — ses OKUNMADAN önce kontrol edilir: 15MB'lık gövdeyi boşuna
     # almayalım ve ElevenLabs'e hiç gitmeyelim.
     onceki = _son_profil(db, user)
@@ -283,6 +293,82 @@ async def clone(audio: UploadFile = File(...), name: str = Form("Kullanıcı Ses
     # örnek dosya hem kota harcar hem yanıltıcı olur. Paketin kendisi örnektir.
     return VoiceCloneResp(voiceId=voice_id, sampleUrl=None,
                           onizleme=hedef == voice_paket.AMAC_ONIZLEME)
+
+
+# ---------------------------------------------------------------------------
+# "Ninnilerini al" (2026-11-03, ANNE_SESI_NINNI_EKLE) — bkz. services/ninni_ekle
+# ---------------------------------------------------------------------------
+NINNI_EKLE_UYGUN_DEGIL_MESAJ = "Ninnilerini ekleme hakkın şu an kullanılamıyor."
+NINNI_EKLE_SURUYOR_MESAJ = ("Ninnilerin hazırlanıyor. Birkaç dakika sonra "
+                            "tekrar deneyebilirsin.")
+
+
+def _ninni_ekleme_suruyor(db: Session, user: User) -> bool:
+    from api.services import ninni_ekle
+    return db.query(VoiceProfile).filter(
+        VoiceProfile.user_id == user.id,
+        VoiceProfile.ninni_ekle_durum == ninni_ekle.HAZIRLANIYOR).count() > 0
+
+
+async def _ninni_ekle_klon(audio: UploadFile, name: str, db: Session, user: User,
+                           premium: bool):
+    """amac=ninni_ekle: aylık beklemeye BAKILMAZ (tek seferlik hak). Mevcut
+    released profile yalnız eksik STS ninnileri eklenir; eski paket ve
+    masallar SİLİNMEZ (_eski_sesleri_temizle çağrılmaz)."""
+    from api.services import ninni_ekle
+    profil = _son_profil(db, user)
+    d = ninni_ekle.degerlendir(db, user, profil, premium)
+    if not d["uygun"]:
+        logger.info("Ninni ekleme reddedildi: user=%s sebep=%s", user.id, d["sebep"])
+        return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={
+            "detail": NINNI_EKLE_UYGUN_DEGIL_MESAJ, "code": "ninni_ekle_uygun_degil",
+            "sebep": d["sebep"]})
+    data = await audio.read()
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Ses dosyası boş")
+    if len(data) > MAX_CLONE_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail="Ses dosyası çok büyük (max ~15MB)")
+    # Hak ÖNCE alınır: iki eşzamanlı istek iki klon açmasın.
+    if not ninni_ekle.hakki_al(db, user):
+        return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={
+            "detail": NINNI_EKLE_UYGUN_DEGIL_MESAJ, "code": "ninni_ekle_uygun_degil",
+            "sebep": "hak_kullanildi"})
+    dosya_adi = audio.filename or "sample.mp3"
+    icerik_turu = audio.content_type or "audio/mpeg"
+    r = voice_svc.clone_voice(name, data, dosya_adi, icerik_turu)
+    if not r.get("ok") and r.get("reason") == voice_svc.HATA_SLOT_DOLU:
+        if _slot_kurtar(db, user)["serbest"] > 0:
+            r = voice_svc.clone_voice(name, data, dosya_adi, icerik_turu)
+    if not r.get("ok"):
+        ninni_ekle.hakki_iade_et(db, user.id)
+        logger.warning("Ninni ekleme klonu başarısız: user=%s reason=%s upstream=%s",
+                       user.id, r.get("reason"), r.get("error"))
+        raise HTTPException(status_code=r.get("status", 502),
+                            detail=_klon_hata_mesaji(r))
+    voice_id = r["voice_id"]
+    usage_svc.kaydet(usage_svc.SERVIS_ELEVENLABS, usage_svc.OP_VOICE_CLONE,
+                     model="voice-clone", user_id=user.id)
+    try:
+        profil = db.get(VoiceProfile, profil.id)
+        profil.ninni_ekle_voice_id = voice_id
+        profil.ninni_ekle_durum = ninni_ekle.HAZIRLANIYOR
+        profil.ninni_ekle_at = datetime.now(timezone.utc)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Ninni ekleme: profil yazılamadı — klon geri alınıyor: "
+                         "user=%s", user.id)
+        voice_svc.delete_voice(voice_id)
+        ninni_ekle.hakki_iade_et(db, user.id)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail=SES_SERVIS_MESAJ)
+    logger.info("Ninni ekleme başladı: user=%s profil=%s eksik=%s",
+                user.id, profil.id, ",".join(d["eksik"]))
+    ninni_ekle.kuyruga_al(profil.id)
+    return VoiceCloneResp(voiceId=voice_id, sampleUrl=None, onizleme=False,
+                          ninni_ekle=True)
 
 
 def _onizleme_mi(profile: VoiceProfile | None) -> bool:
@@ -428,7 +514,8 @@ def voice_status(db: Session = Depends(get_db), user: User = Depends(get_current
         released_at=profile.released_at,
         onizleme=(_onizleme_mi(profile)
                   or _eski_paket_onizlemesi(db, profile, premium) is not None),
-        paket_kaydi_hakki=_paket_kaydi_hakki(profile, user, premium))
+        paket_kaydi_hakki=_paket_kaydi_hakki(profile, user, premium),
+        **_ninni_ekle_alanlari(db, user, profile, premium))
 
 
 def _premium_mi(db: Session, user: User) -> bool:
@@ -523,7 +610,20 @@ def stories(db: Session = Depends(get_db), user: User = Depends(get_current_user
                   if _pakette(x["id"])
                   and (x["id"] not in hazir_yollar or yontemler.get(x["id"]) == "sts")],
         paket=voice_paket.paket_adi(), paket_icerikleri=paket_idler,
-        vitrin=None if premium else voice_paket.vitrin())
+        vitrin=None if premium else voice_paket.vitrin(),
+        **_ninni_ekle_alanlari(db, user, profile, premium))
+
+
+def _ninni_ekle_alanlari(db: Session, user: User, profile, premium: bool) -> dict:
+    """ninni_ekle_uygun / _sayisi / _durumu — bayrak kapalıyken False/0/None.
+    Hesaplanamazsa (beklenmedik) güvenli taraf: uygun değil."""
+    from api.services import ninni_ekle
+    try:
+        return ninni_ekle.api_alanlari(db, user, profile, premium)
+    except Exception:
+        logger.exception("ninni_ekle alanları hesaplanamadı: user=%s", user.id)
+        return {"ninni_ekle_uygun": False, "ninni_ekle_sayisi": 0,
+                "ninni_ekle_durumu": None}
 
 
 @router.post("/generate", response_model=VoiceGenerateResp,
@@ -610,9 +710,11 @@ def _slot_kurtar(db: Session, user: User) -> dict:
     def _idler(sorgu):
         return {vid for (vid,) in sorgu.all() if vid}
 
-    aktif = _idler(db.query(VoiceProfile.elevenlabs_voice_id)
-                   .filter(VoiceProfile.status != "replaced",
-                           VoiceProfile.elevenlabs_voice_id.isnot(None)))
+    from api.services import ninni_ekle
+    aktif = ninni_ekle.tum_gecici_klonlar(db) | _idler(
+        db.query(VoiceProfile.elevenlabs_voice_id)
+        .filter(VoiceProfile.status != "replaced",
+                VoiceProfile.elevenlabs_voice_id.isnot(None)))
     bayat = _idler(db.query(VoiceProfile.elevenlabs_voice_id)
                    .filter(VoiceProfile.status == "replaced",
                            VoiceProfile.elevenlabs_voice_id.isnot(None))) - aktif
@@ -712,7 +814,8 @@ def sesimi_sil(db: Session = Depends(get_db), user: User = Depends(get_current_u
     (silme yeni hak vermez, var olanı da almaz). Paket hâlâ üretiliyorsa 409 —
     üretim iş parçacığı silinen profile dosya yazmasın."""
     profiller = db.query(VoiceProfile).filter(VoiceProfile.user_id == user.id).all()
-    if any(p.status in ("cloning", "generating") for p in profiller):
+    if any(p.status in ("cloning", "generating")
+           or p.ninni_ekle_durum == "hazirlaniyor" for p in profiller):
         return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={
             "detail": ("Ses paketin hâlâ hazırlanıyor. Birkaç dakika sonra "
                        "tekrar deneyebilirsin.")})

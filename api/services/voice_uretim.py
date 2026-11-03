@@ -412,7 +412,8 @@ def bekleyenleri_devam_ettir() -> int:
         kuyruga_al(pid)
     if idler:
         logger.info("Yarım kalan %d ses paketi kuyruğa alındı", len(idler))
-    return len(idler)
+    from api.services import ninni_ekle
+    return len(idler) + ninni_ekle.devam_ettir()
 
 
 def kapat() -> None:

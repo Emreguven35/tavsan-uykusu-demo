@@ -10,6 +10,8 @@ KORUNANLAR (asla silinmez):
   • ELEVENLABS_VOICE_ID — uygulamanın anlatıcı sesi, DB'de satırı yoktur.
   • status'ü `cloning` veya `generating` olan profillerin sesleri — üretim
     sürüyor, altından slot çekilemez.
+  • "Ninnilerini al" geçici klonu (voice_profiles.ninni_ekle_voice_id) iş
+    sürerken 2 saat (services/ninni_ekle.korunan_klonlar); sonrası artıktır.
 """
 import logging
 import os
@@ -47,6 +49,8 @@ def gunluk_temizlik() -> dict:
                     VoiceProfile.status.in_(("cloning", "generating")),
                     VoiceProfile.elevenlabs_voice_id.isnot(None)).all()
                 if p.elevenlabs_voice_id}
+            from api.services import ninni_ekle
+            surenler |= ninni_ekle.korunan_klonlar(db)
         finally:
             db.close()
 
@@ -80,6 +84,9 @@ def _released_isaretle(voice_id: str) -> None:
                 p.released_at = datetime.now(timezone.utc)
             if p.status == "ready":
                 p.status = "released"
+        for p in db.query(VoiceProfile).filter(
+                VoiceProfile.ninni_ekle_voice_id == voice_id).all():
+            p.ninni_ekle_voice_id = None           # bayat geçici klon (ninni ekle)
         db.commit()
     except Exception:
         db.rollback()
@@ -103,14 +110,15 @@ def kullanici_seslerini_sil(db, user) -> dict:
         profiller = (db.query(VoiceProfile)
                      .filter(VoiceProfile.user_id == user.id).all())
         for p in profiller:
-            if p.elevenlabs_voice_id:
-                r = voice_svc.delete_voice(p.elevenlabs_voice_id)
+            for vid in (p.elevenlabs_voice_id, p.ninni_ekle_voice_id):
+                if not vid:
+                    continue
+                r = voice_svc.delete_voice(vid)
                 if r.get("ok"):
                     sonuc["ses_silindi"] += 1
                 else:
                     logger.warning("Hesap silme: ElevenLabs sesi silinemedi "
-                                   "(%s) — günlük temizlik deneyecek",
-                                   p.elevenlabs_voice_id)
+                                   "(%s) — günlük temizlik deneyecek", vid)
         try:
             sonuc["dosya_silindi"] = storage.depo().klasor_sil(
                 storage.ses_klasoru(user.id))

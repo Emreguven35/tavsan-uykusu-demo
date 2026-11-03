@@ -198,7 +198,8 @@ sp = stories(tp)
 check("P1) Premium: vitrin null", sp.get("vitrin") is None, str(sp.get("vitrin")))
 check("P2) Premium: liste kilitsiz, alanlar aynı",
       all(not x["locked"] for x in sp["masallar"] + sp["ninniler"])
-      and set(sp) == {"masallar", "ninniler", "paket", "paket_icerikleri", "vitrin"},
+      and set(sp) == {"masallar", "ninniler", "paket", "paket_icerikleri", "vitrin",
+                   "ninni_ekle_uygun", "ninni_ekle_sayisi", "ninni_ekle_durumu"},
       str(set(sp)))
 check("P3) Premium ninni listesi vitrinle aynı koşulda (STS+referans)",
       [x["id"] for x in sp["ninniler"]] == ["ninni_dandini", "ninni_e_bebegim"],

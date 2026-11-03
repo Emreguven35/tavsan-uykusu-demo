@@ -66,7 +66,9 @@ def _sinifla(db):
     def _idler(sorgu):
         return {vid for (vid,) in sorgu.all() if vid}
 
-    aktif = _idler(db.query(VoiceProfile.elevenlabs_voice_id)
+    from api.services import ninni_ekle
+    gecici = ninni_ekle.tum_gecici_klonlar(db)    # "Ninnilerini al" klonu
+    aktif = gecici | _idler(db.query(VoiceProfile.elevenlabs_voice_id)
                    .filter(VoiceProfile.status != "replaced",
                            VoiceProfile.elevenlabs_voice_id.isnot(None)))
     bayat = _idler(db.query(VoiceProfile.elevenlabs_voice_id)

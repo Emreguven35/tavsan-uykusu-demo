@@ -11,6 +11,8 @@ class VoiceCloneResp(BaseModel):
     # 2026-10-13: premium olmayan (deneme dahil) kayıt → tek masaldan 30 sn'lik
     # önizleme üretilir, tam paket DEĞİL.
     onizleme: bool = False
+    # 2026-11-03: amac=ninni_ekle kaydı — mevcut pakete yalnız ninniler eklenir.
+    ninni_ekle: bool = False
 
 
 class SesSilResp(BaseModel):
@@ -68,6 +70,10 @@ class VoiceStatusResp(BaseModel):
     # Premium anne `amac=paket` ile 30 gün beklemeden BİR KEZ yeniden
     # kaydedebilir mi (önizlemeden tam pakete geçiş)?
     paket_kaydi_hakki: bool = False
+    # "Ninnilerini al" — StoriesResp'teki aynı üç alan (yoklama bu uçtan).
+    ninni_ekle_uygun: bool = False
+    ninni_ekle_sayisi: int = 0
+    ninni_ekle_durumu: str | None = None
 
 
 class StoryItem(BaseModel):
@@ -122,6 +128,14 @@ class StoriesResp(BaseModel):
     # 2026-10-20 — premium olmayanın önizleme ekranı (voice_paket.vitrin).
     # Premium'da None. Bağlantı taşımaz.
     vitrin: list[VitrinBolum] | None = None
+    # "Ninnilerini al" (2026-11-03, ANNE_SESI_NINNI_EKLE; kapalıyken False/0/None).
+    # uygun=True → mobil kartı gösterir; kayıt POST /voice/clone amac=ninni_ekle.
+    # sayisi: eklenecek ninni adedi (uygun değilse 0).
+    # durumu: hazirlaniyor | tamam | uretilemedi | None (hiç denenmedi).
+    #   uretilemedi + uygun=True → hak iade edildi, tekrar denenebilir.
+    ninni_ekle_uygun: bool = False
+    ninni_ekle_sayisi: int = 0
+    ninni_ekle_durumu: str | None = None
 
 
 class VoiceGenerateReq(BaseModel):

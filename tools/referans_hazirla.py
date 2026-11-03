@@ -43,6 +43,7 @@ ETIKET = "tavsan-referans-v1"
 UZANTILAR = (".m4a", ".wav", ".mp3")
 
 # Hedefler (bkz. data/anne_sesi_referans/README.md, docs/uzman_kayit_listesi.md)
+STS_KREDI_SANIYE = 11     # services/voice_sts.KREDI_SANIYE (ölçüm 2026-11-03)
 PARCA_SN = 270            # services/voice_sts.PARCA_SN — üstü bölünür
 NINNI_HEDEF_SN = 150
 MASAL_HEDEF_SN = 270
@@ -235,8 +236,8 @@ def _yazdir(sonuc: dict) -> None:
         toplam += s["sure_sn"] or 0
         print(f"{s['kimlik']:<34} {s['tur']:<6} {_sure_yaz(s['sure_sn']):>6}  "
               f"{s['baslik']}" + (f"  [{'; '.join(s['uyari'])}]" if s["uyari"] else ""))
-    print(f"\nToplam: {_sure_yaz(toplam)} — STS kredisi ≈ {round(toplam / 60 * 1000):,} "
-          f"/ anne (dakikada 1.000)".replace(",", "."))
+    print(f"\nToplam: {_sure_yaz(toplam)} — STS kredisi ≈ {round(toplam * STS_KREDI_SANIYE):,} "
+          f"/ anne (ölçüm: saniyede ~{STS_KREDI_SANIYE})".replace(",", "."))
 
 
 def main(argv=None) -> int:

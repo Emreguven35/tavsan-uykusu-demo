@@ -46,7 +46,7 @@ OP_MODERATION = "moderation"
 OP_TTS = "tts"
 OP_VOICE_CLONE = "voice_clone"
 # Anne Sesi speech-to-speech (ANNE_SESI_STS). `characters` alanına KREDİ yazılır
-# (ElevenLabs STS'yi ses dakikası başına ücretlendirir: dakikada 1.000 kredi).
+# (ses süresine göre: ölçümle saniyede ~11 kredi, bkz. voice_sts.KREDI_SANIYE).
 OP_STS = "sts"
 # Kredinin USD karşılığı: multilingual TTS'te 1 karakter = 1 kredi, aynı birim.
 STS_KREDI_USD = ELEVENLABS_FIYATLARI["eleven_multilingual_v2"]

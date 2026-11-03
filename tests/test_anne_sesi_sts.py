@@ -220,8 +220,8 @@ try:
 finally:
     s.close()
 _kredi = sum(x.characters for x in _u)
-_beklenen = round(120 * 1000 / 60) + round(600 * 1000 / 60)
-check("A5) Maliyet defterinde STS kaydı: parça başına satır, kredi = dakika × 1000",
+_beklenen = round(120 * 11) + round(600 * 11)
+check("A5) Maliyet defterinde STS kaydı: parça başına satır, kredi = saniye × 11 (ölçüm)",
       len(_u) == 1 + 3 and abs(_kredi - _beklenen) <= 5, f"{len(_u)} {_kredi} ~{_beklenen}")
 check("A6) USD = kredi × 0,00022",
       abs(sum(x.estimated_cost_usd for x in _u) - _kredi * 0.00022) < 0.01,
@@ -392,8 +392,8 @@ check("D1) Tek STS çağrısı, ilk 30 sn, doğru ses ve model",
       and STS[0]["url"].endswith("/TEST_SES")
       and STS[0]["data"]["model_id"] == "eleven_multilingual_sts_v2", _metin[-300:])
 check("D2) Çıktı dosyaya yazıldı", _cikti.exists() and mp3.sure(_cikti.read_bytes()) > 0, "")
-check("D3) Harcanan kredi gösterildi (tahmini + hesaptan)",
-      "Tahmini harcama: ~500 kredi" in _metin and "Harcanan kredi (hesaptan): 500" in _metin,
+check("D3) Harcanan kredi gösterildi (tahmini 30 sn × 11 + hesaptan)",
+      "Tahmini harcama: ~330 kredi" in _metin and "Harcanan kredi (hesaptan): 500" in _metin,
       _metin)
 check("D4) Anahtar ekrana yazılmadı", ANAHTAR not in _metin, "")
 sifirla()

@@ -68,6 +68,16 @@ class VoiceProfile(Base):
     # = tam paket (önizleme öncesi her kayıt paketti).
     amac: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
+    # "Ninnilerini al" (2026-11-03): bitmiş pakete yalnız eksik STS ninnileri
+    # eklenir; `status` released KALIR, iş bu alanlarla izlenir.
+    # durum: hazirlaniyor | tamam | uretilemedi | NULL (hiç denenmedi)
+    ninni_ekle_durum: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    # Geçici klon — iş bitince silinir ve NULL olur. Günlük temizlik bu sesi
+    # iş sürerken (ninni_ekle_at'ten itibaren 2 sa) korur.
+    ninni_ekle_voice_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ninni_ekle_at: Mapped["object | None"] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
     user = relationship("User", back_populates="voice_profiles")
     audios = relationship("VoiceAudio", back_populates="profile",
                           cascade="all, delete-orphan")

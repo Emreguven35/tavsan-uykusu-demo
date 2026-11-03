@@ -131,7 +131,7 @@ def main(argv=None) -> int:
     print(f"Referans: {g.referans.name} ({toplam:.1f} sn), gönderilecek: {giden:.1f} sn")
     print(f"Model: {voice_sts.MODEL} · ses: "
           + (g.voice_id or f"geçici klon ({g.gecici_klon.name}; deneme sonunda silinir)"))
-    print(f"Tahmini harcama: ~{tahmini} kredi (dakikada {voice_sts.KREDI_DAKIKA})")
+    print(f"Tahmini harcama: ~{tahmini} kredi (saniyede ~{voice_sts.KREDI_SANIYE})")
     if not g.evet and input("Devam edilsin mi? [e/H] ").strip().lower() not in ("e", "evet", "y"):
         print("Vazgeçildi.")
         return 1

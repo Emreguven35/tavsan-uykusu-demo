@@ -67,6 +67,11 @@ class User(Base, TimestampMixin):
     # kullanıldığı an burada — NULL ise hak duruyor.
     ses_paket_kaydi_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # "Ninnilerini al" (2026-11-03, ANNE_SESI_NINNI_EKLE): STS öncesi paketli
+    # anne BİR KEZ yeniden kaydedip eksik ninnileri ekler. NULL = hak duruyor;
+    # hiç ninni üretilemezse yeniden NULL'a çekilir (iade).
+    ses_ninni_ekle_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
     # KVKK silme hakkı: kullanıcı silinince ilişkili tüm veriler cascade ile gider.
     babies = relationship("Baby", back_populates="user",
